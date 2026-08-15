@@ -642,15 +642,17 @@ function preloadImage(url) {
   return new Promise((resolve) => {
     const probe = new Image();
     let settled = false;
+    let timer = 0;
     const done = () => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       resolve();
     };
     probe.onload = done;
     probe.onerror = done;
     probe.src = url;
-    setTimeout(done, 10000);
+    timer = setTimeout(done, 10000);
   });
 }
 

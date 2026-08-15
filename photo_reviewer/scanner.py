@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import sqlite3
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -95,6 +97,8 @@ class JobManager:
 
 
 JOBS = JobManager()
+
+logger = logging.getLogger(__name__)
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -299,8 +303,10 @@ def _scan_worker(
                     Path(__file__).resolve().parent.parent / "photo-library.backup.db"
                 )
                 db.backup_to(str(backup_path))
-            except Exception:
-                pass
+            except (OSError, sqlite3.Error):
+                logger.warning(
+                    "post-scan cleanup/backup failed for %s", folder, exc_info=True
+                )
             JOBS.update(job_id, status="completed")
     except Exception as exc:  # noqa: BLE001
         JOBS.update(job_id, status="error", error=str(exc))
@@ -333,8 +339,10 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                 row = db.get_photo_by_path(path)
                 if row:
                     db.delete_rows([row["id"]])
-            except Exception:
-                pass
+            except sqlite3.Error:
+                logger.warning(
+                    "could not remove stale photo row for %s", path, exc_info=True
+                )
 
         JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
         for idx, image_path in enumerate(images, start=1):
@@ -357,8 +365,10 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                     Path(__file__).resolve().parent.parent / "photo-library.backup.db"
                 )
                 db.backup_to(str(backup_path))
-            except Exception:
-                pass
+            except (OSError, sqlite3.Error):
+                logger.warning(
+                    "post-scan cleanup/backup failed for %s", folder, exc_info=True
+                )
             JOBS.update(job_id, status="completed")
     except Exception as exc:  # noqa: BLE001
         JOBS.update(job_id, status="error", error=str(exc))

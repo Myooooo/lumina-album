@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> str:
@@ -39,14 +42,14 @@ def parse_capture_datetime(value: Any) -> datetime | None:
         return None
     for fmt in _CAPTURE_FORMATS:
         try:
-            return datetime.strptime(text, fmt)
+            return datetime.strptime(text, fmt)  # noqa: DTZ007 - EXIF timestamps have no timezone
         except ValueError:
             continue
     # ISO-ish formats with timezone offsets or T separators.
     normalized = text.replace("T", " ")
     for fmt in ("%Y-%m-%d %H:%M:%S%z", "%Y-%m-%d %H:%M%z"):
         try:
-            return datetime.strptime(normalized, fmt).replace(tzinfo=None)
+            return datetime.strptime(normalized, fmt).replace(tzinfo=None)  # noqa: DTZ007
         except ValueError:
             continue
     try:
@@ -637,7 +640,7 @@ class Database:
                 if row and row["tags"]:
                     try:
                         tags = json.loads(row["tags"])
-                    except Exception:
+                    except (TypeError, ValueError):
                         tags = []
                 if "duplicate" not in tags:
                     tags.append("duplicate")
@@ -721,7 +724,7 @@ class Database:
                 dst.close()
                 src.close()
             return True
-        except Exception:
+        except (sqlite3.Error, OSError):
             return False
 
     def all_tags(self, folder: str | None = None) -> list[str]:
@@ -744,7 +747,7 @@ class Database:
                         continue
                     try:
                         tags = json.loads(row["tags"])
-                    except Exception:
+                    except (TypeError, ValueError):
                         continue
                     if isinstance(tags, list):
                         for t in tags:
@@ -774,7 +777,7 @@ class Database:
                         continue
                     try:
                         exif = json.loads(row["exif"])
-                    except Exception:
+                    except (TypeError, ValueError):
                         continue
                     if not isinstance(exif, dict):
                         continue
@@ -832,15 +835,15 @@ class Database:
         d = dict(row)
         try:
             d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
-        except Exception:
+        except (TypeError, ValueError):
             d["tags"] = []
         try:
             d["dimensions"] = json.loads(d["dimensions"]) if d.get("dimensions") else {}
-        except Exception:
+        except (TypeError, ValueError):
             d["dimensions"] = {}
         try:
             d["exif"] = json.loads(d["exif"]) if d.get("exif") else {}
-        except Exception:
+        except (TypeError, ValueError):
             d["exif"] = {}
         return d
 

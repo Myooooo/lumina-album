@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import struct
 from typing import Any
 
 from PIL import ExifTags, Image
+
+logger = logging.getLogger(__name__)
 
 
 def _decimal_from_dms(dms, ref) -> float | None:
@@ -28,11 +32,10 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
             if not exif:
                 return location, exif_data
 
-            # Camera / shot info
             def tag_value(key):
                 try:
                     return exif.get(key)
-                except Exception:
+                except (KeyError, TypeError, ValueError):
                     return None
 
             make = tag_value(271)
@@ -56,28 +59,27 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
                 try:
                     num, den = exposure
                     exif_data["exposure"] = f"{num}/{den}s" if den else str(exposure)
-                except Exception:
+                except (TypeError, ValueError):
                     exif_data["exposure"] = str(exposure)
             if fnumber:
                 try:
                     exif_data["fnumber"] = round(float(fnumber), 1)
-                except Exception:
+                except (TypeError, ValueError):
                     exif_data["fnumber"] = str(fnumber)
             if iso:
                 try:
                     exif_data["iso"] = int(iso)
-                except Exception:
+                except (TypeError, ValueError):
                     exif_data["iso"] = str(iso)
             if focal:
                 try:
                     exif_data["focal_length"] = str(focal).replace("/1", "") + "mm"
-                except Exception:
+                except (TypeError, ValueError, AttributeError):
                     exif_data["focal_length"] = str(focal)
 
-            # GPS location
             try:
                 gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)
-            except Exception:
+            except (KeyError, TypeError, ValueError, struct.error):
                 gps_ifd = None
             if gps_ifd:
                 lat_ref = gps_ifd.get(1)
@@ -91,6 +93,6 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
                     exif_data["latitude"] = lat
                     exif_data["longitude"] = lon
                     exif_data["location"] = location
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 - EXIF readers can raise arbitrary codec errors
+        logger.debug("EXIF extraction failed for %s: %s", image_path, exc)
     return location, exif_data

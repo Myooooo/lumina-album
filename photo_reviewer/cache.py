@@ -8,9 +8,13 @@ All scan results and scores are stored in the central SQLite database.
 from __future__ import annotations
 
 import json
+import logging
+import sqlite3
 from pathlib import Path
 
 from .thumbnailer import cleanup_cache
+
+logger = logging.getLogger(__name__)
 
 
 def cache_dir_for_folder(
@@ -50,7 +54,7 @@ def cleanup_folder_cache(
             if path.exists():
                 path.unlink()
         except OSError:
-            pass
+            logger.debug("legacy cache file is already gone: %s", path)
 
     # Remove old nested thumbnails directory (previous layout).
     old_thumb_dir = cache_dir / "thumbnails"
@@ -59,8 +63,10 @@ def cleanup_folder_cache(
             import shutil
 
             shutil.rmtree(old_thumb_dir, ignore_errors=True)
-        except Exception:
-            pass
+        except OSError:
+            logger.debug(
+                "legacy thumbnails directory is already gone: %s", old_thumb_dir
+            )
     return result
 
 
@@ -105,7 +111,8 @@ def load_scan_results_from_cache(
         try:
             db.upsert_photo(item)
             imported += 1
-        except Exception:
+        except (TypeError, ValueError, KeyError, sqlite3.Error) as exc:
+            logger.warning("could not import legacy cache item %s: %s", path, exc)
             continue
 
     # This JSON is a legacy cache. After importing into SQLite, remove it so the
@@ -113,9 +120,12 @@ def load_scan_results_from_cache(
     try:
         cache_file.unlink()
     except OSError:
-        pass
+        logger.debug("legacy cache file is already gone: %s", cache_file)
     try:
         (cache_dir / "scan_results.json.tmp").unlink()
     except OSError:
-        pass
+        logger.debug(
+            "legacy cache tmp file is already gone: %s",
+            cache_dir / "scan_results.json.tmp",
+        )
     return imported

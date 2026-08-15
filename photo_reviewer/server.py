@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import uuid
@@ -22,6 +24,8 @@ from .exif import extract_exif
 from .geocode import reverse_geocode
 from .scanner import JOBS, reanalyze_photo, start_rebuild_index, start_scan
 from .thumbnailer import make_proxy
+
+logger = logging.getLogger(__name__)
 
 
 def _photo_payload(photo: dict[str, Any]) -> dict[str, Any]:
@@ -67,7 +71,7 @@ def _move_to_trash(photo: dict[str, Any], config: Config) -> str:
 
     folder = photo["folder"] or os.path.dirname(src)
     trash_root = Path(folder) / config.trash_dir_name
-    day_dir = trash_root / datetime.now().strftime("%Y%m%d")
+    day_dir = trash_root / datetime.now().astimezone().strftime("%Y%m%d")
     day_dir.mkdir(parents=True, exist_ok=True)
 
     dest = day_dir / Path(src).name
@@ -105,7 +109,7 @@ def _remove_photo_cache(photo: dict[str, Any]) -> None:
             try:
                 os.remove(path)
             except OSError:
-                pass
+                logger.debug("photo cache file is already gone: %s", path)
 
 
 def _ensure_exif(
@@ -125,7 +129,7 @@ def _ensure_exif(
         if path and os.path.exists(path):
             try:
                 location, exif = extract_exif(path)
-            except Exception:
+            except (OSError, ValueError):
                 location, exif = None, {}
             if location or exif:
                 database.update_exif(photo["id"], location, exif)
@@ -228,8 +232,17 @@ def _save_settings_to_db(database: Database, cfg: Config) -> None:
     try:
         db_backup = Path(__file__).resolve().parent.parent / "photo-library.backup.db"
         database.backup_to(str(db_backup))
-    except Exception:
-        pass
+    except (OSError, sqlite3.Error):
+        logger.warning("could not write database backup", exc_info=True)
+
+
+def _load_legacy_cache_safely(
+    folder: str, database: Database, cache_dir_name: str
+) -> None:
+    try:
+        load_scan_results_from_cache(folder, database, cache_dir_name)
+    except (OSError, ValueError, sqlite3.Error):
+        logger.warning("could not import legacy cache for %s", folder, exc_info=True)
 
 
 def create_app(config: Config | None = None, db: Database | None = None) -> Flask:
@@ -367,10 +380,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             folder = _normalize_folder(folder)
         except NotADirectoryError as exc:
             return jsonify({"error": str(exc)}), 400
-        try:
-            load_scan_results_from_cache(folder, database, cfg.cache_dir_name)
-        except Exception:
-            pass
+        _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         for existing in JOBS.list():
             if existing.folder == folder and existing.status == "running":
                 return jsonify(
@@ -412,10 +422,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     def api_years():
         folder = request.args.get("folder", "").strip() or None
         if folder:
-            try:
-                load_scan_results_from_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         return jsonify({"years": database.capture_years(folder)})
 
     @app.get("/api/folders")
@@ -472,10 +479,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         limit = min(int(request.args.get("limit", 1000)), 5000)
         offset = max(int(request.args.get("offset", 0)), 0)
         if folder:
-            try:
-                load_scan_results_from_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         photos = database.list_photos(
             folder=folder,
             status=status,
@@ -538,10 +542,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         except (TypeError, ValueError):
             return jsonify({"error": "score 参数不合法"}), 400
         if folder:
-            try:
-                load_scan_results_from_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
 
         all_candidates = database.list_photos(
             folder=folder,
@@ -600,10 +601,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     def api_stats():
         folder = request.args.get("folder", "").strip() or None
         if folder:
-            try:
-                load_scan_results_from_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         return jsonify(database.stats(folder))
 
     @app.get("/api/photo/<int:photo_id>")
@@ -634,7 +632,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     quality=cfg.proxy_quality,
                 )
                 return send_file(proxy_path, mimetype="image/jpeg", conditional=True)
-            except Exception:
+            except (OSError, ValueError):
                 return jsonify({"error": "无法生成缩略图"}), 500
         return jsonify({"error": "缩略图不存在"}), 404
 
@@ -682,8 +680,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         for folder in touched_folders:
             try:
                 cleanup_folder_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            except (OSError, sqlite3.Error):
+                logger.warning("cache cleanup failed for %s", folder, exc_info=True)
         return jsonify({"moved": moved, "errors": errors})
 
     @app.post("/api/restore")
@@ -721,8 +719,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         for folder in touched_folders:
             try:
                 cleanup_folder_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            except (OSError, sqlite3.Error):
+                logger.warning("cache cleanup failed for %s", folder, exc_info=True)
         return jsonify({"restored": restored, "errors": errors})
 
     @app.post("/api/delete/permanent")
@@ -766,8 +764,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         for folder in touched_folders:
             try:
                 cleanup_folder_cache(folder, database, cfg.cache_dir_name)
-            except Exception:
-                pass
+            except (OSError, sqlite3.Error):
+                logger.warning("cache cleanup failed for %s", folder, exc_info=True)
         return jsonify({"purged": purged, "errors": errors})
 
     @app.post("/api/cache/clean")

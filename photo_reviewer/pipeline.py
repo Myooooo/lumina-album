@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from collections.abc import Iterator
 
 from .api_client import analyze_image, build_analysis_context
 from .cache import ensure_cache_dirs

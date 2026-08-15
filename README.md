@@ -46,6 +46,15 @@ python app.py
 - 收起区：每个照片文件夹下的 `.photo-trash/日期/`
 - 照片、评分和分析结果只保存在本机；数据库、备份和设置文件已被 `.gitignore` 忽略，请勿手动提交
 
+## 开发与测试
+
+```bash
+python -m unittest discover -s tests
+ruff check app.py photo_reviewer tests
+```
+
+测试只使用临时目录和假模型响应，不会读取或修改真实相册数据。
+
 ## 常用环境变量
 
 | 变量 | 默认值 | 说明 |
