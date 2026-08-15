@@ -336,7 +336,7 @@ class GeocodeTests(unittest.TestCase):
     def test_amap_request_uses_longitude_first(self) -> None:
         from unittest.mock import patch
 
-        from photo_reviewer.geocode import reverse_geocode
+        from photo_reviewer.geocode import reverse_geocode, wgs84_to_gcj02
 
         captured = {}
 
@@ -348,7 +348,8 @@ class GeocodeTests(unittest.TestCase):
             reverse_geocode(
                 30.25, 120.17, provider="amap", api_key="k", interval=0.1, retries=1
             )
-        self.assertEqual(captured["location"], "120.170000,30.250000")
+        expected_lat, expected_lon = wgs84_to_gcj02(30.25, 120.17)
+        self.assertEqual(captured["location"], f"{expected_lon:.6f},{expected_lat:.6f}")
 
     def test_amap_failure_falls_back_to_nominatim(self) -> None:
         from unittest.mock import patch
