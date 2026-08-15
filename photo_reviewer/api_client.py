@@ -52,7 +52,11 @@ def _normalize_base_url(url: str) -> str:
     return url
 
 
-def _post_chat_completion(payload: dict[str, Any], config: Config) -> requests.Response:
+def _post_chat_completion(
+    payload: dict[str, Any],
+    config: Config,
+    retries: int | None = None,
+) -> requests.Response:
     """POST a chat completion with a short exponential-backoff retry loop.
 
     429 and 5xx responses are retried; other HTTP errors fail immediately.
@@ -62,7 +66,10 @@ def _post_chat_completion(payload: dict[str, Any], config: Config) -> requests.R
         "Content-Type": "application/json",
         "Authorization": f"Bearer {config.api_key}",
     }
-    retries = max(0, int(getattr(config, "model_retries", 2) or 2))
+    if retries is None:
+        retries = max(0, int(getattr(config, "model_retries", 2) or 2))
+    else:
+        retries = max(0, int(retries))
     last_message = ""
     for attempt in range(retries + 1):
         try:
@@ -162,7 +169,13 @@ def analyze_image(
     parse_retries = max(0, int(getattr(config, "model_retries", 2) or 2))
     last_parse_error: Exception | None = None
     for attempt in range(parse_retries + 1):
-        resp = _post_chat_completion(payload, config)
+        # Only the first attempt performs full network retries; subsequent
+        # attempts exist solely to give malformed JSON one more chance.
+        resp = _post_chat_completion(
+            payload,
+            config,
+            retries=config.model_retries if attempt == 0 else 0,
+        )
         try:
             data = resp.json()
             content = data["choices"][0]["message"]["content"]
