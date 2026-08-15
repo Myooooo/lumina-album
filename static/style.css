@@ -452,6 +452,11 @@ body {
   box-shadow: 0 2px 8px rgba(80,50,30,0.08);
   transition: transform .25s ease, color .25s ease, background .25s ease, box-shadow .25s ease;
 }
+.modal-close svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
 .modal-close:hover {
   color: var(--danger);
   background: #fae8e3;
