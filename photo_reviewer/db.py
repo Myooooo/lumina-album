@@ -877,14 +877,16 @@ class Database:
             finally:
                 conn.close()
 
-    def update_cache_paths(self, photo_id: int, proxy_path: str) -> None:
-        """Persist a proxy generated on demand so later cleanups keep it."""
+    def update_cache_paths(
+        self, photo_id: int, thumb_path: str, proxy_path: str
+    ) -> None:
+        """Persist gallery/proxy paths generated on demand."""
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
-                    "UPDATE photos SET proxy_path=?, thumb_path=? WHERE id=?",
-                    (proxy_path, proxy_path, photo_id),
+                    "UPDATE photos SET thumb_path=?, proxy_path=? WHERE id=?",
+                    (thumb_path, proxy_path, photo_id),
                 )
                 conn.commit()
             finally:

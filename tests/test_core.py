@@ -117,11 +117,16 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(self.db.cache_paths_for_folder(folder_b)), 1)
         photo_id = self.db.get_photo_by_path(os.path.join(folder_a, "1.jpg"))["id"]
         self.db.update_cache_paths(
-            photo_id, os.path.join(folder_a, ".cache", "new.jpg")
+            photo_id,
+            os.path.join(folder_a, ".cache", "new_thumb.jpg"),
+            os.path.join(folder_a, ".cache", "new.jpg"),
         )
         paths = self.db.cache_paths_for_folder(folder_a)[0]
         self.assertEqual(
             paths["proxy_path"], os.path.join(folder_a, ".cache", "new.jpg")
+        )
+        self.assertEqual(
+            paths["thumb_path"], os.path.join(folder_a, ".cache", "new_thumb.jpg")
         )
 
     def test_edit_metadata_and_remove_folder(self) -> None:
@@ -249,6 +254,13 @@ class DatabaseTests(unittest.TestCase):
             )
         self.assertEqual(result, "杭州")
 
+    def test_model_retry_defaults_to_three(self) -> None:
+        from photo_reviewer.config import Config
+
+        cfg = Config(data_dir=self.tmp.name)
+        self.assertEqual(cfg.model_retries, 3)
+        self.assertEqual(cfg.scan_concurrency, 1)
+
     def test_parse_capture_datetime_variants(self) -> None:
         self.assertIsNotNone(parse_capture_datetime("2023:01:02 03:04:05"))
         self.assertIsNotNone(parse_capture_datetime("2023-01-02"))
@@ -285,12 +297,16 @@ class ApiClientTests(unittest.TestCase):
                 {"message": {"content": json.dumps(fake_analysis("", self.cfg))}}
             ]
         }
-        with patch(
-            "photo_reviewer.api_client.requests.post", side_effect=[bad, good]
-        ) as post:
+        with (
+            patch(
+                "photo_reviewer.api_client.requests.post", side_effect=[bad, good]
+            ) as post,
+            patch("photo_reviewer.api_client.time.sleep") as sleep,
+        ):
             result = analyze_image(self.image_path, self.cfg)
             self.assertEqual(result["score"], 7.5)
             self.assertEqual(post.call_count, 2)
+            self.assertEqual(sleep.call_args_list[0][0][0], 1.0)
 
     def test_semantic_search_failure_is_explicit(self) -> None:
         from photo_reviewer.api_client import semantic_search
@@ -408,6 +424,31 @@ class GeocodeTests(unittest.TestCase):
                 39.990464, 116.481488, provider="amap", api_key="bad", interval=0.1
             )
         self.assertIsNone(result)
+
+
+class ThumbnailerTests(unittest.TestCase):
+    def test_make_proxy_creates_small_gallery_thumb(self) -> None:
+        import tempfile
+
+        from photo_reviewer.thumbnailer import make_proxy
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image_path = os.path.join(tmp, "large.jpg")
+            Image.new("RGB", (1600, 1200)).save(image_path)
+            cache_dir = os.path.join(tmp, ".cache")
+            proxy, _, _, _, thumb = make_proxy(
+                image_path,
+                max_edge=1024,
+                cache_dir=cache_dir,
+                quality=85,
+                thumb_size=320,
+            )
+            self.assertTrue(proxy.endswith("_proxy.jpg"))
+            self.assertTrue(thumb.endswith("_thumb.jpg"))
+            self.assertTrue(Path(proxy).exists())
+            self.assertTrue(Path(thumb).exists())
+            with Image.open(thumb) as img:
+                self.assertLessEqual(max(img.size), 320)
 
 
 class ScannerTests(unittest.TestCase):
@@ -746,6 +787,47 @@ class ServerApiTests(unittest.TestCase):
         self.assertFalse(trash_path.exists())
         self.assertIsNone(self.db.get_photo(photo_id))
         # The original path was already moved away before this test.
+
+    def test_photos_endpoint_supports_pagination(self) -> None:
+        for idx in range(3):
+            self.db.upsert_photo(
+                {
+                    "path": os.path.join(self.folder, f"{idx}.jpg"),
+                    "folder": self.folder,
+                    "filename": f"{idx}.jpg",
+                    "status": "analyzed",
+                    "score": 8 - idx,
+                }
+            )
+        first = self.client.get(f"/api/photos?folder={self.folder}&limit=2").get_json()
+        self.assertEqual(len(first["photos"]), 2)
+        self.assertTrue(first["has_more"])
+        second = self.client.get(
+            f"/api/photos?folder={self.folder}&limit=2&offset=2"
+        ).get_json()
+        self.assertEqual(len(second["photos"]), 2)
+        self.assertFalse(second["has_more"])
+
+    def test_prompt_presets_are_available(self) -> None:
+        data = self.client.get("/api/prompt-presets").get_json()
+        self.assertEqual(data["default"], "playful")
+        for key in ("playful", "literary", "melancholy", "humorous"):
+            self.assertTrue(data["presets"][key].strip())
+
+    def test_model_queue_and_retry_settings_persist(self) -> None:
+        resp = self.client.post(
+            "/api/config",
+            json={
+                "scan_concurrency": 2,
+                "model_retries": 4,
+                "gallery_thumb_size": 320,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        cfg = self.client.get("/api/config").get_json()
+        self.assertEqual(cfg["scan_concurrency"], 2)
+        self.assertEqual(cfg["model_retries"], 4)
+        self.assertEqual(cfg["gallery_thumb_size"], 320)
 
     def test_invalid_ids_return_400(self) -> None:
         self.assertEqual(

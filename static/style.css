@@ -583,6 +583,19 @@ select {
   cursor: pointer;
 }
 
+.gallery-load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 0 0 90px;
+}
+.gallery-load-more {
+  padding: 10px 22px;
+}
+.gallery-load-more.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 /* ---------- Polaroid Waterfall Gallery ---------- */
 .gallery {
   display: grid;
@@ -1563,11 +1576,17 @@ select {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 .form-grid .full-row { grid-column: 1 / -1; }
-.edit-grid { max-width: 760px; }
 .prompt-template-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 6px;
+}
+.preset-btn.active {
+  border-color: var(--primary);
+  background: rgba(179, 129, 90, 0.14);
+  box-shadow: 0 0 0 2px rgba(179, 129, 90, 0.28);
+  color: var(--primary-dark);
 }
 .modal-actions {
   text-align: right;

@@ -85,11 +85,12 @@ def prepare_proxy(image_path: str, folder: str, config: Config) -> PreparedPhoto
     image_path = os.path.abspath(image_path)
     folder = os.path.abspath(folder)
     cache_dir = ensure_cache_dirs(folder, config.cache_dir_name)
-    proxy_path, width, height, phash = make_proxy(
+    proxy_path, width, height, phash, thumb_path = make_proxy(
         image_path,
         max_edge=config.proxy_max_edge,
         cache_dir=str(cache_dir),
         quality=config.proxy_quality,
+        thumb_size=config.gallery_thumb_size,
     )
     return PreparedPhoto(
         image_path=image_path,
@@ -99,7 +100,7 @@ def prepare_proxy(image_path: str, folder: str, config: Config) -> PreparedPhoto
         width=width,
         height=height,
         proxy_path=proxy_path,
-        thumb_path=proxy_path,
+        thumb_path=thumb_path,
         phash=phash,
     )
 

@@ -23,11 +23,13 @@ def make_proxy(
     max_edge: int = 1024,
     cache_dir: str = "data/thumbnails",
     quality: int = 85,
-) -> tuple[str, int, int, str]:
-    """Create a JPEG proxy for one photo.
+    thumb_size: int = 480,
+) -> tuple[str, int, int, str, str]:
+    """Create a JPEG proxy and a small gallery thumbnail for one photo.
 
-    Returns (proxy_path, width, height, proxy_hash). The same proxy file is
-    used by both the vision API and the web gallery.
+    Returns (proxy_path, width, height, proxy_hash, thumb_path). The proxy is
+    sent to the vision API; the small thumbnail is served to the gallery so
+    large albums do not download full-size proxies.
     """
     image_path = os.path.abspath(image_path)
     cache_dir = os.path.abspath(cache_dir)
@@ -56,8 +58,15 @@ def make_proxy(
                 proxy_img.thumbnail((max_edge, max_edge), Image.LANCZOS)
             proxy_img.save(proxy_path, "JPEG", quality=quality)
 
+        thumb_path = os.path.join(cache_dir, f"{base}_thumb.jpg")
+        if not os.path.exists(thumb_path):
+            thumb_img = img.copy()
+            if max(thumb_img.size) > thumb_size:
+                thumb_img.thumbnail((thumb_size, thumb_size), Image.LANCZOS)
+            thumb_img.save(thumb_path, "JPEG", quality=min(quality, 82))
+
         proxy_hash = _dhash(img, hash_size=8)
-        return proxy_path, width, height, proxy_hash
+        return proxy_path, width, height, proxy_hash, thumb_path
 
 
 def _dhash(img: Image.Image, hash_size: int = 8) -> str:

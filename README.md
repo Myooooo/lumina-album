@@ -13,7 +13,8 @@
 - 详情页点击照片可全屏查看，支持滚轮缩放、拖拽平移、双击切换、快捷键（`+` `-` `0` `Esc`）
 - 键盘快捷键：`←` / `→` 切换照片、`F` 珍藏、`E` 编辑、`Esc` 关闭
 - 编辑回忆：总分、各项评分、标签、地点、标题和简评，不修改原文件
-- 设置可持久化：API 地址、Key、模型、超时、代理图尺寸、索引并发、地理编码服务与控流参数、自定义系统提示词
+- 设置可持久化：API 地址、Key、模型、超时、代理图/缩略图尺寸、索引并发、模型并发与重试、地理编码服务与控流参数、自定义系统提示词
+- 多种分析语气预设：活泼（默认）、文艺、伤感、幽默
 - 逆地理编码：支持 Nominatim（免费）与高德地图（AMap）；调用高德前自动将 WGS-84 转为 GCJ-02 坐标
 - 设置中可移除当前目录的数据库记录与代理缓存，不影响原图
 
@@ -81,12 +82,13 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_API_BASE_URL` | `http://localhost:1234/v1` | 模型 API 地址 |
 | `PHOTO_API_KEY` | `not-needed` | API Key |
 | `PHOTO_MODEL` | `local-model` | 模型名称 |
-| `PHOTO_PROXY_MAX_EDGE` | `1024` | 代理图最大边长 |
+| `PHOTO_PROXY_MAX_EDGE` | `1024` | 发送给模型的代理图最大边长 |
+| `PHOTO_GALLERY_THUMB_SIZE` | `480` | 画廊缩略图最大边长 |
 | `PHOTO_PROXY_QUALITY` | `85` | JPEG 代理图质量 |
 | `PHOTO_SCAN_CONCURRENCY` | `1` | 同时调用模型分析的照片数 |
 | `PHOTO_INDEX_CONCURRENCY` | `4` | 建立索引 / 生成代理图的最大线程数 |
 | `PHOTO_REQUEST_TIMEOUT` | `120` | 模型请求超时（秒） |
-| `PHOTO_MODEL_RETRIES` | `2` | 模型连接失败或 5xx 时的重试次数 |
+| `PHOTO_MODEL_RETRIES` | `3` | 单个模型请求失败后的重试次数（1 秒起翻倍） |
 | `PHOTO_DATA_DIR` | `./data` | 数据库目录 |
 | `PHOTO_CACHE_DIR_NAME` | `.photo-review-cache` | 代理图缓存目录名 |
 | `PHOTO_TRASH_DIR_NAME` | `.photo-trash` | 收起区目录名 |

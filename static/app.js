@@ -21,6 +21,10 @@ const state = {
   pollingTimer: null,
   pollTick: 0,
   photoSignature: "",
+  pageSize: 200,
+  hasMore: false,
+  renderedCount: 0,
+  loadingMore: false,
   currentJobId: null,
   fullscreen: {
     scale: 1,
@@ -31,6 +35,8 @@ const state = {
     startY: 0,
   },
 };
+
+let promptPresets = {};
 
 const ICONS = window.LuminaIcons;
 const $ = (id) => document.getElementById(id);
@@ -285,9 +291,11 @@ async function loadStats() {
   }
 }
 
-function getFilterParams() {
+function getFilterParams(offset = 0) {
   const params = new URLSearchParams();
   if (state.folder) params.set("folder", state.folder);
+  params.set("limit", String(state.pageSize));
+  params.set("offset", String(offset));
   const status = $("statusFilter").value;
   if (status !== "all") params.set("status", status);
   const min = $("minScoreFilter").value;
@@ -325,11 +333,12 @@ async function loadPhotos(options = {}) {
   const shouldSkeleton = !quiet && !state.photos.length;
   if (shouldSkeleton) renderSkeleton();
 
-  const params = getFilterParams();
+  const params = getFilterParams(0);
   const mode = $("searchMode").value;
   const query = $("searchInput").value.trim();
   const scrollY = quiet ? window.scrollY : 0;
   let data;
+  let hasMore = false;
   try {
     if ((mode === "semantic" || mode === "smart") && query) {
       const statusVal = $("statusFilter").value;
@@ -355,6 +364,7 @@ async function loadPhotos(options = {}) {
       }
     } else {
       data = await api(`/api/photos?${params.toString()}`);
+      hasMore = !!data.has_more;
     }
 
     if (data.warning && !quiet) showToast(data.warning, "warning");
@@ -368,11 +378,14 @@ async function loadPhotos(options = {}) {
     }
     state.photoSignature = nextSignature;
     state.photos = nextPhotos;
+    state.hasMore = hasMore;
+    state.renderedCount = 0;
     const ids = new Set(state.photos.map((p) => p.id));
     for (const id of [...state.selected]) {
       if (!ids.has(id)) state.selected.delete(id);
     }
     renderGallery({ animate: !quiet });
+    updateLoadMoreButton();
     if (quiet) window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
     updateSelectionBar();
     if (!quiet) {
@@ -391,6 +404,30 @@ async function loadPhotos(options = {}) {
     }
     showToast("读取照片失败：" + e.message, "error");
   }
+}
+
+async function loadMorePhotos() {
+  if (state.loadingMore || !state.hasMore) return;
+  state.loadingMore = true;
+  $("loadMoreBtn").classList.add("loading");
+  try {
+    const params = getFilterParams(state.photos.length);
+    const data = await api(`/api/photos?${params.toString()}`);
+    const nextPhotos = data.photos || [];
+    state.photos = state.photos.concat(nextPhotos);
+    state.hasMore = !!data.has_more;
+    renderGallery({ append: true, animate: true });
+    updateLoadMoreButton();
+  } catch (e) {
+    showToast("加载更多照片失败：" + e.message, "error");
+  } finally {
+    state.loadingMore = false;
+    $("loadMoreBtn").classList.remove("loading");
+  }
+}
+
+function updateLoadMoreButton() {
+  $("loadMoreBtn").classList.toggle("hidden", !state.hasMore);
 }
 
 async function loadTags() {
@@ -429,14 +466,20 @@ async function loadYears() {
 function renderGallery(options = {}) {
   const gallery = $("gallery");
   const empty = $("emptyState");
-  gallery.innerHTML = "";
+  if (!options.append) {
+    gallery.innerHTML = "";
+    state.renderedCount = 0;
+  }
   if (!state.photos.length) {
     empty.classList.remove("hidden");
+    updateLoadMoreButton();
     return;
   }
   empty.classList.add("hidden");
 
-  state.photos.forEach((photo, idx) => {
+  const startIndex = options.append ? state.renderedCount : 0;
+  state.photos.slice(startIndex).forEach((photo, offset) => {
+    const idx = startIndex + offset;
     const card = document.createElement("div");
     card.className = "polaroid-card";
     if (options.animate === false) {
@@ -553,6 +596,7 @@ function renderGallery(options = {}) {
       });
     }
   });
+  state.renderedCount = state.photos.length;
 }
 
 function updateCardFavorite(id) {
@@ -1141,14 +1185,51 @@ function resetFilters() {
   loadPhotos();
 }
 
+async function loadPromptPresets() {
+  try {
+    const data = await api("/api/prompt-presets");
+    promptPresets = data.presets || {};
+  } catch (e) {
+    console.warn("加载提示词预设失败", e);
+  }
+}
+
+function activePresetFor(text) {
+  return (
+    Object.entries(promptPresets).find(([, template]) => template === text)?.[0] || ""
+  );
+}
+
+function highlightPromptPreset(text) {
+  const active = activePresetFor(text);
+  document.querySelectorAll(".preset-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.preset === active);
+  });
+}
+
+function applyPromptPreset(name) {
+  const template = promptPresets[name];
+  if (!template) {
+    showToast("提示词预设不可用", "error");
+    return;
+  }
+  $("setSystemPrompt").value = template;
+  highlightPromptPreset(template);
+}
+
 async function openSettings() {
   try {
+    await loadPromptPresets();
     const cfg = await api("/api/config");
     $("setApiBase").value = cfg.api_base_url || "";
     $("setApiKey").value = cfg.api_key || "";
     $("setModel").value = cfg.model || "";
-    $("setSystemPrompt").value = cfg.system_prompt || "";
+    $("setSystemPrompt").value = cfg.system_prompt || promptPresets.playful || "";
+    highlightPromptPreset($("setSystemPrompt").value);
     $("setMaxEdge").value = cfg.proxy_max_edge || 1024;
+    $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 480;
+    $("setModelConcurrency").value = cfg.scan_concurrency || 1;
+    $("setModelRetries").value = cfg.model_retries ?? 3;
     $("setTimeout").value = cfg.request_timeout || 120;
     $("setIndexThreads").value = cfg.index_concurrency || 4;
     setSelectValue($("setGeocodingProvider"), cfg.geocoding_provider || "nominatim");
@@ -1168,6 +1249,9 @@ async function saveSettings() {
     model: $("setModel").value.trim(),
     system_prompt: $("setSystemPrompt").value,
     proxy_max_edge: parseInt($("setMaxEdge").value, 10) || 1024,
+    gallery_thumb_size: parseInt($("setGalleryThumbSize").value, 10) || 480,
+    scan_concurrency: parseInt($("setModelConcurrency").value, 10) || 1,
+    model_retries: parseInt($("setModelRetries").value, 10) || 3,
     request_timeout: parseInt($("setTimeout").value, 10) || 120,
     index_concurrency: parseInt($("setIndexThreads").value, 10) || 4,
     geocoding_provider: $("setGeocodingProvider").value,
@@ -1320,17 +1404,8 @@ async function emptyTrash() {
   }
 }
 
-async function loadPromptTemplate() {
-  try {
-    const data = await api("/api/prompt-template");
-    $("setSystemPrompt").value = data.template || "";
-  } catch (e) {
-    showToast("加载提示词模板失败：" + e.message, "error");
-  }
-}
-
-function clearPrompt() {
-  $("setSystemPrompt").value = "";
+function handlePromptPresetClick(name) {
+  applyPromptPreset(name);
 }
 
 async function openDirBrowser() {
@@ -1430,6 +1505,7 @@ function init() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("searchBtn").addEventListener("click", loadPhotos);
   $("resetFiltersBtn").addEventListener("click", resetFilters);
+  $("loadMoreBtn").addEventListener("click", loadMorePhotos);
   $("cancelScanBtn").addEventListener("click", async () => {
     if (state.currentJobId) {
       try { await api(`/api/scan/cancel/${state.currentJobId}`, { method: "POST" }); } catch (e) {}
@@ -1533,8 +1609,9 @@ function init() {
   $("editSaveBtn").addEventListener("click", saveEditedPhoto);
   $("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
   $("emptyTrashBtn").addEventListener("click", emptyTrash);
-  $("usePromptTemplateBtn").addEventListener("click", loadPromptTemplate);
-  $("clearPromptBtn").addEventListener("click", clearPrompt);
+  document.querySelectorAll(".preset-btn").forEach((btn) => {
+    btn.addEventListener("click", () => handlePromptPresetClick(btn.dataset.preset));
+  });
 
   document.querySelectorAll("[data-close]").forEach((btn) => {
     btn.addEventListener("click", () => closeModal(btn.dataset.close));

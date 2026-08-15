@@ -18,21 +18,12 @@ _A = 6378245.0
 
 
 def _out_of_china(lat: float, lon: float) -> bool:
-    if lon < 72.004 or lon > 137.8347:
-        return True
-    if lat < 0.8293 or lat > 55.8271:
-        return True
-    return False
+    return lon < 72.004 or lon > 137.8347 or lat < 0.8293 or lat > 55.8271
 
 
 def _transform_lat(x: float, y: float) -> float:
     ret = (
-        -100.0
-        + 2.0 * x
-        + 3.0 * y
-        + 0.2 * y * y
-        + 0.1 * x * y
-        + 0.2 * math.sqrt(abs(x))
+        -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
     )
     ret += (
         (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi))
@@ -40,9 +31,7 @@ def _transform_lat(x: float, y: float) -> float:
         / 3.0
     )
     ret += (
-        (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi))
-        * 2.0
-        / 3.0
+        (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
     )
     ret += (
         (160.0 * math.sin(y / 12.0 * math.pi) + 320 * math.sin(y * math.pi / 30.0))
@@ -53,23 +42,14 @@ def _transform_lat(x: float, y: float) -> float:
 
 
 def _transform_lon(x: float, y: float) -> float:
-    ret = (
-        300.0
-        + x
-        + 2.0 * y
-        + 0.1 * x * x
-        + 0.1 * x * y
-        + 0.1 * math.sqrt(abs(x))
-    )
+    ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
     ret += (
         (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi))
         * 2.0
         / 3.0
     )
     ret += (
-        (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi))
-        * 2.0
-        / 3.0
+        (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
     )
     ret += (
         (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi))
@@ -153,7 +133,7 @@ def _wait_for_queue_slot(interval: float) -> None:
 
 def _amap_location(lat: float, lon: float) -> str:
     """高德逆地理编码要求：GCJ-02坐标系，经度在前，纬度在后。
-    
+
     相机/手机拍摄原始EXIF记录的是WGS-84标准坐标，调用高德前自动转换为GCJ-02火星坐标。
     """
     g_lat, g_lon = wgs84_to_gcj02(lat, lon)

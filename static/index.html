@@ -68,11 +68,10 @@
       <label><span class="label-icon" data-icon="score"></span>总分</label>
       <select id="minScoreFilter">
         <option value="">不限</option>
-        <option value="0">0</option>
-        <option value="2">2</option>
-        <option value="4">4</option>
-        <option value="6">6</option>
-        <option value="8">8</option>
+        <option value="2">2分</option>
+        <option value="4">4分</option>
+        <option value="6">6分</option>
+        <option value="8">8分</option>
       </select>
     </div>
     <div class="filter-group sort-group" data-filter-key="sort">
@@ -130,6 +129,9 @@
   </div>
 
   <main id="gallery" class="gallery"></main>
+  <div class="gallery-load-more-wrap">
+    <button id="loadMoreBtn" class="btn gallery-load-more hidden"><span class="btn-icon" data-icon="chevronDown"></span>加载更多回忆</button>
+  </div>
   <div id="emptyState" class="empty-state hidden">
     <span class="empty-icon" data-icon="sparkles"></span>
     <p>还没有照片。<br>选择一份装满回忆的文件夹，开启温暖的时光旅程吧。</p>
@@ -200,13 +202,24 @@
         </label>
         <label class="full-row">自定义系统提示词
           <textarea id="setSystemPrompt" rows="5" placeholder="留空使用内置提示词，或点击下方按钮填入模板"></textarea>
-          <div class="prompt-template-row">
-            <button type="button" id="usePromptTemplateBtn" class="btn small"><span class="btn-icon" data-icon="feather"></span>填入内置模板</button>
-            <button type="button" id="clearPromptBtn" class="btn small"><span class="btn-icon" data-icon="reset"></span>清空（使用默认）</button>
+          <div class="prompt-template-row" id="promptPresetRow">
+            <button type="button" class="btn small preset-btn" data-preset="playful"><span class="btn-icon" data-icon="sparkles"></span>活泼（默认）</button>
+            <button type="button" class="btn small preset-btn" data-preset="literary"><span class="btn-icon" data-icon="feather"></span>文艺</button>
+            <button type="button" class="btn small preset-btn" data-preset="melancholy"><span class="btn-icon" data-icon="cloudRain"></span>伤感</button>
+            <button type="button" class="btn small preset-btn" data-preset="humorous"><span class="btn-icon" data-icon="smile"></span>幽默</button>
           </div>
         </label>
         <label>代理图片最大边长 (px)
           <input id="setMaxEdge" type="number" min="64" step="64" />
+        </label>
+        <label>画廊缩略图边长 (px)
+          <input id="setGalleryThumbSize" type="number" min="96" max="1024" step="32" />
+        </label>
+        <label>模型并发请求数
+          <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />
+        </label>
+        <label>模型请求重试次数
+          <input id="setModelRetries" type="number" min="0" max="10" step="1" />
         </label>
         <label>请求超时（秒）
           <input id="setTimeout" type="number" min="5" />

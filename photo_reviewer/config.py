@@ -27,6 +27,7 @@ PERSISTED_FIELDS = (
     "model",
     "system_prompt",
     "proxy_max_edge",
+    "gallery_thumb_size",
     "proxy_quality",
     "scan_concurrency",
     "index_concurrency",
@@ -64,13 +65,14 @@ class Config:
 
     # Image proxy generation.
     proxy_max_edge: int = int(os.getenv("PHOTO_PROXY_MAX_EDGE", "1024"))
+    gallery_thumb_size: int = int(os.getenv("PHOTO_GALLERY_THUMB_SIZE", "480"))
     proxy_quality: int = int(os.getenv("PHOTO_PROXY_QUALITY", "85"))
 
     # Scanning.
     scan_concurrency: int = int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
     index_concurrency: int = int(os.getenv("PHOTO_INDEX_CONCURRENCY", "4"))
     request_timeout: int = int(os.getenv("PHOTO_REQUEST_TIMEOUT", "120"))
-    model_retries: int = int(os.getenv("PHOTO_MODEL_RETRIES", "2"))
+    model_retries: int = int(os.getenv("PHOTO_MODEL_RETRIES", "3"))
     # Storage.
     data_dir: str = field(
         default_factory=lambda: os.getenv(
@@ -134,6 +136,7 @@ class Config:
                 value = saved[key]
                 if key in {
                     "proxy_max_edge",
+                    "gallery_thumb_size",
                     "proxy_quality",
                     "scan_concurrency",
                     "index_concurrency",
@@ -168,6 +171,7 @@ class Config:
             "model": self.model,
             "system_prompt": self.system_prompt,
             "proxy_max_edge": self.proxy_max_edge,
+            "gallery_thumb_size": self.gallery_thumb_size,
             "scan_concurrency": self.scan_concurrency,
             "index_concurrency": self.index_concurrency,
             "request_timeout": self.request_timeout,

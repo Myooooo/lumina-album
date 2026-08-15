@@ -16,7 +16,12 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_file
 
-from .api_client import SYSTEM_PROMPT, SemanticSearchError, semantic_search
+from .api_client import (
+    PROMPT_PRESETS,
+    SYSTEM_PROMPT,
+    SemanticSearchError,
+    semantic_search,
+)
 from .cache import (
     cache_dir_for_folder,
     cleanup_folder_cache,
@@ -293,6 +298,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             cfg.system_prompt = str(data["system_prompt"])
         for key, minimum in (
             ("proxy_max_edge", 64),
+            ("gallery_thumb_size", 96),
             ("request_timeout", 5),
             ("model_retries", 0),
         ):
@@ -301,6 +307,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     setattr(cfg, key, max(minimum, int(data[key])))
                 except (TypeError, ValueError):
                     return jsonify({"error": f"{key} 参数不合法"}), 400
+        if "scan_concurrency" in data:
+            try:
+                cfg.scan_concurrency = max(1, min(16, int(data["scan_concurrency"])))
+            except (TypeError, ValueError):
+                return jsonify({"error": "scan_concurrency 参数不合法"}), 400
         if "index_concurrency" in data:
             try:
                 cfg.index_concurrency = max(1, min(32, int(data["index_concurrency"])))
@@ -330,6 +341,10 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/prompt-template")
     def api_prompt_template():
         return jsonify({"template": SYSTEM_PROMPT})
+
+    @app.get("/api/prompt-presets")
+    def api_prompt_presets():
+        return jsonify({"presets": PROMPT_PRESETS, "default": "playful"})
 
     @app.get("/api/dirs")
     def api_dirs():
@@ -504,8 +519,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             )
         except (TypeError, ValueError):
             return jsonify({"error": "score 参数不合法"}), 400
-        limit = min(int(request.args.get("limit", 1000)), 5000)
+        requested_limit = min(int(request.args.get("limit", 200)), 500)
         offset = max(int(request.args.get("offset", 0)), 0)
+        fetch_limit = requested_limit + 1
         if folder:
             _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         photos = database.list_photos(
@@ -520,11 +536,18 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             year=year,
             exclude_deleted=exclude_deleted,
             sort=sort,
-            limit=limit,
+            limit=fetch_limit,
             offset=offset,
         )
+        has_more = len(photos) > requested_limit
+        photos = photos[:requested_limit]
         photos = [_ensure_exif(p, database, cfg) for p in photos]
-        return jsonify({"photos": [_photo_payload(p) for p in photos]})
+        return jsonify(
+            {
+                "photos": [_photo_payload(p) for p in photos],
+                "has_more": has_more,
+            }
+        )
 
     @app.post("/api/search")
     def api_search():
@@ -646,21 +669,22 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if not photo:
             return jsonify({"error": "照片不存在"}), 404
         thumb = photo.get("thumb_path")
-        if thumb and os.path.exists(thumb):
+        if thumb and os.path.exists(thumb) and thumb.endswith("_thumb.jpg"):
             return send_file(thumb, mimetype="image/jpeg", conditional=True)
         path = photo.get("path") or photo.get("original_path")
         if path and os.path.exists(path):
             try:
                 folder = photo.get("folder") or os.path.dirname(path)
                 thumb_dir = ensure_cache_dirs(folder, cfg.cache_dir_name)
-                proxy_path, _, _, _ = make_proxy(
+                proxy_path, _, _, _, thumb_path = make_proxy(
                     path,
                     max_edge=cfg.proxy_max_edge,
                     cache_dir=str(thumb_dir),
                     quality=cfg.proxy_quality,
+                    thumb_size=cfg.gallery_thumb_size,
                 )
-                database.update_cache_paths(photo_id, proxy_path)
-                return send_file(proxy_path, mimetype="image/jpeg", conditional=True)
+                database.update_cache_paths(photo_id, thumb_path, proxy_path)
+                return send_file(thumb_path, mimetype="image/jpeg", conditional=True)
             except (OSError, ValueError):
                 return jsonify({"error": "无法生成缩略图"}), 500
         return jsonify({"error": "缩略图不存在"}), 404
