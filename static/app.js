@@ -817,7 +817,7 @@ function updatePreview(options = {}) {
   $("previewInfo").innerHTML = `
     <h3>${escapeHtml(photo.filename)}</h3>
     ${cameraHtml}
-    ${captureTime ? `<p>${ICONS.clock} <strong>拍摄时间：</strong>${escapeHtml(captureTime)}</p>` : ""}
+    ${captureTime ? `<p>${ICONS.clock} ${escapeHtml(captureTime)}</p>` : ""}
     ${photo.location ? `<p>${ICONS.pin} ${escapeHtml(photo.location)}</p>` : ""}
     <p><strong>路径：</strong>${escapeHtml(photo.path || "")}</p>
     <p><strong>尺寸：</strong>${photo.width ? photo.width + " × " + photo.height : "-"}，
