@@ -1,4 +1,6 @@
-/* Local Photo Review System - frontend logic */
+/* ==========================================================================
+   Lumina Album (拾光相册) - Frontend Core Controller
+   ========================================================================== */
 "use strict";
 
 const state = {
@@ -20,12 +22,27 @@ const state = {
   pollTick: 0,
   photoSignature: "",
   currentJobId: null,
+  fullscreen: {
+    scale: 1,
+    panX: 0,
+    panY: 0,
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+  },
 };
 
 const ICONS = window.LuminaIcons;
-
 const $ = (id) => document.getElementById(id);
-const { enhanceSelect, setSelectValue, showToast, showLoading, hideLoading, confirmDialog } = window.LuminaUI;
+const {
+  renderAllIcons,
+  enhanceSelect,
+  setSelectValue,
+  showToast,
+  showLoading,
+  hideLoading,
+  confirmDialog,
+} = window.LuminaUI;
 
 async function api(url, options = {}) {
   const resp = await fetch(url, {
@@ -61,7 +78,7 @@ function rememberFolder(folder) {
   try {
     localStorage.setItem("photoFolderHistory", JSON.stringify(state.folderHistory));
   } catch (e) {
-    // localStorage may be unavailable; memory history still works.
+    // localStorage may be unavailable in some environments
   }
 }
 
@@ -168,6 +185,49 @@ function scoreText(score) {
   return score === null || score === undefined ? "-" : Number(score).toFixed(1);
 }
 
+function formatFnumber(val) {
+  if (val === null || val === undefined || val === "") return "";
+  const num = Number(val);
+  if (!Number.isFinite(num) || num <= 0) return String(val);
+  return num >= 10 ? num.toFixed(0) : num.toFixed(1).replace(/\.0$/, "");
+}
+
+function formatExposure(val) {
+  if (val === null || val === undefined || val === "") return "";
+  const s = String(val).trim();
+  if (s.includes("/")) return s + "s";
+  const num = Number(s);
+  if (!Number.isFinite(num) || num <= 0) return s;
+  if (num < 1) {
+    const denom = Math.round(1 / num);
+    return `1/${denom}s`;
+  }
+  return `${num.toFixed(1).replace(/\.0$/, "")}s`;
+}
+
+function formatIso(val) {
+  if (val === null || val === undefined || val === "") return "";
+  return String(val).replace(/^ISO\s*/i, "");
+}
+
+function formatFocalLength(val) {
+  if (val === null || val === undefined || val === "") return "";
+  const num = parseFloat(String(val).replace(/mm$/i, "").trim());
+  if (!Number.isFinite(num)) return String(val);
+  return `${num.toFixed(0)}mm`;
+}
+
+function formatCaptureTime(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const text = String(value).trim().replace(/\x00/g, "").trim();
+  if (!text) return "";
+  const m = text.match(/^(\d{4})[-\/:](\d{1,2})[-\/:](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return text;
+  const [, y, mo, d, hh, mm, ss] = m;
+  if (!hh) return `${y}年${mo}月${d}日`;
+  return `${y}年${mo}月${d}日 ${hh}:${mm}${ss ? ":" + ss : ""}`;
+}
+
 const DIMENSION_NAMES = {
   technical: "技术",
   composition: "构图",
@@ -184,14 +244,17 @@ const DIMENSION_COLORS = {
 function dimensionRows(dims) {
   const d = dims || {};
   return Object.keys(DIMENSION_NAMES).map((key) => {
-    const val = d[key] ?? 0;
-    const pct = Math.max(0, Math.min(100, Number(val) * 10));
+    const rawVal = d[key];
+    const val = (rawVal === null || rawVal === undefined) ? 0 : Number(rawVal);
+    const pct = Math.max(4, Math.min(100, Math.round(val * 10)));
     const color = DIMENSION_COLORS[key] || "#b3815a";
     return `
       <div class="dimension-row">
         <span class="dimension-name">${DIMENSION_NAMES[key]}</span>
-        <span class="dimension-bar"><span class="dimension-fill" style="width:${pct}%;background:${color}"></span></span>
-        <span class="dimension-value">${Number(val).toFixed(1)}</span>
+        <div class="dimension-bar">
+          <div class="dimension-fill" style="width:${pct}%;background-color:${color}!important;"></div>
+        </div>
+        <span class="dimension-value" style="color:${color}">${val.toFixed(1)}</span>
       </div>
     `;
   }).join("");
@@ -202,7 +265,7 @@ function dimensionValues(dims) {
   return Object.keys(DIMENSION_NAMES).map((key) => {
     const val = d[key] ?? 0;
     const color = DIMENSION_COLORS[key] || "#b3815a";
-    return `<span class="score-pill" style="color:${color};background:${color}1a">${DIMENSION_NAMES[key]} ${Number(val).toFixed(1)}</span>`;
+    return `<span class="score-pill" style="color:${color};background-color:${color}1a">${DIMENSION_NAMES[key]} ${Number(val).toFixed(1)}</span>`;
   }).join("");
 }
 
@@ -340,7 +403,7 @@ async function loadTags() {
     if (current && (data.tags || []).includes(current)) select.value = current;
     if (select.dataset.enhanced) {
       const wrapper = select.parentElement;
-      const label = wrapper.querySelector(".custom-select-label");
+      const label = wrapper ? wrapper.querySelector(".custom-select-label") : null;
       const opt = select.options[select.selectedIndex];
       if (label && opt) label.textContent = opt.text;
     }
@@ -390,12 +453,12 @@ function renderGallery(options = {}) {
     let deleteActions = "";
     if (isDeleted) {
       deleteActions = `
-        <button class="btn small restore-btn" title="恢复">${ICONS.restore}</button>
-        <button class="btn small danger permanent-btn" title="彻底移除">${ICONS.close}</button>
+        <button class="btn small restore-btn" title="恢复"><span class="btn-icon">${ICONS.restore}</span>恢复</button>
+        <button class="btn small danger permanent-btn" title="彻底移除"><span class="btn-icon">${ICONS.close}</span></button>
       `;
     } else {
       deleteActions = `
-        <button class="btn small danger delete-btn" title="暂时收起">${ICONS.trash}</button>
+        <button class="btn small danger delete-btn" title="暂时收起"><span class="btn-icon">${ICONS.trash}</span></button>
       `;
     }
 
@@ -406,7 +469,7 @@ function renderGallery(options = {}) {
           <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
           <img class="polaroid-photo" src="/api/thumbnail/${photo.id}" alt="${escapeHtml(photo.filename)}" loading="lazy" />
           <div class="polaroid-body">
-            ${photo.location ? `<div class="photo-location">${ICONS.pin} ${escapeHtml(photo.location)}</div>` : ""}
+            ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
             ${photo.reason ? `<div class="photo-comment">“${escapeHtml(photo.reason)}”</div>` : ""}
             <div class="back-tags">${tagsHtml || ""}</div>
             <div class="score-pills">
@@ -418,7 +481,7 @@ function renderGallery(options = {}) {
                 <input type="checkbox" />
               </label>
               <span class="card-btn-group">
-                <button class="btn small reanalyze-btn" title="重新解读">${ICONS.refresh}</button>
+                <button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>
                 ${deleteActions}
               </span>
             </div>
@@ -597,7 +660,7 @@ function pollScan() {
       }
       const pct = job.total ? Math.round((job.processed / job.total) * 100) : 0;
       $("progressFill").style.width = pct + "%";
-      const phaseText = job.phase === "analyze" ? "正在聆听" : "整理照片";
+      const phaseText = job.phase === "analyze" ? "正在解读" : "整理照片";
       $("progressText").textContent = `${phaseText} ${job.processed}/${job.total}：${job.current || ""}`;
       state.pollTick += 1;
       loadStats();
@@ -693,7 +756,7 @@ async function restorePhotos(ids) {
 }
 
 async function reanalyze(id) {
-  showLoading("重新欣赏这张照片…");
+  showLoading("重新解读这张照片…");
   try {
     await api("/api/reanalyze", {
       method: "POST",
@@ -733,8 +796,6 @@ function visiblePhotoOrder() {
 }
 
 async function navigatePreview(delta) {
-  // Use the currently rendered gallery order so prev/next always follows the
-  // active filters and sort, even if the list was refreshed behind the modal.
   const order = visiblePhotoOrder();
   if (!order.length) return;
   const idx = order.indexOf(state.currentPreviewId);
@@ -763,9 +824,9 @@ async function toggleFolderHistory() {
   try {
     const data = await api("/api/folders");
     if (!data.folders || !data.folders.length) {
-      panel.innerHTML = `<div class="folder-history-empty">暂无整理过的文件夹</div>`;
+      panel.innerHTML = `<div class="folder-history-empty">${ICONS.history || ""} 暂无整理过的文件夹</div>`;
     } else {
-      panel.innerHTML = data.folders.map((f) => `<div class="folder-history-item" data-path="${escapeHtml(f)}">${escapeHtml(f)}</div>`).join("");
+      panel.innerHTML = data.folders.map((f) => `<div class="folder-history-item" data-path="${escapeHtml(f)}">${ICONS.folder || ""}<span>${escapeHtml(f)}</span></div>`).join("");
       panel.querySelectorAll(".folder-history-item").forEach((el) => {
         el.addEventListener("click", () => {
           state.folder = el.dataset.path;
@@ -827,6 +888,67 @@ async function reanalyzeSelected(ids) {
   }
 }
 
+function applyFsTransform() {
+  const img = $("fsImage");
+  if (!img) return;
+  const { scale, panX, panY } = state.fullscreen;
+  img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  const pctEl = $("fsZoomPct");
+  if (pctEl) pctEl.textContent = `${Math.round(scale * 100)}%`;
+}
+
+function openFullscreenViewer() {
+  if (!state.currentPreviewId) return;
+  const photo = state.photos.find((p) => p.id === state.currentPreviewId);
+  if (!photo) return;
+  
+  const fsModal = $("fullscreenModal");
+  const fsImg = $("fsImage");
+  if (!fsModal || !fsImg) return;
+
+  state.fullscreen.scale = 1;
+  state.fullscreen.panX = 0;
+  state.fullscreen.panY = 0;
+  state.fullscreen.isDragging = false;
+
+  fsImg.src = `/api/original/${photo.id}`;
+  applyFsTransform();
+  fsModal.classList.remove("hidden");
+}
+
+function closeFullscreenViewer() {
+  const fsModal = $("fullscreenModal");
+  if (fsModal) fsModal.classList.add("hidden");
+  state.fullscreen.scale = 1;
+  state.fullscreen.panX = 0;
+  state.fullscreen.panY = 0;
+  state.fullscreen.isDragging = false;
+}
+
+function zoomFullscreen(factor, clientX, clientY) {
+  const oldScale = state.fullscreen.scale;
+  let newScale = oldScale * factor;
+  newScale = Math.max(0.5, Math.min(6.0, newScale));
+  
+  if (clientX !== undefined && clientY !== undefined) {
+    const rect = $("fsImageContainer").getBoundingClientRect();
+    const offsetX = clientX - (rect.left + rect.width / 2);
+    const offsetY = clientY - (rect.top + rect.height / 2);
+    state.fullscreen.panX -= (offsetX - state.fullscreen.panX) * (newScale / oldScale - 1);
+    state.fullscreen.panY -= (offsetY - state.fullscreen.panY) * (newScale / oldScale - 1);
+  }
+  
+  state.fullscreen.scale = newScale;
+  applyFsTransform();
+}
+
+function resetFullscreenZoom() {
+  state.fullscreen.scale = 1;
+  state.fullscreen.panX = 0;
+  state.fullscreen.panY = 0;
+  applyFsTransform();
+}
+
 function openPreview(id) {
   state.previewNavToken += 1;
   state.currentPreviewId = id;
@@ -843,63 +965,9 @@ function closeModal(id) {
   }
 }
 
-function formatCaptureTime(value) {
-  if (value === null || value === undefined || value === "") return "";
-  const text = String(value).trim().replace(/\x00/g, "").trim();
-  if (!text) return "";
-  const m = text.match(/^(\d{4})[-\/:](\d{1,2})[-\/:](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if (!m) return text;
-  const [, y, mo, d, hh, mm, ss] = m;
-  if (!hh) return `${y}年${mo}月${d}日`;
-  return `${y}年${mo}月${d}日 ${hh}:${mm}${ss ? ":" + ss : ""}`;
-}
-
-function parseExifNumber(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return Number.NaN;
-  const tuple = text.match(/^\(?\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)?$/);
-  if (tuple) {
-    const num = Number(tuple[1]);
-    const den = Number(tuple[2]);
-    return den ? num / den : Number.NaN;
-  }
-  const fraction = text.match(/^([+-]?\d+(?:\.\d+)?)\s*\/\s*([+-]?\d+(?:\.\d+)?)$/);
-  if (fraction) {
-    const num = Number(fraction[1]);
-    const den = Number(fraction[2]);
-    return den ? num / den : Number.NaN;
-  }
-  const numeric = Number(text);
-  return Number.isFinite(numeric) ? numeric : Number.NaN;
-}
-
-function formatFnumber(value) {
-  const n = parseExifNumber(value);
-  if (Number.isFinite(n)) return n.toFixed(1).replace(/\.0$/, "");
-  return String(value).trim();
-}
-
-function formatExposure(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return "";
-  const n = parseExifNumber(text);
-  if (Number.isFinite(n)) return text.toLowerCase().endsWith("s") ? text : `${n}s`;
-  return text.toLowerCase().endsWith("s") ? text : `${text}s`;
-}
-
-function formatIso(value) {
-  const n = parseExifNumber(value);
-  if (Number.isFinite(n)) return String(Math.round(n));
-  return String(value ?? "").trim();
-}
-
-function formatFocalLength(value) {
-  const text = String(value ?? "").trim().replace(/mm$/i, "");
-  const n = parseExifNumber(text);
-  if (Number.isFinite(n)) return `${Number(n.toFixed(2))}mm`;
-  return text ? `${text}mm` : "";
-}
-
+/**
+ * Update and Render Lightbox Preview Details with Rich Iconography
+ */
 function updatePreview(options = {}) {
   const id = state.currentPreviewId;
   const photo = state.photos.find((p) => p.id === id);
@@ -916,35 +984,127 @@ function updatePreview(options = {}) {
   $("previewDeleteBtn").classList.toggle("hidden", isDeleted);
   $("previewRestoreBtn").classList.toggle("hidden", !isDeleted);
   $("previewPermanentDeleteBtn").classList.toggle("hidden", !isDeleted);
+  
   const favBtn = $("previewFavoriteBtn");
   favBtn.classList.toggle("active", !!photo.favorite);
-  favBtn.innerHTML = photo.favorite ? ICONS.heartFilled : ICONS.heart;
-  favBtn.title = photo.favorite ? "取消珍藏" : "珍藏";
+  favBtn.innerHTML = `${photo.favorite ? ICONS.heartFilled : ICONS.heart}<span>${photo.favorite ? "已珍藏" : "珍藏"}</span>`;
+  favBtn.title = photo.favorite ? "取消珍藏 (快捷键 F)" : "珍藏 (快捷键 F)";
+
   const exif = photo.exif || {};
   const cameraText = [exif.make, exif.model].filter(Boolean).join(" ");
-  const shotParts = [];
-  if (exif.fnumber) shotParts.push(`f/${formatFnumber(exif.fnumber)}`);
-  if (exif.exposure) shotParts.push(formatExposure(exif.exposure));
-  if (exif.iso) shotParts.push(`ISO ${formatIso(exif.iso)}`);
-  if (exif.focal_length) shotParts.push(formatFocalLength(exif.focal_length));
-  const cameraHtml = (cameraText || shotParts.length) ? `
-    ${cameraText ? `<div class="camera-info">${ICONS.camera} ${escapeHtml(cameraText)}</div>` : ""}
-    ${shotParts.length ? `<div class="shot-info">${shotParts.map((p) => `<span class="tag">${escapeHtml(p)}</span>`).join("")}</div>` : ""}
-  ` : "";
+  
+  // Optical Specs Grid - Compact row with icons only
+  const specItems = [];
+  if (cameraText) {
+    specItems.push(`
+      <div class="spec-badge camera-badge" title="拍摄机身/镜头：${escapeHtml(cameraText)}">
+        ${ICONS.camera}
+        <span class="spec-val">${escapeHtml(cameraText)}</span>
+      </div>
+    `);
+  }
+  if (exif.fnumber) {
+    specItems.push(`
+      <div class="spec-badge" title="光圈：f/${formatFnumber(exif.fnumber)}">
+        ${ICONS.aperture}
+        <span class="spec-val">f/${formatFnumber(exif.fnumber)}</span>
+      </div>
+    `);
+  }
+  if (exif.exposure) {
+    specItems.push(`
+      <div class="spec-badge" title="快门速度：${formatExposure(exif.exposure)}">
+        ${ICONS.shutter}
+        <span class="spec-val">${formatExposure(exif.exposure)}</span>
+      </div>
+    `);
+  }
+  if (exif.iso) {
+    specItems.push(`
+      <div class="spec-badge" title="感光度：ISO ${formatIso(exif.iso)}">
+        ${ICONS.iso}
+        <span class="spec-val">ISO ${formatIso(exif.iso)}</span>
+      </div>
+    `);
+  }
+  if (exif.focal_length) {
+    specItems.push(`
+      <div class="spec-badge" title="焦距：${formatFocalLength(exif.focal_length)}">
+        ${ICONS.focal}
+        <span class="spec-val">${formatFocalLength(exif.focal_length)}</span>
+      </div>
+    `);
+  }
+
   const captureTime = formatCaptureTime(exif.datetime_original);
+
   $("previewInfo").innerHTML = `
-    <h3>${escapeHtml(photo.title || photo.filename)}</h3>
-    ${cameraHtml}
-    ${captureTime ? `<p>${ICONS.clock} ${escapeHtml(captureTime)}</p>` : ""}
-    ${photo.location ? `<p>${ICONS.pin} ${escapeHtml(photo.location)}</p>` : ""}
-    <p><strong>路径：</strong>${escapeHtml(photo.path || "")}</p>
-    <p><strong>尺寸：</strong>${photo.width ? photo.width + " × " + photo.height : "-"}，
-       <strong>大小：</strong>${fmtSize(photo.size)}</p>
-    <p><strong>评分：</strong><span class="badge score">${scoreText(photo.score)}</span></p>
-    <div class="dimension-list" style="margin-top:8px">${dimensionRows(photo.dimensions || {})}</div>
-    <p><strong>标签：</strong>${(photo.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join(" ") || "-"}</p>
-    <p><strong>简评：</strong>${escapeHtml(photo.reason || "")}</p>
-    ${photo.error ? `<p><strong>错误：</strong>${escapeHtml(photo.error)}</p>` : ""}
+    <div class="preview-header-block">
+      <h3>${escapeHtml(photo.title || photo.filename)}</h3>
+    </div>
+
+    ${photo.reason ? `
+      <div class="preview-quote-card">
+        ${ICONS.quote} “${escapeHtml(photo.reason)}”
+      </div>
+    ` : ""}
+
+    ${specItems.length ? `
+      <div class="specs-badge-grid">
+        ${specItems.join("")}
+      </div>
+    ` : ""}
+
+    <div class="meta-list-block" style="display:flex;flex-direction:column;gap:8px;margin:4px 0;">
+      ${captureTime ? `
+        <div class="meta-item-row" title="拍摄时间">
+          ${ICONS.calendar}
+          <div class="meta-content">${escapeHtml(captureTime)}</div>
+        </div>
+      ` : ""}
+      ${photo.location ? `
+        <div class="meta-item-row" title="拍摄地点">
+          ${ICONS.pin}
+          <div class="meta-content">${escapeHtml(photo.location)}</div>
+        </div>
+      ` : ""}
+      <div class="meta-item-row" title="尺寸分辨率">
+        ${ICONS.imageSize}
+        <div class="meta-content">${photo.width ? photo.width + " × " + photo.height : "-"}</div>
+      </div>
+      <div class="meta-item-row" title="文件大小">
+        ${ICONS.fileSize}
+        <div class="meta-content">${fmtSize(photo.size)}</div>
+      </div>
+      <div class="meta-item-row" title="物理路径">
+        ${ICONS.path}
+        <div class="meta-content">${escapeHtml(photo.path || "")}</div>
+      </div>
+    </div>
+
+    <div class="dimension-section">
+      <div class="dimension-section-title">
+        <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.score} 回忆评分与维度解读</span>
+        <span class="badge score">总分 ${scoreText(photo.score)}</span>
+      </div>
+      <div class="dimension-list">
+        ${dimensionRows(photo.dimensions || {})}
+      </div>
+    </div>
+
+    ${photo.tags && photo.tags.length ? `
+      <div class="meta-item-row" title="情感与场景标签">
+        ${ICONS.tag}
+        <div class="meta-content">${photo.tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join(" ")}</div>
+      </div>
+    ` : ""}
+
+    ${photo.error ? `
+      <div class="meta-item-row" style="color:var(--danger)" title="解析错误">
+        ${ICONS.error}
+        <div class="meta-content">${escapeHtml(photo.error)}</div>
+      </div>
+    ` : ""}
   `;
 }
 
@@ -1085,8 +1245,7 @@ async function removeCurrentFolder() {
     return;
   }
   const ok = await confirmDialog(
-    "确定从拾光相册中移除当前目录吗？" + String.fromCharCode(10) + 
-    "只会清除数据库记录和该目录的代理缓存，不会改动任何照片原图。",
+    "确定从拾光相册中移除当前目录吗？\n只会清除数据库记录和该目录的代理缓存，不会改动任何照片原图。",
     { title: "移除当前目录", confirmText: "移除目录", danger: true }
   );
   if (!ok) return;
@@ -1119,8 +1278,7 @@ async function removeCurrentFolder() {
 async function emptyTrash() {
   const scope = state.folder ? "当前目录" : "全部目录";
   const ok = await confirmDialog(
-    `确定清空${scope}的回收站吗？` + String.fromCharCode(10) + 
-    "回收站中的照片原文件将被彻底删除，此操作无法恢复。",
+    `确定清空${scope}的回收站吗？\n回收站中的照片原文件将被彻底删除，此操作无法恢复。`,
     { title: "清空回收站", confirmText: "彻底清空", danger: true }
   );
   if (!ok) return;
@@ -1155,7 +1313,6 @@ function clearPrompt() {
   $("setSystemPrompt").value = "";
 }
 
-
 async function openDirBrowser() {
   const path = state.folder || "";
   $("dirModal").classList.remove("hidden");
@@ -1175,7 +1332,7 @@ async function loadDirList(path) {
     list.innerHTML = "";
     if (data.parent) {
       const up = document.createElement("li");
-      up.textContent = "返回上一级";
+      up.innerHTML = `${ICONS.arrowUp || ""} <span>返回上一级</span>`;
       up.addEventListener("click", () => loadDirList(data.parent));
       list.appendChild(up);
     }
@@ -1187,7 +1344,7 @@ async function loadDirList(path) {
     }
     for (const dir of data.directories) {
       const li = document.createElement("li");
-      li.textContent = dir.name;
+      li.innerHTML = `${ICONS.folder || ""} <span>${escapeHtml(dir.name)}</span>`;
       li.dataset.path = dir.path;
       li.addEventListener("click", () => {
         $("dirPathInput").value = dir.path;
@@ -1205,8 +1362,34 @@ async function loadDirList(path) {
   }
 }
 
+async function toggleCurrentPreviewFavorite() {
+  const photo = state.photos.find((p) => p.id === state.currentPreviewId);
+  if (!photo) return;
+  const newVal = !photo.favorite;
+  try {
+    await api("/api/favorite", {
+      method: "POST",
+      body: JSON.stringify({ id: photo.id, favorite: newVal }),
+    });
+    photo.favorite = newVal;
+    updatePreview({ skipImage: true });
+    updateCardFavorite(photo.id);
+    loadStats();
+    if ($("favoriteFilter").value === "1" && !newVal) {
+      await loadPhotos();
+      if (state.currentPreviewId && !state.photos.some((p) => p.id === state.currentPreviewId)) {
+        closeModal("previewModal");
+      }
+    }
+  } catch (e) {
+    showToast("珍藏操作失败：" + e.message, "error");
+  }
+}
+
 function init() {
-  // The default view is always "已收录" on page load.
+  // Render embedded icons
+  renderAllIcons();
+
   setSelectValue($("statusFilter"), "analyzed");
   $("folderInput").value = state.folder;
   $("folderInput").addEventListener("change", () => {
@@ -1218,6 +1401,7 @@ function init() {
       loadPhotos();
     }
   });
+
   $("scanBtn").addEventListener("click", startScan);
   $("rebuildIndexBtn").addEventListener("click", startRebuildIndex);
   $("browseBtn").addEventListener("click", openDirBrowser);
@@ -1259,29 +1443,57 @@ function init() {
   $("previewRestoreBtn").addEventListener("click", () => restorePhotos([state.currentPreviewId]));
   $("previewPermanentDeleteBtn").addEventListener("click", () => permanentDeletePhotos([state.currentPreviewId]));
   $("previewReanalyzeBtn").addEventListener("click", () => reanalyze(state.currentPreviewId));
-  $("previewFavoriteBtn").addEventListener("click", async () => {
-    const photo = state.photos.find((p) => p.id === state.currentPreviewId);
-    if (!photo) return;
-    const newVal = !photo.favorite;
-    try {
-      await api("/api/favorite", {
-        method: "POST",
-        body: JSON.stringify({ id: photo.id, favorite: newVal }),
-      });
-      photo.favorite = newVal;
-      updatePreview({ skipImage: true });
-      updateCardFavorite(photo.id);
-      loadStats();
-      if ($("favoriteFilter").value === "1" && !newVal) {
-        await loadPhotos();
-        if (state.currentPreviewId && !state.photos.some((p) => p.id === state.currentPreviewId)) {
-          closeModal("previewModal");
-        }
+  $("previewFavoriteBtn").addEventListener("click", toggleCurrentPreviewFavorite);
+  $("previewImage").addEventListener("click", openFullscreenViewer);
+
+  // Fullscreen Viewer Controls
+  const fsCloseBtn = $("fsCloseBtn");
+  if (fsCloseBtn) fsCloseBtn.addEventListener("click", closeFullscreenViewer);
+  const fsZoomInBtn = $("fsZoomInBtn");
+  if (fsZoomInBtn) fsZoomInBtn.addEventListener("click", () => zoomFullscreen(1.25));
+  const fsZoomOutBtn = $("fsZoomOutBtn");
+  if (fsZoomOutBtn) fsZoomOutBtn.addEventListener("click", () => zoomFullscreen(0.8));
+  const fsResetBtn = $("fsResetBtn");
+  if (fsResetBtn) fsResetBtn.addEventListener("click", resetFullscreenZoom);
+
+  const fsContainer = $("fsImageContainer");
+  if (fsContainer) {
+    fsContainer.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 0.85;
+      zoomFullscreen(factor, e.clientX, e.clientY);
+    }, { passive: false });
+
+    fsContainer.addEventListener("mousedown", (e) => {
+      if (e.target.closest("button")) return;
+      state.fullscreen.isDragging = true;
+      state.fullscreen.startX = e.clientX - state.fullscreen.panX;
+      state.fullscreen.startY = e.clientY - state.fullscreen.panY;
+      fsContainer.classList.add("is-dragging");
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!state.fullscreen.isDragging) return;
+      state.fullscreen.panX = e.clientX - state.fullscreen.startX;
+      state.fullscreen.panY = e.clientY - state.fullscreen.startY;
+      applyFsTransform();
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (state.fullscreen.isDragging) {
+        state.fullscreen.isDragging = false;
+        fsContainer.classList.remove("is-dragging");
       }
-    } catch (e) {
-      showToast("珍藏操作失败：" + e.message, "error");
-    }
-  });
+    });
+
+    fsContainer.addEventListener("dblclick", (e) => {
+      if (state.fullscreen.scale > 1.1) {
+        resetFullscreenZoom();
+      } else {
+        zoomFullscreen(2.0, e.clientX, e.clientY);
+      }
+    });
+  }
 
   $("dirGoBtn").addEventListener("click", () => loadDirList($("dirPathInput").value.trim()));
   $("dirUpBtn").addEventListener("click", () => loadDirList(state.currentDirPath ? state.currentDirPath.replace(/[\/][^\/]*$/, "") : ""));
@@ -1318,8 +1530,26 @@ function init() {
       $("folderHistory").classList.add("hidden");
     }
   });
+
+  // Keyboard Shortcuts: ← / → / Esc / F / E
   document.addEventListener("keydown", (e) => {
+    const fsModal = $("fullscreenModal");
+    if (fsModal && !fsModal.classList.contains("hidden")) {
+      if (e.key === "Escape") {
+        closeFullscreenViewer();
+      } else if (e.key === "+" || e.key === "=") {
+        zoomFullscreen(1.25);
+      } else if (e.key === "-") {
+        zoomFullscreen(0.8);
+      } else if (e.key === "0") {
+        resetFullscreenZoom();
+      }
+      return;
+    }
+
     if ($("previewModal").classList.contains("hidden")) return;
+    if (["input", "textarea", "select"].includes((e.target.tagName || "").toLowerCase())) return;
+
     if (e.key === "ArrowLeft") {
       e.preventDefault();
       navigatePreview(-1);
@@ -1328,6 +1558,12 @@ function init() {
       navigatePreview(1);
     } else if (e.key === "Escape") {
       closeModal("previewModal");
+    } else if (e.key === "f" || e.key === "F") {
+      e.preventDefault();
+      toggleCurrentPreviewFavorite();
+    } else if (e.key === "e" || e.key === "E") {
+      e.preventDefault();
+      openEditPreview();
     }
   });
 
