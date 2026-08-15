@@ -14,25 +14,10 @@ const state = {
   currentJobId: null,
 };
 
-const ICONS = {
-  heart: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
-  heartFilled: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
-  pin: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+const ICONS = window.LuminaIcons;
 
-
-
-  refresh: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
-  trash: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
-  restore: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>',
-  close: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-
-
-
-
-  camera: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
-  clock: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
-};
 const $ = (id) => document.getElementById(id);
+const { enhanceSelect, setSelectValue, showToast, showLoading, hideLoading, confirmDialog } = window.LuminaUI;
 
 async function api(url, options = {}) {
   const resp = await fetch(url, {
@@ -50,79 +35,6 @@ async function api(url, options = {}) {
     throw new Error(detail || `HTTP ${resp.status}`);
   }
   return resp.json();
-}
-
-function enhanceSelect(select) {
-  if (select.dataset.enhanced || select.dataset.noCustom) return;
-  select.dataset.enhanced = "1";
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "custom-select";
-  select.parentNode.insertBefore(wrapper, select);
-  wrapper.appendChild(select);
-
-  const trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "custom-select-trigger";
-  trigger.innerHTML = '<span class="custom-select-label"></span><span class="custom-select-arrow"></span>';
-  wrapper.appendChild(trigger);
-
-  const menu = document.createElement("div");
-  menu.className = "custom-select-menu";
-  wrapper.appendChild(menu);
-
-  function updateLabel() {
-    const opt = select.options[select.selectedIndex];
-    trigger.querySelector(".custom-select-label").textContent = opt ? opt.text : "";
-  }
-
-  function buildMenu() {
-    menu.innerHTML = "";
-    [...select.options].forEach((opt) => {
-      const item = document.createElement("div");
-      item.className = "custom-select-option" + (opt.selected ? " selected" : "");
-      item.textContent = opt.text;
-      item.addEventListener("click", () => {
-        select.value = opt.value;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-        updateLabel();
-        close();
-      });
-      menu.appendChild(item);
-    });
-  }
-
-  function open() {
-    buildMenu();
-    menu.classList.add("open");
-    trigger.classList.add("open");
-  }
-  function close() {
-    menu.classList.remove("open");
-    trigger.classList.remove("open");
-  }
-
-  trigger.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (menu.classList.contains("open")) close();
-    else open();
-  });
-  document.addEventListener("click", (e) => {
-    if (!wrapper.contains(e.target)) close();
-  });
-
-  select.classList.add("native-hidden");
-  updateLabel();
-}
-
-function setSelectValue(select, value) {
-  select.value = value;
-  if (select.dataset.enhanced) {
-    const wrapper = select.parentElement;
-    const label = wrapper.querySelector(".custom-select-label");
-    const opt = select.options[select.selectedIndex];
-    if (label && opt) label.textContent = opt.text;
-  }
 }
 
 function updateActiveStat() {
@@ -164,57 +76,6 @@ function updateFilterHighlights() {
     const key = group.dataset.filterKey;
     const value = currentFilterValue(key);
     group.classList.toggle("active-filter", value !== FILTER_DEFAULTS[key]);
-  });
-}
-
-function showToast(message, type = "info") {
-  const container = $("toastContainer");
-  const el = document.createElement("div");
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  container.appendChild(el);
-  setTimeout(() => {
-    el.classList.add("removing");
-    setTimeout(() => el.remove(), 400);
-  }, 3200);
-}
-
-function showLoading(text) {
-  $("loadingText").textContent = text || "正在处理…";
-  $("loadingModal").classList.remove("hidden");
-}
-
-function hideLoading() {
-  $("loadingModal").classList.add("hidden");
-}
-
-function confirmDialog(message, options = {}) {
-  return new Promise((resolve) => {
-    const modal = $("confirmModal");
-    $("confirmTitle").textContent = options.title || "确认操作";
-    $("confirmMessage").textContent = message;
-    const okBtn = $("confirmOkBtn");
-    okBtn.textContent = options.confirmText || "确定";
-    okBtn.className = "btn primary" + (options.danger ? " danger" : "");
-    const cancelBtn = $("confirmCancelBtn");
-    const closeBtn = modal.querySelector(".modal-close");
-
-    function cleanup() {
-      modal.classList.add("hidden");
-      okBtn.removeEventListener("click", onOk);
-      cancelBtn.removeEventListener("click", onCancel);
-      closeBtn.removeEventListener("click", onCancel);
-      modal.removeEventListener("click", onOverlay);
-    }
-    function onOk() { cleanup(); resolve(true); }
-    function onCancel() { cleanup(); resolve(false); }
-    function onOverlay(e) { if (e.target === modal) onCancel(); }
-
-    okBtn.addEventListener("click", onOk);
-    cancelBtn.addEventListener("click", onCancel);
-    closeBtn.addEventListener("click", onCancel);
-    modal.addEventListener("click", onOverlay);
-    modal.classList.remove("hidden");
   });
 }
 
