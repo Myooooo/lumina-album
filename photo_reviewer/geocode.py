@@ -56,6 +56,11 @@ def _wait_for_queue_slot(interval: float) -> None:
         _LAST_GEOCODE_REQUEST = time.monotonic()
 
 
+def _amap_location(lat: float, lon: float) -> str:
+    """高德逆地理编码要求：经度在前，纬度在后。"""
+    return f"{lon:.6f},{lat:.6f}"
+
+
 def reverse_geocode(
     lat: float,
     lon: float,
@@ -76,7 +81,7 @@ def reverse_geocode(
         data = _get_json(
             "https://restapi.amap.com/v3/geocode/regeo",
             {
-                "location": f"{lon:.6f},{lat:.6f}",
+                "location": _amap_location(lat, lon),
                 "key": api_key,
                 "extensions": "base",
                 "output": "json",

@@ -333,6 +333,23 @@ class GeocodeTests(unittest.TestCase):
             )
         self.assertEqual(result, "北京市朝阳区望京街道方恒国际")
 
+    def test_amap_request_uses_longitude_first(self) -> None:
+        from unittest.mock import patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        captured = {}
+
+        def fake_get_json(url, params, **kwargs):
+            captured.update(params)
+            return {"status": "1", "regeocode": {"formatted_address": "测试地址"}}
+
+        with patch("photo_reviewer.geocode._get_json", side_effect=fake_get_json):
+            reverse_geocode(
+                30.25, 120.17, provider="amap", api_key="k", interval=0.1, retries=1
+            )
+        self.assertEqual(captured["location"], "120.170000,30.250000")
+
     def test_amap_failure_falls_back_to_nominatim(self) -> None:
         from unittest.mock import patch
 
