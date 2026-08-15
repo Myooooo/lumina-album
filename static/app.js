@@ -815,7 +815,7 @@ function updatePreview(options = {}) {
   ` : "";
   const captureTime = formatCaptureTime(exif.datetime_original);
   $("previewInfo").innerHTML = `
-    <h3>${escapeHtml(photo.filename)}</h3>
+    <h3>${escapeHtml(photo.title || photo.filename)}</h3>
     ${cameraHtml}
     ${captureTime ? `<p>${ICONS.clock} ${escapeHtml(captureTime)}</p>` : ""}
     ${photo.location ? `<p>${ICONS.pin} ${escapeHtml(photo.location)}</p>` : ""}
@@ -899,6 +899,7 @@ function openEditPreview() {
   const photo = state.photos.find((p) => p.id === state.currentPreviewId);
   if (!photo) return;
   const dims = photo.dimensions || {};
+  $("editTitle").value = photo.title || "";
   $("editScore").value = scoreText(photo.score);
   $("editTechnical").value = dims.technical ?? 0;
   $("editComposition").value = dims.composition ?? 0;
@@ -941,6 +942,7 @@ async function saveEditedPhoto() {
         score,
         dimensions,
         tags,
+        title: $("editTitle").value.trim(),
         reason: $("editReason").value.trim(),
         location: $("editLocation").value.trim(),
       }),
@@ -1081,6 +1083,8 @@ async function loadDirList(path) {
 }
 
 function init() {
+  // The default view is always "已收录" on page load.
+  setSelectValue($("statusFilter"), "analyzed");
   $("folderInput").value = state.folder;
   $("folderInput").addEventListener("change", () => {
     const val = $("folderInput").value.trim();

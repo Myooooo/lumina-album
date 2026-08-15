@@ -33,6 +33,7 @@ SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，温暖、俏皮�
 Return ONLY a JSON object, no markdown, with exactly these keys:
 {
   "score": <number 0-10, higher is better>,
+  "title": "<一句简短、有画面感的照片命名，10字以内>",
   "dimensions": {
     "technical": <number 0-10>,
     "composition": <number 0-10>,
@@ -255,8 +256,10 @@ def _validate_result(result: dict[str, Any]) -> None:
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"模型返回的 JSON 字段不合法: {result}") from exc
 
+    title = str(result.get("title") or "").strip()
     score = max(0.0, min(10.0, score))
     result["score"] = score
+    result["title"] = title[:40]
     result["recommendation"] = None
     result["tags"] = [str(t).strip() for t in tags][:20]
     result["reason"] = comment or "这一瞬，值得被好好收藏。"

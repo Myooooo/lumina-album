@@ -141,6 +141,7 @@ class Database:
                         recommendation TEXT,
                         tags TEXT,
                         reason TEXT,
+                        title TEXT,
                         model TEXT,
                         analyzed_at TEXT,
                         status TEXT NOT NULL DEFAULT 'pending',
@@ -177,6 +178,8 @@ class Database:
                     conn.execute(
                         "ALTER TABLE photos ADD COLUMN favorite INTEGER DEFAULT 0"
                     )
+                if "title" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN title TEXT")
                 # New versions use the proxy file directly as the gallery
                 # preview, so existing thumb_path values are migrated to the
                 # proxy path (old _thumb.jpg files become orphan cache).
@@ -198,11 +201,11 @@ class Database:
                     """
                     INSERT INTO photos
                         (path, original_path, folder, filename, size, width, height, thumb_path,
-                         proxy_path, dimensions, location, exif, phash, score, recommendation, tags, reason, model,
+                         proxy_path, dimensions, location, exif, phash, score, recommendation, tags, reason, title, model,
                          analyzed_at, status, favorite, error, created_at)
                     VALUES
                         (:path, :original_path, :folder, :filename, :size, :width, :height, :thumb_path,
-                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :recommendation, :tags, :reason, :model,
+                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :recommendation, :tags, :reason, :title, :model,
                          :analyzed_at, :status, :favorite, :error, :created_at)
                     ON CONFLICT(path) DO UPDATE SET
                         original_path=excluded.original_path,
@@ -221,6 +224,7 @@ class Database:
                         recommendation=excluded.recommendation,
                         tags=excluded.tags,
                         reason=excluded.reason,
+                        title=excluded.title,
                         model=excluded.model,
                         analyzed_at=excluded.analyzed_at,
                         status=excluded.status,
@@ -254,6 +258,7 @@ class Database:
                         if isinstance(record.get("tags"), (list, tuple, dict))
                         else record.get("tags"),
                         "reason": record.get("reason"),
+                        "title": record.get("title"),
                         "model": record.get("model"),
                         "analyzed_at": record.get("analyzed_at"),
                         "status": record.get("status", "pending"),
@@ -454,6 +459,7 @@ class Database:
         tags: list[str],
         reason: str,
         model: str,
+        title: str | None = None,
         phash: str | None = None,
         width: int | None = None,
         height: int | None = None,
@@ -472,6 +478,7 @@ class Database:
                     """
                     UPDATE photos SET
                         score=?, recommendation=?, tags=?, reason=?, model=?,
+                        title=COALESCE(NULLIF(?, ''), title),
                         phash=COALESCE(?, phash), width=COALESCE(?, width),
                         height=COALESCE(?, height), thumb_path=COALESCE(?, thumb_path),
                         proxy_path=COALESCE(?, proxy_path),
@@ -487,6 +494,7 @@ class Database:
                         json.dumps(tags, ensure_ascii=False),
                         reason,
                         model,
+                        title or "",
                         phash,
                         width,
                         height,
@@ -516,6 +524,7 @@ class Database:
         dimensions: dict[str, float],
         tags: list[str],
         reason: str,
+        title: str,
         location: str | None,
     ) -> None:
         """Update user-editable analysis metadata without touching the file."""
@@ -525,7 +534,7 @@ class Database:
                 conn.execute(
                     """
                     UPDATE photos SET
-                        score=?, dimensions=?, tags=?, reason=?, location=?,
+                        score=?, dimensions=?, tags=?, reason=?, title=?, location=?,
                         analyzed_at=?
                     WHERE id=?
                     """,
@@ -534,6 +543,7 @@ class Database:
                         json.dumps(dimensions, ensure_ascii=False),
                         json.dumps(tags, ensure_ascii=False),
                         reason,
+                        title,
                         location,
                         utc_now(),
                         photo_id,

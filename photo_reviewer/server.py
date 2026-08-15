@@ -53,6 +53,7 @@ def _photo_payload(photo: dict[str, Any]) -> dict[str, Any]:
         "recommendation": photo.get("recommendation"),
         "tags": photo.get("tags") or [],
         "reason": photo.get("reason"),
+        "title": photo.get("title") or "",
         "model": photo.get("model"),
         "analyzed_at": photo.get("analyzed_at"),
         "status": photo.get("status"),
@@ -826,9 +827,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             return jsonify({"error": "标签不合法"}), 400
         tags = [str(t).strip() for t in tags if str(t).strip()][:20]
         reason = str(data.get("reason", photo.get("reason") or "")).strip()
+        title = str(data.get("title", photo.get("title") or "")).strip()[:40]
         location_value = data.get("location", photo.get("location") or "")
         location = str(location_value).strip() if location_value else None
-        database.update_metadata(photo_id, score, dimensions, tags, reason, location)
+        database.update_metadata(
+            photo_id, score, dimensions, tags, reason, title, location
+        )
         updated = database.get_photo(photo_id)
         return jsonify(_photo_payload(updated))
 

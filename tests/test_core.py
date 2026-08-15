@@ -40,6 +40,7 @@ def wait_for_job(job_id: str, timeout: float = 6.0) -> dict:
 def fake_analysis(proxy_path: str, config: Config, context=None) -> dict:
     return {
         "score": 7.5,
+        "title": "温柔的黄昏",
         "dimensions": {"technical": 7, "composition": 8, "memory": 9, "uniqueness": 6},
         "tags": ["风景", "黄昏"],
         "comment": "温柔的一刻",
@@ -145,12 +146,14 @@ class DatabaseTests(unittest.TestCase):
             {"technical": 9, "composition": 8, "memory": 7, "uniqueness": 6},
             ["新标签", "风景"],
             "新评语",
+            "新标题",
             "杭州",
         )
         photo = self.db.get_photo(photo_id)
         self.assertEqual(photo["score"], 9.5)
         self.assertEqual(photo["dimensions"]["memory"], 7)
         self.assertEqual(photo["tags"], ["新标签", "风景"])
+        self.assertEqual(photo["title"], "新标题")
         self.assertEqual(self.db.remove_folder(folder), 1)
         self.assertIsNone(self.db.get_photo(photo_id))
 
@@ -169,6 +172,13 @@ class ApiClientTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def test_missing_title_is_forward_compatible(self) -> None:
+        from photo_reviewer.api_client import _validate_result
+
+        result = {"score": 6, "tags": ["旧"], "comment": "旧输出"}
+        _validate_result(result)
+        self.assertEqual(result["title"], "")
 
     def test_parse_fenced_and_bare_json(self) -> None:
         self.assertEqual(_parse_model_json('```json\n{"a": 1}\n```'), {"a": 1})
@@ -271,6 +281,7 @@ class ScannerTests(unittest.TestCase):
         by_name = {p["filename"]: p for p in photos}
         self.assertEqual(by_name["good.jpg"]["status"], "analyzed")
         self.assertEqual(by_name["good.jpg"]["score"], 7.5)
+        self.assertEqual(by_name["good.jpg"]["title"], "温柔的黄昏")
         self.assertEqual(by_name["bad.jpg"]["status"], "error")
         self.assertIn("无法读取", by_name["bad.jpg"]["error"])
 
@@ -333,6 +344,7 @@ class ServerApiTests(unittest.TestCase):
                     "uniqueness": 7,
                 },
                 "tags": ["夏日", "海边"],
+                "title": "夏日海边",
                 "reason": "新的回忆",
                 "location": "青岛",
             },
@@ -341,6 +353,7 @@ class ServerApiTests(unittest.TestCase):
         data = resp.get_json()
         self.assertEqual(data["score"], 9.2)
         self.assertEqual(data["tags"], ["夏日", "海边"])
+        self.assertEqual(data["title"], "夏日海边")
         self.assertEqual(data["location"], "青岛")
 
     def test_remove_folder_clears_cache_but_keeps_photos(self) -> None:
