@@ -1,27 +1,48 @@
 """Folder scanning and memory album analysis."""
+
 from __future__ import annotations
 
+import builtins
 import os
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
 
-from .api_client import analyze_image, build_analysis_context
-from .cache import cleanup_folder_cache, ensure_cache_dirs, load_scan_results_from_cache
+from .cache import cleanup_folder_cache, load_scan_results_from_cache
 from .config import Config
 from .db import Database
-from .exif import extract_exif
-from .geocode import reverse_geocode
-from .thumbnailer import make_proxy
+from .pipeline import (
+    analyze_prepared,
+    base_record,
+    persist_analysis,
+    prepare_for_analysis,
+    prepare_proxy,
+)
 
 IMAGE_EXTENSIONS = (
-    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff",
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".tif",
+    ".tiff",
 )
 
 RAW_EXTENSIONS = {
-    ".raw", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2", ".pef", ".srw",
+    ".raw",
+    ".cr2",
+    ".cr3",
+    ".nef",
+    ".arw",
+    ".dng",
+    ".orf",
+    ".rw2",
+    ".pef",
+    ".srw",
 }
 
 
@@ -35,13 +56,13 @@ class ScanJob:
     processed: int = 0
     current: str = ""
     phase: str = "index"
-    error: Optional[str] = None
+    error: str | None = None
     cancelled: bool = False
 
 
 class JobManager:
     def __init__(self) -> None:
-        self._jobs: Dict[str, ScanJob] = {}
+        self._jobs: dict[str, ScanJob] = {}
         self._lock = threading.Lock()
 
     def create(self, folder: str, force: bool = False) -> ScanJob:
@@ -50,11 +71,11 @@ class JobManager:
             self._jobs[job.id] = job
         return job
 
-    def get(self, job_id: str) -> Optional[ScanJob]:
+    def get(self, job_id: str) -> ScanJob | None:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def list(self) -> List[ScanJob]:
+    def list(self) -> builtins.list[ScanJob]:
         with self._lock:
             return list(self._jobs.values())
 
@@ -77,7 +98,22 @@ class JobManager:
 JOBS = JobManager()
 
 
-def discover_images(folder: str, extensions=IMAGE_EXTENSIONS, skip_dirs=None) -> List[str]:
+def _friendly_error(exc: Exception) -> str:
+    """Turn low-level exceptions into a short, human-friendly Chinese message."""
+    raw = str(exc)
+    lowered = raw.lower()
+    if "cannot identify image" in lowered or "unidentifiedimage" in lowered:
+        return "无法读取这张照片，文件可能已损坏或格式不受支持。"
+    if "no such file" in lowered or "filenotfound" in lowered:
+        return "照片文件不存在或已被移动。"
+    if "无法连接本地模型服务" in raw or "模型接口" in raw:
+        return raw[:500]
+    return raw[:1000]
+
+
+def discover_images(
+    folder: str, extensions=IMAGE_EXTENSIONS, skip_dirs=None
+) -> list[str]:
     folder_path = Path(folder)
     if not folder_path.exists() or not folder_path.is_dir():
         raise NotADirectoryError(f"文件夹不存在或不是目录: {folder}")
@@ -93,7 +129,11 @@ def discover_images(folder: str, extensions=IMAGE_EXTENSIONS, skip_dirs=None) ->
                 skip.add(name)
     found = []
     for root, dirs, files in os.walk(folder_path):
-        dirs[:] = [d for d in dirs if d not in skip and os.path.abspath(os.path.join(root, d)) not in skip]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in skip and os.path.abspath(os.path.join(root, d)) not in skip
+        ]
         parts = Path(root).parts
         if any(p in {".photo-trash", ".git", "__pycache__"} for p in parts):
             continue
@@ -105,7 +145,9 @@ def discover_images(folder: str, extensions=IMAGE_EXTENSIONS, skip_dirs=None) ->
     return found
 
 
-def start_scan(folder: str, db: Database, config: Config, force: bool = False) -> ScanJob:
+def start_scan(
+    folder: str, db: Database, config: Config, force: bool = False
+) -> ScanJob:
     job = JOBS.create(folder, force)
     # If the folder already has an index, skip the proxy/index phase.
     job.phase = "analyze" if db.paths_for_folder(folder) else "index"
@@ -118,180 +160,144 @@ def start_scan(folder: str, db: Database, config: Config, force: bool = False) -
     return job
 
 
-def _scan_worker(job_id: str, folder: str, db: Database, config: Config, force: bool) -> None:
+def _record_photo_error(
+    image_path: str, folder: str, db: Database, exc: Exception
+) -> None:
+    """Record a processing error without throwing away an existing good analysis."""
+    message = _friendly_error(exc)
+    existing = db.get_photo_by_path(image_path)
+    if existing:
+        record = dict(existing)
+        record["error"] = message
+        if existing.get("status") in (None, "pending", "error"):
+            record["status"] = "error"
+        db.upsert_photo(record)
+        return
+    try:
+        size = os.path.getsize(image_path)
+    except OSError:
+        size = 0
+    db.upsert_photo(
+        {
+            "path": image_path,
+            "folder": os.path.abspath(folder),
+            "filename": os.path.basename(image_path),
+            "size": size,
+            "status": "error",
+            "error": message,
+        }
+    )
+
+
+def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> bool:
+    """Analyze one photo and persist the result; errors are recorded per photo."""
+    try:
+        prepared = prepare_for_analysis(image_path, folder, config)
+        result = analyze_prepared(prepared, config)
+        persist_analysis(db, prepared, result, config)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _record_photo_error(image_path, folder, db, exc)
+        return False
+
+
+def _scan_worker(
+    job_id: str, folder: str, db: Database, config: Config, force: bool
+) -> None:
     job = JOBS.get(job_id)
     if not job:
         return
     active_paths = set(db.paths_for_folder(folder))
-    first_time = len(active_paths) == 0
-    JOBS.update(job_id, status="running", phase="index" if first_time else "analyze", error=None)
+    JOBS.update(
+        job_id,
+        status="running",
+        phase="index" if not active_paths else "analyze",
+        error=None,
+    )
     try:
         load_scan_results_from_cache(folder, db, config.cache_dir_name)
         skip_dirs = [config.data_dir, config.trash_dir_name, config.cache_dir_name]
         images = discover_images(folder, config.image_extensions, skip_dirs=skip_dirs)
-        thumb_dir = ensure_cache_dirs(folder, config.cache_dir_name)
 
-        # Only the first scan builds the index and generates proxies. Later
-        # scans only call the LLM on photos that already exist in the index
-        # and do not have a score yet.
-        if first_time:
-            # Phase 1: build/refresh index and generate proxies for every photo.
-            JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
-            for idx, image_path in enumerate(images, start=1):
+        # Index every photo we have not seen yet. This also covers files added
+        # after a previous scan, including a forced re-scan.
+        if not active_paths:
+            to_index = list(images)
+        else:
+            to_index = [
+                image_path for image_path in images if image_path not in active_paths
+            ]
+
+        if to_index:
+            JOBS.update(
+                job_id, phase="index", total=len(to_index), processed=0, current=""
+            )
+            for idx, image_path in enumerate(to_index, start=1):
                 job = JOBS.get(job_id)
                 if not job or job.cancelled:
                     JOBS.update(job_id, status="cancelled")
                     return
                 JOBS.update(job_id, processed=idx, current=image_path)
                 try:
-                    proxy_path, width, height, phash, thumb_path = make_proxy(
-                        image_path,
-                        max_edge=config.proxy_max_edge,
-                        thumb_dir=str(thumb_dir),
-                        quality=config.proxy_quality,
-                        thumb_size=config.thumb_size,
+                    prepared = prepare_proxy(image_path, folder, config)
+                    existing = db.get_photo_by_path(prepared.image_path)
+                    status = existing.get("status") if existing else "pending"
+                    db.upsert_photo(
+                        base_record(prepared, existing=existing, status=status)
                     )
-                    existing = db.get_photo_by_path(image_path)
-                    record = {
-                        "path": image_path,
-                        "folder": os.path.abspath(folder),
-                        "filename": os.path.basename(image_path),
-                        "size": os.path.getsize(image_path),
-                        "width": width,
-                        "height": height,
-                        "thumb_path": thumb_path,
-                        "proxy_path": proxy_path,
-                        "phash": phash,
-                        "status": existing.get("status") if existing else "pending",
-                    }
-                    if existing:
-                        for key in ("score", "recommendation", "tags", "reason", "model", "dimensions", "location", "exif", "analyzed_at", "favorite", "error"):
-                            if existing.get(key) is not None:
-                                record[key] = existing[key]
-                    db.upsert_photo(record)
                 except Exception as exc:  # noqa: BLE001
-                    try:
-                        existing = db.get_photo_by_path(image_path)
-                        if existing:
-                            db.mark_error(existing["id"], str(exc)[:1000])
-                        else:
-                            db.upsert_photo({
-                                "path": image_path,
-                                "folder": os.path.abspath(folder),
-                                "filename": os.path.basename(image_path),
-                                "size": os.path.getsize(image_path),
-                                "status": "error",
-                                "error": str(exc)[:1000],
-                            })
-                    except Exception:
-                        pass
+                    _record_photo_error(image_path, folder, db, exc)
 
             if JOBS.get(job_id).cancelled:
                 JOBS.update(job_id, status="cancelled")
                 return
 
-        # Phase 2: analyze only photos without a score (unless forced).
+        # Analyze pending photos, or every photo when the user forced a full
+        # re-analysis. Corrupted files stay in the queue so they can be retried
+        # after the file is repaired.
         if force:
-            to_analyze = []
-            for image_path in images:
-                if db.get_photo_by_path(image_path):
-                    to_analyze.append(image_path)
+            to_analyze = [
+                image_path for image_path in images if db.get_photo_by_path(image_path)
+            ]
         else:
             to_analyze = []
             for image_path in images:
                 existing = db.get_photo_by_path(image_path)
-                if existing and not (existing.get("status") == "analyzed" and existing.get("score") is not None):
+                if existing and not (
+                    existing.get("status") == "analyzed"
+                    and existing.get("score") is not None
+                ):
                     to_analyze.append(image_path)
 
-        JOBS.update(job_id, phase="analyze", total=len(to_analyze), processed=0, current="")
-        for idx, image_path in enumerate(to_analyze, start=1):
-            job = JOBS.get(job_id)
-            if not job or job.cancelled:
-                JOBS.update(job_id, status="cancelled")
-                return
-            JOBS.update(job_id, processed=idx, current=image_path)
-            try:
-                proxy_path, width, height, phash, thumb_path = make_proxy(
-                    image_path,
-                    max_edge=config.proxy_max_edge,
-                    thumb_dir=str(thumb_dir),
-                    quality=config.proxy_quality,
-                    thumb_size=config.thumb_size,
-                )
-                location, exif = extract_exif(image_path)
-                if exif.get("latitude") is not None and exif.get("longitude") is not None:
-                    place = reverse_geocode(
-                        exif["latitude"], exif["longitude"],
-                        config.geocoding_provider, config.geocoding_api_key,
-                    )
-                    if place:
-                        location = place
-                result = analyze_image(
-                    proxy_path,
-                    config,
-                    context=build_analysis_context(location, exif),
-                )
-                record = {
-                    "path": image_path,
-                    "folder": os.path.abspath(folder),
-                    "filename": os.path.basename(image_path),
-                    "size": os.path.getsize(image_path),
-                    "width": width,
-                    "height": height,
-                    "thumb_path": thumb_path,
-                    "proxy_path": proxy_path,
-                    "dimensions": result.get("dimensions", {}),
-                    "location": location,
-                    "exif": exif,
-                    "phash": phash,
-                    "score": result["score"],
-                    "recommendation": result.get("recommendation"),
-                    "tags": result["tags"],
-                    "reason": result.get("reason") or result.get("comment"),
-                    "model": config.model,
-                    "analyzed_at": None,
-                    "status": "analyzed",
-                    "error": None,
-                }
-                photo_id = db.upsert_photo(record)
-                db.update_analysis(
-                    photo_id,
-                    score=result["score"],
-                    recommendation=result.get("recommendation"),
-                    tags=result["tags"],
-                    reason=result.get("reason") or result.get("comment"),
-                    model=config.model,
-                    phash=phash,
-                    width=width,
-                    height=height,
-                    thumb_path=thumb_path,
-                    proxy_path=proxy_path,
-                    dimensions=result.get("dimensions", {}),
-                    location=location,
-                    exif=exif,
-                    status="analyzed",
-                )
-            except Exception as exc:  # noqa: BLE001
-                try:
-                    existing = db.get_photo_by_path(image_path)
-                    if existing:
-                        db.mark_error(existing["id"], str(exc)[:1000])
-                    else:
-                        db.upsert_photo({
-                            "path": image_path,
-                            "folder": os.path.abspath(folder),
-                            "filename": os.path.basename(image_path),
-                            "size": os.path.getsize(image_path),
-                            "status": "error",
-                            "error": str(exc)[:1000],
-                        })
-                except Exception:
-                    pass
+        JOBS.update(
+            job_id, phase="analyze", total=len(to_analyze), processed=0, current=""
+        )
+        workers = max(1, int(config.scan_concurrency or 1))
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="lumina-analyze"
+        ) as executor:
+            futures = {
+                executor.submit(
+                    _analyze_one, image_path, folder, db, config
+                ): image_path
+                for image_path in to_analyze
+            }
+            for processed, future in enumerate(as_completed(futures), start=1):
+                image_path = futures[future]
+                JOBS.update(job_id, processed=processed, current=image_path)
+                job = JOBS.get(job_id)
+                if not job or job.cancelled:
+                    JOBS.update(job_id, status="cancelled")
+                    for pending in futures:
+                        pending.cancel()
+                    return
 
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)
-                backup_path = Path(__file__).resolve().parent.parent / "photo-library.backup.db"
+                backup_path = (
+                    Path(__file__).resolve().parent.parent / "photo-library.backup.db"
+                )
                 db.backup_to(str(backup_path))
             except Exception:
                 pass
@@ -330,7 +336,6 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
             except Exception:
                 pass
 
-        thumb_dir = ensure_cache_dirs(folder, config.cache_dir_name)
         JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
         for idx, image_path in enumerate(images, start=1):
             job = JOBS.get(job_id)
@@ -339,51 +344,18 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                 return
             JOBS.update(job_id, processed=idx, current=image_path)
             try:
-                proxy_path, width, height, phash, thumb_path = make_proxy(
-                    image_path,
-                    max_edge=config.proxy_max_edge,
-                    thumb_dir=str(thumb_dir),
-                    quality=config.proxy_quality,
-                    thumb_size=config.thumb_size,
-                )
-                existing = db.get_photo_by_path(image_path)
-                record = {
-                    "path": image_path,
-                    "folder": os.path.abspath(folder),
-                    "filename": os.path.basename(image_path),
-                    "size": os.path.getsize(image_path),
-                    "width": width,
-                    "height": height,
-                    "thumb_path": thumb_path,
-                    "proxy_path": proxy_path,
-                    "phash": phash,
-                    "status": existing.get("status") if existing else "pending",
-                }
-                if existing:
-                    for key in ("score", "recommendation", "tags", "reason", "model", "dimensions", "location", "exif", "analyzed_at", "favorite", "error"):
-                        if existing.get(key) is not None:
-                            record[key] = existing[key]
-                db.upsert_photo(record)
+                prepared = prepare_proxy(image_path, folder, config)
+                existing = db.get_photo_by_path(prepared.image_path)
+                status = existing.get("status") if existing else "pending"
+                db.upsert_photo(base_record(prepared, existing=existing, status=status))
             except Exception as exc:  # noqa: BLE001
-                try:
-                    existing = db.get_photo_by_path(image_path)
-                    if existing:
-                        db.mark_error(existing["id"], str(exc)[:1000])
-                    else:
-                        db.upsert_photo({
-                            "path": image_path,
-                            "folder": os.path.abspath(folder),
-                            "filename": os.path.basename(image_path),
-                            "size": os.path.getsize(image_path),
-                            "status": "error",
-                            "error": str(exc)[:1000],
-                        })
-                except Exception:
-                    pass
+                _record_photo_error(image_path, folder, db, exc)
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)
-                backup_path = Path(__file__).resolve().parent.parent / "photo-library.backup.db"
+                backup_path = (
+                    Path(__file__).resolve().parent.parent / "photo-library.backup.db"
+                )
                 db.backup_to(str(backup_path))
             except Exception:
                 pass
@@ -404,42 +376,11 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
         raise FileNotFoundError(f"文件不存在: {image_path}")
 
     folder = photo.get("folder") or os.path.dirname(image_path)
-    thumb_dir = ensure_cache_dirs(folder, config.cache_dir_name)
-    proxy_path, width, height, phash, thumb_path = make_proxy(
-        image_path,
-        max_edge=config.proxy_max_edge,
-        thumb_dir=str(thumb_dir),
-        quality=config.proxy_quality,
-        thumb_size=config.thumb_size,
-    )
-    location, exif = extract_exif(image_path)
-    if exif.get("latitude") is not None and exif.get("longitude") is not None:
-        place = reverse_geocode(
-            exif["latitude"], exif["longitude"],
-            config.geocoding_provider, config.geocoding_api_key,
-        )
-        if place:
-            location = place
-    result = analyze_image(
-        proxy_path,
-        config,
-        context=build_analysis_context(location, exif),
-    )
-    db.update_analysis(
-        photo_id,
-        score=result["score"],
-        recommendation=result.get("recommendation"),
-        tags=result["tags"],
-        reason=result.get("reason") or result.get("comment"),
-        model=config.model,
-        phash=phash,
-        width=width,
-        height=height,
-        thumb_path=thumb_path,
-        proxy_path=proxy_path,
-        dimensions=result.get("dimensions", {}),
-        location=location,
-        exif=exif,
-        status="analyzed",
-    )
+    try:
+        prepared = prepare_for_analysis(image_path, folder, config)
+        result = analyze_prepared(prepared, config)
+        persist_analysis(db, prepared, result, config)
+    except Exception as exc:
+        _record_photo_error(image_path, folder, db, exc)
+        raise
     return db.get_photo(photo_id)

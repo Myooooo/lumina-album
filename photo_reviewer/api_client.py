@@ -1,15 +1,21 @@
 """Client for OpenAI-compatible local vision model endpoints."""
+
 from __future__ import annotations
 
 import base64
 import json
 import re
-from typing import Any, Dict, Optional
+import time
+from typing import Any
 from urllib.parse import urljoin
 
 import requests
 
 from .config import Config
+
+
+class SemanticSearchError(RuntimeError):
+    """Raised when the local model cannot complete a semantic search."""
 
 
 SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，温暖、俏皮，又带一点文艺气息。
@@ -39,8 +45,6 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
 """
 
 
-
-
 def _normalize_base_url(url: str) -> str:
     url = (url or "").strip().rstrip("/")
     if not url:
@@ -48,15 +52,57 @@ def _normalize_base_url(url: str) -> str:
     return url
 
 
-def build_analysis_context(location: Optional[str] = None, exif: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _post_chat_completion(payload: dict[str, Any], config: Config) -> requests.Response:
+    """POST a chat completion with a short exponential-backoff retry loop.
+
+    429 and 5xx responses are retried; other HTTP errors fail immediately.
+    """
+    url = urljoin(_normalize_base_url(config.api_base_url) + "/", "chat/completions")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {config.api_key}",
+    }
+    retries = max(0, int(getattr(config, "model_retries", 2) or 2))
+    last_message = ""
+    for attempt in range(retries + 1):
+        try:
+            resp = requests.post(
+                url, headers=headers, json=payload, timeout=config.request_timeout
+            )
+        except (requests.exceptions.RequestException, OSError) as exc:
+            last_message = f"无法连接本地模型服务: {exc}"
+            if attempt >= retries:
+                raise RuntimeError(last_message) from exc
+            time.sleep(0.8 * (2**attempt))
+            continue
+
+        if resp.status_code in (429, 500, 502, 503, 504):
+            last_message = f"模型接口暂时不可用 (HTTP {resp.status_code})"
+            if attempt >= retries:
+                raise RuntimeError(last_message)
+            time.sleep(0.8 * (2**attempt))
+            continue
+
+        if resp.status_code >= 400:
+            raise RuntimeError(f"模型接口返回 {resp.status_code}: {resp.text[:500]}")
+        return resp
+
+    raise RuntimeError(last_message or "模型请求失败")
+
+
+def build_analysis_context(
+    location: str | None = None, exif: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Build the small metadata context passed to the vision model."""
     exif = exif or {}
-    context: Dict[str, Any] = {}
+    context: dict[str, Any] = {}
     if location:
         context["location"] = str(location).strip()
     if exif.get("datetime_original"):
         context["captured_at"] = str(exif["datetime_original"]).strip()
-    camera = " ".join(str(exif.get(k) or "") for k in ("make", "model") if exif.get(k)).strip()
+    camera = " ".join(
+        str(exif.get(k) or "") for k in ("make", "model") if exif.get(k)
+    ).strip()
     if camera:
         context["camera"] = camera
     return context
@@ -65,18 +111,13 @@ def build_analysis_context(location: Optional[str] = None, exif: Optional[Dict[s
 def analyze_image(
     proxy_path: str,
     config: Config,
-    context: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Send one image to the local model and return parsed JSON result."""
     with open(proxy_path, "rb") as fh:
         image_bytes = fh.read()
     b64 = base64.b64encode(image_bytes).decode("ascii")
 
-    url = urljoin(_normalize_base_url(config.api_base_url) + "/", "chat/completions")
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {config.api_key}",
-    }
     system_prompt = (config.system_prompt or SYSTEM_PROMPT).strip()
     context = context or {}
     metadata_lines = []
@@ -118,15 +159,7 @@ def analyze_image(
         "max_tokens": 700,
     }
 
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=config.request_timeout)
-    except requests.exceptions.RequestException as exc:
-        raise RuntimeError(f"无法连接本地模型服务: {exc}") from exc
-
-    if resp.status_code >= 400:
-        raise RuntimeError(
-            f"模型接口返回 {resp.status_code}: {resp.text[:500]}"
-        )
+    resp = _post_chat_completion(payload, config)
 
     try:
         data = resp.json()
@@ -143,7 +176,7 @@ def analyze_image(
     return parsed
 
 
-def _parse_model_json(content: Any) -> Dict[str, Any]:
+def _parse_model_json(content: Any) -> dict[str, Any]:
     if isinstance(content, list):
         parts = []
         for item in content:
@@ -173,7 +206,7 @@ def _parse_model_json(content: Any) -> Dict[str, Any]:
     raise RuntimeError(f"模型输出类型不受支持: {type(content)}")
 
 
-def _normalize_dimensions(raw: Any) -> Dict[str, float]:
+def _normalize_dimensions(raw: Any) -> dict[str, float]:
     dims = {
         "technical": 0.0,
         "composition": 0.0,
@@ -190,7 +223,7 @@ def _normalize_dimensions(raw: Any) -> Dict[str, float]:
     return dims
 
 
-def _validate_result(result: Dict[str, Any]) -> None:
+def _validate_result(result: dict[str, Any]) -> None:
     try:
         score = float(result.get("score"))
         tags = result.get("tags", [])
@@ -225,22 +258,17 @@ def semantic_search(query: str, candidates: list, config: Config) -> list:
         tags = ",".join(p.get("tags") or []) or "-"
         reason = (p.get("reason") or "")[:120]
         location = p.get("location") or ""
-        lines.append(f"{p['id']}|{p.get('filename','')}|{tags}|{reason}|{location}")
+        lines.append(f"{p['id']}|{p.get('filename', '')}|{tags}|{reason}|{location}")
     candidate_text = "\n".join(lines)
 
     system_prompt = (
         "You are a photo search assistant. The user provides a search query and a "
         "list of photos. Each line is: id|filename|tags|description|location. "
-        "Return ONLY JSON like {\"ids\": [1,2,3]} with the ids of photos relevant "
+        'Return ONLY JSON like {"ids": [1,2,3]} with the ids of photos relevant '
         "to the query. Include both exact keyword matches and semantic matches."
     )
     user_content = f"Search query: {query}\n\nPhotos:\n{candidate_text}"
 
-    url = urljoin(_normalize_base_url(config.api_base_url) + "/", "chat/completions")
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {config.api_key}",
-    }
     payload = {
         "model": config.model,
         "messages": [
@@ -251,17 +279,18 @@ def semantic_search(query: str, candidates: list, config: Config) -> list:
         "max_tokens": 500,
     }
     try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=config.request_timeout)
-    except requests.exceptions.RequestException:
-        return []
-    if resp.status_code >= 400:
-        return []
+        resp = _post_chat_completion(payload, config)
+    except RuntimeError as exc:
+        raise SemanticSearchError(f"语义搜索暂时不可用：{exc}") from exc
     try:
         data = resp.json()
         content = data["choices"][0]["message"]["content"]
-    except Exception:
-        return []
-    parsed = _parse_model_json(content)
+    except Exception as exc:
+        raise SemanticSearchError("语义搜索结果格式不正确。") from exc
+    try:
+        parsed = _parse_model_json(content)
+    except RuntimeError as exc:
+        raise SemanticSearchError("语义搜索结果无法解析，请稍后重试。") from exc
     ids = parsed.get("ids", []) if isinstance(parsed, dict) else []
     result = []
     for i in ids:

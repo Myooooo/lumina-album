@@ -4,13 +4,14 @@ Settings can be provided through environment variables, and are persisted to
 ``<data_dir>/settings.json`` when changed from the web UI.  On the next start
 the saved settings are loaded automatically, so no configuration is lost.
 """
+
 from __future__ import annotations
 
 import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -26,10 +27,10 @@ PERSISTED_FIELDS = (
     "model",
     "system_prompt",
     "proxy_max_edge",
-    "thumb_size",
     "proxy_quality",
     "scan_concurrency",
     "request_timeout",
+    "model_retries",
     "trash_dir_name",
     "cache_dir_name",
     "geocoding_provider",
@@ -44,9 +45,13 @@ PERSISTED_FIELDS = (
 class Config:
     # Local model endpoint that speaks the OpenAI Chat Completions protocol.
     api_base_url: str = field(
-        default_factory=lambda: os.getenv("PHOTO_API_BASE_URL", "http://localhost:1234/v1")
+        default_factory=lambda: os.getenv(
+            "PHOTO_API_BASE_URL", "http://localhost:1234/v1"
+        )
     )
-    api_key: str = field(default_factory=lambda: os.getenv("PHOTO_API_KEY", "not-needed"))
+    api_key: str = field(
+        default_factory=lambda: os.getenv("PHOTO_API_KEY", "not-needed")
+    )
     model: str = field(default_factory=lambda: os.getenv("PHOTO_MODEL", "local-model"))
 
     # Custom system prompt. Empty means use the built-in default prompt.
@@ -56,30 +61,45 @@ class Config:
 
     # Image proxy generation.
     proxy_max_edge: int = int(os.getenv("PHOTO_PROXY_MAX_EDGE", "1024"))
-    thumb_size: int = int(os.getenv("PHOTO_THUMB_SIZE", "320"))
     proxy_quality: int = int(os.getenv("PHOTO_PROXY_QUALITY", "85"))
 
     # Scanning.
     scan_concurrency: int = int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
     request_timeout: int = int(os.getenv("PHOTO_REQUEST_TIMEOUT", "120"))
+    model_retries: int = int(os.getenv("PHOTO_MODEL_RETRIES", "2"))
     # Storage.
     data_dir: str = field(
-        default_factory=lambda: os.getenv("PHOTO_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
+        default_factory=lambda: os.getenv(
+            "PHOTO_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")
+        )
     )
-    db_path: str = field(
-        default_factory=lambda: os.getenv("PHOTO_DB_PATH", "")
+    db_path: str = field(default_factory=lambda: os.getenv("PHOTO_DB_PATH", ""))
+    trash_dir_name: str = field(
+        default_factory=lambda: os.getenv("PHOTO_TRASH_DIR_NAME", ".photo-trash")
     )
-    trash_dir_name: str = field(default_factory=lambda: os.getenv("PHOTO_TRASH_DIR_NAME", ".photo-trash"))
-    cache_dir_name: str = field(default_factory=lambda: os.getenv("PHOTO_CACHE_DIR_NAME", ".photo-review-cache"))
-    geocoding_provider: str = field(default_factory=lambda: os.getenv("PHOTO_GEOCODING_PROVIDER", "nominatim"))
-    geocoding_api_key: str = field(default_factory=lambda: os.getenv("PHOTO_GEOCODING_API_KEY", ""))
+    cache_dir_name: str = field(
+        default_factory=lambda: os.getenv("PHOTO_CACHE_DIR_NAME", ".photo-review-cache")
+    )
+    geocoding_provider: str = field(
+        default_factory=lambda: os.getenv("PHOTO_GEOCODING_PROVIDER", "nominatim")
+    )
+    geocoding_api_key: str = field(
+        default_factory=lambda: os.getenv("PHOTO_GEOCODING_API_KEY", "")
+    )
     host: str = field(default_factory=lambda: os.getenv("PHOTO_HOST", "127.0.0.1"))
     port: int = int(os.getenv("PHOTO_PORT", "5000"))
     debug: bool = _env_bool("PHOTO_DEBUG", False)
 
     # Allowed image extensions.
     image_extensions: tuple = (
-        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tif", ".tiff",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".tif",
+        ".tiff",
     )
 
     # Runtime-computed settings path.
@@ -106,12 +126,19 @@ class Config:
         for key in PERSISTED_FIELDS:
             if key in saved and hasattr(self, key):
                 value = saved[key]
-                if key in {"proxy_max_edge", "thumb_size", "proxy_quality", "scan_concurrency", "request_timeout", "dedupe_threshold", "port"}:
+                if key in {
+                    "proxy_max_edge",
+                    "proxy_quality",
+                    "scan_concurrency",
+                    "request_timeout",
+                    "model_retries",
+                    "port",
+                }:
                     try:
                         value = int(value)
                     except (TypeError, ValueError):
                         continue
-                elif key in {"dedupe_enabled", "debug"}:
+                elif key == "debug":
                     value = bool(value)
                 setattr(self, key, value)
 
@@ -121,16 +148,16 @@ class Config:
         with open(self.settings_path, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False, indent=2)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "api_base_url": self.api_base_url,
             "api_key": self.api_key,
             "model": self.model,
             "system_prompt": self.system_prompt,
             "proxy_max_edge": self.proxy_max_edge,
-            "thumb_size": self.thumb_size,
             "scan_concurrency": self.scan_concurrency,
             "request_timeout": self.request_timeout,
+            "model_retries": self.model_retries,
             "data_dir": self.data_dir,
             "trash_dir_name": self.trash_dir_name,
             "cache_dir_name": self.cache_dir_name,

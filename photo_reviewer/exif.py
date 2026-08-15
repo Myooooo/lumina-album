@@ -1,12 +1,13 @@
 """EXIF extraction for photos."""
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
-from PIL import Image, ExifTags
+from PIL import ExifTags, Image
 
 
-def _decimal_from_dms(dms, ref) -> Optional[float]:
+def _decimal_from_dms(dms, ref) -> float | None:
     try:
         d, m, s = [float(x) for x in dms]
     except (TypeError, ValueError):
@@ -17,10 +18,10 @@ def _decimal_from_dms(dms, ref) -> Optional[float]:
     return value
 
 
-def extract_exif(image_path: str) -> Tuple[Optional[str], Dict[str, Any]]:
+def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
     """Return (location_string, exif_dict) from a photo file."""
     location = None
-    exif_data: Dict[str, Any] = {}
+    exif_data: dict[str, Any] = {}
     try:
         with Image.open(image_path) as img:
             exif = img.getexif()

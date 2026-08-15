@@ -1,12 +1,11 @@
 """Thumbnail/proxy generation and perceptual hashing."""
+
 from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
-from typing import Optional, Tuple
 
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageOps
 
 
 def _safe_hash(path: str) -> str:
@@ -22,19 +21,17 @@ def _safe_hash(path: str) -> str:
 def make_proxy(
     image_path: str,
     max_edge: int = 1024,
-    thumb_dir: str = "data/thumbnails",
+    cache_dir: str = "data/thumbnails",
     quality: int = 85,
-    thumb_size: int = 320,
-) -> Tuple[str, int, int, str, str]:
-    """Create a JPEG proxy (and a small UI thumbnail) for a photo.
+) -> tuple[str, int, int, str]:
+    """Create a JPEG proxy for one photo.
 
-    Returns (proxy_path, width, height, proxy_hash, ui_thumb_path).
-    The proxy is used for the vision API; the UI thumbnail is smaller and used
-    in the web gallery.
+    Returns (proxy_path, width, height, proxy_hash). The same proxy file is
+    used by both the vision API and the web gallery.
     """
     image_path = os.path.abspath(image_path)
-    thumb_dir = os.path.abspath(thumb_dir)
-    os.makedirs(thumb_dir, exist_ok=True)
+    cache_dir = os.path.abspath(cache_dir)
+    os.makedirs(cache_dir, exist_ok=True)
 
     with Image.open(image_path) as img:
         img = ImageOps.exif_transpose(img)
@@ -52,7 +49,7 @@ def make_proxy(
         # Proxy: keep aspect ratio, limit the longest edge for API upload.
         # The same proxy file is also used directly as the gallery preview,
         # so no separate thumbnail file is created.
-        proxy_path = os.path.join(thumb_dir, f"{base}_proxy.jpg")
+        proxy_path = os.path.join(cache_dir, f"{base}_proxy.jpg")
         if not os.path.exists(proxy_path):
             proxy_img = img.copy()
             if max(proxy_img.size) > max_edge:
@@ -60,7 +57,7 @@ def make_proxy(
             proxy_img.save(proxy_path, "JPEG", quality=quality)
 
         proxy_hash = _dhash(img, hash_size=8)
-        return proxy_path, width, height, proxy_hash, proxy_path
+        return proxy_path, width, height, proxy_hash
 
 
 def _dhash(img: Image.Image, hash_size: int = 8) -> str:
@@ -85,7 +82,7 @@ def hamming_distance(a: str, b: str) -> int:
         ib = int(b, 16)
     except ValueError:
         return 999
-    return bin(ia ^ ib).count("1")
+    return (ia ^ ib).bit_count()
 
 
 def cleanup_cache(referenced_paths, thumb_dir: str) -> dict:
@@ -107,7 +104,7 @@ def cleanup_cache(referenced_paths, thumb_dir: str) -> dict:
         return {"freed": freed, "freed_size": freed_size, "photos_affected": 0}
 
     for name in os.listdir(thumb_dir):
-        if not (name.endswith("_thumb.jpg") or name.endswith("_proxy.jpg")):
+        if not name.endswith(("_thumb.jpg", "_proxy.jpg")):
             continue
         path = os.path.join(thumb_dir, name)
         if path in referenced:
@@ -122,4 +119,8 @@ def cleanup_cache(referenced_paths, thumb_dir: str) -> dict:
                 affected_bases.add(name[: -len("_thumb.jpg")])
         except OSError:
             pass
-    return {"freed": freed, "freed_size": freed_size, "photos_affected": len(affected_bases)}
+    return {
+        "freed": freed,
+        "freed_size": freed_size,
+        "photos_affected": len(affected_bases),
+    }

@@ -1,12 +1,14 @@
 """SQLite storage for photo metadata and analysis results."""
+
 from __future__ import annotations
 
 import json
 import sqlite3
 import threading
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 
 def utc_now() -> str:
@@ -26,7 +28,7 @@ _CAPTURE_FORMATS = (
 )
 
 
-def parse_capture_datetime(value: Any) -> Optional[datetime]:
+def parse_capture_datetime(value: Any) -> datetime | None:
     """Parse the common EXIF capture-time formats into a naive datetime."""
     if value is None:
         return None
@@ -53,21 +55,23 @@ def parse_capture_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-def photo_capture_time(photo: Dict[str, Any]) -> Optional[datetime]:
+def photo_capture_time(photo: dict[str, Any]) -> datetime | None:
     """Return the capture time for a photo payload/row."""
     exif = photo.get("exif") or {}
     if not isinstance(exif, dict):
         exif = {}
-    return parse_capture_datetime(exif.get("datetime_original") or exif.get("DateTimeOriginal"))
+    return parse_capture_datetime(
+        exif.get("datetime_original") or exif.get("DateTimeOriginal")
+    )
 
 
-def photo_capture_year(photo: Dict[str, Any]) -> Optional[int]:
+def photo_capture_year(photo: dict[str, Any]) -> int | None:
     """Return the 4-digit capture year for a photo payload/row."""
     value = photo_capture_time(photo)
     return value.year if value else None
 
 
-def _time_sort_key(photo: Dict[str, Any], descending: bool):
+def _time_sort_key(photo: dict[str, Any], descending: bool):
     """Photos without capture time always sort after photos that have one."""
     captured = photo_capture_time(photo)
     if captured is None:
@@ -76,7 +80,7 @@ def _time_sort_key(photo: Dict[str, Any], descending: bool):
     return (0, -timestamp) if descending else (0, timestamp)
 
 
-def sort_photos(photos: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
+def sort_photos(photos: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
     """Sort photo dicts in place using the same sort names as the UI."""
     if sort == "score_desc":
         photos.sort(key=lambda p: (p.get("score") is None, -(p.get("score") or 0)))
@@ -154,7 +158,10 @@ class Database:
                 )
                 conn.commit()
                 # Migration for databases created by older versions.
-                cols = {row["name"] for row in conn.execute("PRAGMA table_info(photos)").fetchall()}
+                cols = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(photos)").fetchall()
+                }
                 if "proxy_path" not in cols:
                     conn.execute("ALTER TABLE photos ADD COLUMN proxy_path TEXT")
                 if "dimensions" not in cols:
@@ -164,7 +171,9 @@ class Database:
                 if "exif" not in cols:
                     conn.execute("ALTER TABLE photos ADD COLUMN exif TEXT")
                 if "favorite" not in cols:
-                    conn.execute("ALTER TABLE photos ADD COLUMN favorite INTEGER DEFAULT 0")
+                    conn.execute(
+                        "ALTER TABLE photos ADD COLUMN favorite INTEGER DEFAULT 0"
+                    )
                 # New versions use the proxy file directly as the gallery
                 # preview, so existing thumb_path values are migrated to the
                 # proxy path (old _thumb.jpg files become orphan cache).
@@ -175,7 +184,7 @@ class Database:
             finally:
                 conn.close()
 
-    def upsert_photo(self, record: Dict[str, Any]) -> int:
+    def upsert_photo(self, record: dict[str, Any]) -> int:
         """Insert a photo row, or update it if the path already exists."""
         now = utc_now()
         record.setdefault("created_at", now)
@@ -226,13 +235,21 @@ class Database:
                         "height": record.get("height"),
                         "thumb_path": record.get("thumb_path"),
                         "proxy_path": record.get("proxy_path"),
-                        "dimensions": json.dumps(record.get("dimensions") or {}, ensure_ascii=False) if isinstance(record.get("dimensions"), dict) else record.get("dimensions"),
+                        "dimensions": json.dumps(
+                            record.get("dimensions") or {}, ensure_ascii=False
+                        )
+                        if isinstance(record.get("dimensions"), dict)
+                        else record.get("dimensions"),
                         "location": record.get("location"),
-                        "exif": json.dumps(record.get("exif") or {}, ensure_ascii=False) if isinstance(record.get("exif"), dict) else record.get("exif"),
+                        "exif": json.dumps(record.get("exif") or {}, ensure_ascii=False)
+                        if isinstance(record.get("exif"), dict)
+                        else record.get("exif"),
                         "phash": record.get("phash"),
                         "score": record.get("score"),
                         "recommendation": record.get("recommendation"),
-                        "tags": json.dumps(record.get("tags") or [], ensure_ascii=False) if isinstance(record.get("tags"), (list, tuple, dict)) else record.get("tags"),
+                        "tags": json.dumps(record.get("tags") or [], ensure_ascii=False)
+                        if isinstance(record.get("tags"), (list, tuple, dict))
+                        else record.get("tags"),
                         "reason": record.get("reason"),
                         "model": record.get("model"),
                         "analyzed_at": record.get("analyzed_at"),
@@ -243,47 +260,53 @@ class Database:
                     },
                 )
                 conn.commit()
-                row = conn.execute("SELECT id FROM photos WHERE path=?", (record["path"],)).fetchone()
+                row = conn.execute(
+                    "SELECT id FROM photos WHERE path=?", (record["path"],)
+                ).fetchone()
                 return int(row["id"]) if row else 0
             finally:
                 conn.close()
 
-    def get_photo(self, photo_id: int) -> Optional[Dict[str, Any]]:
+    def get_photo(self, photo_id: int) -> dict[str, Any] | None:
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute("SELECT * FROM photos WHERE id=?", (photo_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT * FROM photos WHERE id=?", (photo_id,)
+                ).fetchone()
                 return dict(row) if row else None
             finally:
                 conn.close()
 
-    def get_photo_by_path(self, path: str) -> Optional[Dict[str, Any]]:
+    def get_photo_by_path(self, path: str) -> dict[str, Any] | None:
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute("SELECT * FROM photos WHERE path=?", (path,)).fetchone()
+                row = conn.execute(
+                    "SELECT * FROM photos WHERE path=?", (path,)
+                ).fetchone()
                 return dict(row) if row else None
             finally:
                 conn.close()
 
     def list_photos(
         self,
-        folder: Optional[str] = None,
-        status: Optional[str] = None,
-        recommendation: Optional[str] = None,
-        min_score: Optional[float] = None,
-        max_score: Optional[float] = None,
-        search: Optional[str] = None,
-        tag: Optional[str] = None,
-        favorite: Optional[bool] = None,
-        year: Optional[int] = None,
+        folder: str | None = None,
+        status: str | None = None,
+        recommendation: str | None = None,
+        min_score: float | None = None,
+        max_score: float | None = None,
+        search: str | None = None,
+        tag: str | None = None,
+        favorite: bool | None = None,
+        year: int | None = None,
         exclude_deleted: bool = False,
         sort: str = "score_asc",
         limit: int = 1000,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         clauses = []
-        params: List[Any] = []
+        params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
@@ -353,12 +376,12 @@ class Database:
 
     def count_photos(
         self,
-        folder: Optional[str] = None,
-        status: Optional[str] = None,
-        recommendation: Optional[str] = None,
+        folder: str | None = None,
+        status: str | None = None,
+        recommendation: str | None = None,
     ) -> int:
         clauses = []
-        params: List[Any] = []
+        params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
@@ -372,32 +395,43 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute(f"SELECT COUNT(*) AS c FROM photos {where}", params).fetchone()
+                row = conn.execute(
+                    f"SELECT COUNT(*) AS c FROM photos {where}", params
+                ).fetchone()
                 return int(row["c"])
             finally:
                 conn.close()
 
-    def stats(self, folder: Optional[str] = None) -> Dict[str, int]:
+    def stats(self, folder: str | None = None) -> dict[str, int]:
         clauses = []
-        params: List[Any] = []
+        params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
         where = "WHERE " + " AND ".join(clauses) if clauses else ""
         and_clause = " AND " if where else " WHERE "
-        active_clause = f"{where}{and_clause}status != 'deleted'" if where else "WHERE status != 'deleted'"
+        active_clause = (
+            f"{where}{and_clause}status != 'deleted'"
+            if where
+            else "WHERE status != 'deleted'"
+        )
         with self._lock:
             conn = self._connect()
             try:
-                total = conn.execute(f"SELECT COUNT(*) c FROM photos {active_clause}", params).fetchone()["c"]
+                total = conn.execute(
+                    f"SELECT COUNT(*) c FROM photos {active_clause}", params
+                ).fetchone()["c"]
                 analyzed = conn.execute(
-                    f"SELECT COUNT(*) c FROM photos {active_clause} AND status='analyzed'", params
+                    f"SELECT COUNT(*) c FROM photos {active_clause} AND status='analyzed'",
+                    params,
                 ).fetchone()["c"]
                 favorite = conn.execute(
-                    f"SELECT COUNT(*) c FROM photos {active_clause} AND favorite=1", params
+                    f"SELECT COUNT(*) c FROM photos {active_clause} AND favorite=1",
+                    params,
                 ).fetchone()["c"]
                 deleted = conn.execute(
-                    f"SELECT COUNT(*) c FROM photos {where}{and_clause}status='deleted'", params
+                    f"SELECT COUNT(*) c FROM photos {where}{and_clause}status='deleted'",
+                    params,
                 ).fetchone()["c"]
                 return {
                     "total": int(total),
@@ -414,19 +448,19 @@ class Database:
         photo_id: int,
         score: float,
         recommendation: str,
-        tags: List[str],
+        tags: list[str],
         reason: str,
         model: str,
-        phash: Optional[str] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        thumb_path: Optional[str] = None,
-        proxy_path: Optional[str] = None,
-        dimensions: Optional[Dict[str, float]] = None,
-        location: Optional[str] = None,
-        exif: Optional[Dict[str, Any]] = None,
+        phash: str | None = None,
+        width: int | None = None,
+        height: int | None = None,
+        thumb_path: str | None = None,
+        proxy_path: str | None = None,
+        dimensions: dict[str, float] | None = None,
+        location: str | None = None,
+        exif: dict[str, Any] | None = None,
         status: str = "analyzed",
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         with self._lock:
             conn = self._connect()
@@ -455,9 +489,13 @@ class Database:
                         height,
                         thumb_path,
                         proxy_path,
-                        json.dumps(dimensions, ensure_ascii=False) if isinstance(dimensions, dict) else None,
+                        json.dumps(dimensions, ensure_ascii=False)
+                        if isinstance(dimensions, dict)
+                        else None,
                         location,
-                        json.dumps(exif, ensure_ascii=False) if isinstance(exif, dict) else None,
+                        json.dumps(exif, ensure_ascii=False)
+                        if isinstance(exif, dict)
+                        else None,
                         status,
                         error,
                         utc_now(),
@@ -468,13 +506,21 @@ class Database:
             finally:
                 conn.close()
 
-    def update_exif(self, photo_id: int, location: Optional[str], exif: Optional[Dict[str, Any]]) -> None:
+    def update_exif(
+        self, photo_id: int, location: str | None, exif: dict[str, Any] | None
+    ) -> None:
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     "UPDATE photos SET location=?, exif=? WHERE id=?",
-                    (location, json.dumps(exif or {}, ensure_ascii=False) if isinstance(exif, dict) else None, photo_id),
+                    (
+                        location,
+                        json.dumps(exif or {}, ensure_ascii=False)
+                        if isinstance(exif, dict)
+                        else None,
+                        photo_id,
+                    ),
                 )
                 conn.commit()
             finally:
@@ -492,7 +538,9 @@ class Database:
             finally:
                 conn.close()
 
-    def mark_deleted(self, ids: Sequence[int], new_paths: Optional[Dict[int, str]] = None) -> None:
+    def mark_deleted(
+        self, ids: Sequence[int], new_paths: dict[int, str] | None = None
+    ) -> None:
         if not ids:
             return
         new_paths = new_paths or {}
@@ -515,7 +563,9 @@ class Database:
             finally:
                 conn.close()
 
-    def restore_deleted(self, ids: Sequence[int], original_paths: Dict[int, str]) -> None:
+    def restore_deleted(
+        self, ids: Sequence[int], original_paths: dict[int, str]
+    ) -> None:
         if not ids:
             return
         with self._lock:
@@ -537,29 +587,32 @@ class Database:
             finally:
                 conn.close()
 
-    def _get_original_path(self, photo_id: int) -> Optional[str]:
+    def _get_original_path(self, photo_id: int) -> str | None:
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute("SELECT original_path, path FROM photos WHERE id=?", (photo_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT original_path, path FROM photos WHERE id=?", (photo_id,)
+                ).fetchone()
                 if not row:
                     return None
                 return row["original_path"] or row["path"]
             finally:
                 conn.close()
 
-    def paths_for_folder(self, folder: str) -> List[str]:
+    def paths_for_folder(self, folder: str) -> list[str]:
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    "SELECT path FROM photos WHERE folder=? AND status != 'deleted'", (folder,)
+                    "SELECT path FROM photos WHERE folder=? AND status != 'deleted'",
+                    (folder,),
                 ).fetchall()
                 return [r["path"] for r in rows]
             finally:
                 conn.close()
 
-    def analyzed_rows_for_folder(self, folder: str) -> List[Dict[str, Any]]:
+    def analyzed_rows_for_folder(self, folder: str) -> list[dict[str, Any]]:
         with self._lock:
             conn = self._connect()
             try:
@@ -571,11 +624,15 @@ class Database:
             finally:
                 conn.close()
 
-    def update_duplicate_tag(self, photo_id: int, score: float, recommendation: str, reason: str) -> None:
+    def update_duplicate_tag(
+        self, photo_id: int, score: float, recommendation: str, reason: str
+    ) -> None:
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute("SELECT tags FROM photos WHERE id=?", (photo_id,)).fetchone()
+                row = conn.execute(
+                    "SELECT tags FROM photos WHERE id=?", (photo_id,)
+                ).fetchone()
                 tags = []
                 if row and row["tags"]:
                     try:
@@ -586,13 +643,19 @@ class Database:
                     tags.append("duplicate")
                 conn.execute(
                     "UPDATE photos SET tags=?, score=?, recommendation=?, reason=? WHERE id=?",
-                    (json.dumps(tags, ensure_ascii=False), score, recommendation, reason, photo_id),
+                    (
+                        json.dumps(tags, ensure_ascii=False),
+                        score,
+                        recommendation,
+                        reason,
+                        photo_id,
+                    ),
                 )
                 conn.commit()
             finally:
                 conn.close()
 
-    def get_settings(self) -> Dict[str, str]:
+    def get_settings(self) -> dict[str, str]:
         with self._lock:
             conn = self._connect()
             try:
@@ -601,13 +664,21 @@ class Database:
             finally:
                 conn.close()
 
-    def save_settings(self, data: Dict[str, Any]) -> None:
+    def save_settings(self, data: dict[str, Any]) -> None:
         with self._lock:
             conn = self._connect()
             try:
                 conn.executemany(
                     "INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)",
-                    [(str(k), json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v) for k, v in data.items()],
+                    [
+                        (
+                            str(k),
+                            json.dumps(v, ensure_ascii=False)
+                            if not isinstance(v, str)
+                            else v,
+                        )
+                        for k, v in data.items()
+                    ],
                 )
                 conn.commit()
             finally:
@@ -620,7 +691,9 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
-                conn.executemany("DELETE FROM photos WHERE id=?", [(pid,) for pid in ids])
+                conn.executemany(
+                    "DELETE FROM photos WHERE id=?", [(pid,) for pid in ids]
+                )
                 conn.commit()
             finally:
                 conn.close()
@@ -629,7 +702,10 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
-                conn.execute("UPDATE photos SET favorite=? WHERE id=?", (1 if favorite else 0, photo_id))
+                conn.execute(
+                    "UPDATE photos SET favorite=? WHERE id=?",
+                    (1 if favorite else 0, photo_id),
+                )
                 conn.commit()
             finally:
                 conn.close()
@@ -648,10 +724,10 @@ class Database:
         except Exception:
             return False
 
-    def all_tags(self, folder: Optional[str] = None) -> List[str]:
+    def all_tags(self, folder: str | None = None) -> list[str]:
         """Return all distinct tags for a folder (or across all folders)."""
         clauses = []
-        params: List[Any] = []
+        params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
@@ -660,7 +736,9 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
-                rows = conn.execute(f"SELECT tags FROM photos {where}", params).fetchall()
+                rows = conn.execute(
+                    f"SELECT tags FROM photos {where}", params
+                ).fetchall()
                 for row in rows:
                     if not row["tags"]:
                         continue
@@ -676,10 +754,10 @@ class Database:
                 conn.close()
         return sorted(tags_set)
 
-    def capture_years(self, folder: Optional[str] = None) -> List[int]:
+    def capture_years(self, folder: str | None = None) -> list[int]:
         """Return distinct capture years for active photos."""
         clauses = ["status != 'deleted'"]
-        params: List[Any] = []
+        params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
@@ -688,7 +766,9 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
-                rows = conn.execute(f"SELECT exif FROM photos {where}", params).fetchall()
+                rows = conn.execute(
+                    f"SELECT exif FROM photos {where}", params
+                ).fetchall()
                 for row in rows:
                     if not row["exif"]:
                         continue
@@ -705,16 +785,18 @@ class Database:
                 conn.close()
         return sorted(years, reverse=True)
 
-    def all_folders(self) -> List[str]:
+    def all_folders(self) -> list[str]:
         with self._lock:
             conn = self._connect()
             try:
-                rows = conn.execute("SELECT DISTINCT folder FROM photos WHERE folder IS NOT NULL AND folder != ''").fetchall()
+                rows = conn.execute(
+                    "SELECT DISTINCT folder FROM photos WHERE folder IS NOT NULL AND folder != ''"
+                ).fetchall()
                 return [r["folder"] for r in rows]
             finally:
                 conn.close()
 
-    def all_cache_paths(self) -> List[Dict[str, Optional[str]]]:
+    def all_cache_paths(self) -> list[dict[str, str | None]]:
         """Return thumb_path/proxy_path for all photos (used for cache cleanup)."""
         with self._lock:
             conn = self._connect()
@@ -722,11 +804,14 @@ class Database:
                 rows = conn.execute(
                     "SELECT thumb_path, proxy_path FROM photos WHERE thumb_path IS NOT NULL OR proxy_path IS NOT NULL"
                 ).fetchall()
-                return [{"thumb_path": r["thumb_path"], "proxy_path": r["proxy_path"]} for r in rows]
+                return [
+                    {"thumb_path": r["thumb_path"], "proxy_path": r["proxy_path"]}
+                    for r in rows
+                ]
             finally:
                 conn.close()
 
-    def photo_cache_paths(self, photo_id: int) -> Dict[str, Optional[str]]:
+    def photo_cache_paths(self, photo_id: int) -> dict[str, str | None]:
         with self._lock:
             conn = self._connect()
             try:
@@ -735,12 +820,15 @@ class Database:
                 ).fetchone()
                 if not row:
                     return {}
-                return {"thumb_path": row["thumb_path"], "proxy_path": row["proxy_path"]}
+                return {
+                    "thumb_path": row["thumb_path"],
+                    "proxy_path": row["proxy_path"],
+                }
             finally:
                 conn.close()
 
     @staticmethod
-    def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
         try:
             d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
@@ -758,10 +846,10 @@ class Database:
 
 
 # Global database instance, initialized when the app starts.
-DB: Optional[Database] = None
+DB: Database | None = None
 
 
-def get_db(path: Optional[str] = None) -> Database:
+def get_db(path: str | None = None) -> Database:
     global DB
     if DB is None:
         DB = Database(path or "data/library.db")

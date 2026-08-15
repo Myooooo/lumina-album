@@ -4,32 +4,31 @@ Only proxy images and UI thumbnails are stored inside the selected photo
 folder, under a hidden cache directory (by default ``.photo-review-cache``).
 All scan results and scores are stored in the central SQLite database.
 """
+
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-from typing import Dict
 
 from .thumbnailer import cleanup_cache
 
 
-def cache_dir_for_folder(folder: str, cache_dir_name: str = ".photo-review-cache") -> Path:
+def cache_dir_for_folder(
+    folder: str, cache_dir_name: str = ".photo-review-cache"
+) -> Path:
     return Path(folder) / cache_dir_name
 
 
-def thumb_dir_for_folder(folder: str, cache_dir_name: str = ".photo-review-cache") -> Path:
-    # Proxy images are stored directly in the cache folder root.
-    return cache_dir_for_folder(folder, cache_dir_name)
-
-
 def ensure_cache_dirs(folder: str, cache_dir_name: str = ".photo-review-cache") -> Path:
-    cache_dir = thumb_dir_for_folder(folder, cache_dir_name)
+    """Ensure the proxy cache directory exists and return its path."""
+    cache_dir = cache_dir_for_folder(folder, cache_dir_name)
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
 
 
-def cleanup_folder_cache(folder: str, db, cache_dir_name: str = ".photo-review-cache") -> Dict[str, int]:
+def cleanup_folder_cache(
+    folder: str, db, cache_dir_name: str = ".photo-review-cache"
+) -> dict[str, int]:
     """Remove unreferenced proxy/thumbnail files inside one folder's cache.
 
     Proxy images live directly in the cache folder root. This also removes old
@@ -58,13 +57,16 @@ def cleanup_folder_cache(folder: str, db, cache_dir_name: str = ".photo-review-c
     if old_thumb_dir.exists():
         try:
             import shutil
+
             shutil.rmtree(old_thumb_dir, ignore_errors=True)
         except Exception:
             pass
     return result
 
 
-def load_scan_results_from_cache(folder: str, db, cache_dir_name: str = ".photo-review-cache") -> int:
+def load_scan_results_from_cache(
+    folder: str, db, cache_dir_name: str = ".photo-review-cache"
+) -> int:
     """Import a previous ``scan_results.json`` cache into the database.
 
     This makes the UI show earlier scan results immediately when a folder is
@@ -95,7 +97,10 @@ def load_scan_results_from_cache(folder: str, db, cache_dir_name: str = ".photo-
             # Never resurrect permanently deleted rows or overwrite newer analyzed results.
             if existing.get("status") == "deleted":
                 continue
-            if existing.get("status") == "analyzed" and existing.get("score") is not None:
+            if (
+                existing.get("status") == "analyzed"
+                and existing.get("score") is not None
+            ):
                 continue
         try:
             db.upsert_photo(item)

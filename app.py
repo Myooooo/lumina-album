@@ -5,6 +5,7 @@ Run:
     python app.py
 Then open http://127.0.0.1:5000
 """
+
 from photo_reviewer.config import CONFIG
 from photo_reviewer.server import create_app
 
