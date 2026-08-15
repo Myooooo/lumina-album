@@ -799,13 +799,14 @@ class Database:
             finally:
                 conn.close()
 
-    def all_cache_paths(self) -> list[dict[str, str | None]]:
-        """Return thumb_path/proxy_path for all photos (used for cache cleanup)."""
+    def cache_paths_for_folder(self, folder: str) -> list[dict[str, str | None]]:
+        """Return referenced proxy paths for one folder's cache directory."""
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    "SELECT thumb_path, proxy_path FROM photos WHERE thumb_path IS NOT NULL OR proxy_path IS NOT NULL"
+                    "SELECT thumb_path, proxy_path FROM photos WHERE folder=? AND (thumb_path IS NOT NULL OR proxy_path IS NOT NULL)",
+                    (folder,),
                 ).fetchall()
                 return [
                     {"thumb_path": r["thumb_path"], "proxy_path": r["proxy_path"]}
@@ -814,19 +815,16 @@ class Database:
             finally:
                 conn.close()
 
-    def photo_cache_paths(self, photo_id: int) -> dict[str, str | None]:
+    def update_cache_paths(self, photo_id: int, proxy_path: str) -> None:
+        """Persist a proxy generated on demand so later cleanups keep it."""
         with self._lock:
             conn = self._connect()
             try:
-                row = conn.execute(
-                    "SELECT thumb_path, proxy_path FROM photos WHERE id=?", (photo_id,)
-                ).fetchone()
-                if not row:
-                    return {}
-                return {
-                    "thumb_path": row["thumb_path"],
-                    "proxy_path": row["proxy_path"],
-                }
+                conn.execute(
+                    "UPDATE photos SET proxy_path=?, thumb_path=? WHERE id=?",
+                    (proxy_path, proxy_path, photo_id),
+                )
+                conn.commit()
             finally:
                 conn.close()
 

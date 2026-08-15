@@ -21,8 +21,10 @@ const { enhanceSelect, setSelectValue, showToast, showLoading, hideLoading, conf
 
 async function api(url, options = {}) {
   const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: options.body
+      ? { "Content-Type": "application/json", ...(options.headers || {}) }
+      : options.headers,
   });
   if (!resp.ok) {
     let detail = "";

@@ -92,6 +92,37 @@ class DatabaseTests(unittest.TestCase):
             ["c.jpg"],
         )
 
+    def test_cache_paths_are_scoped_and_persistable(self) -> None:
+        folder_a = os.path.join(self.tmp.name, "a")
+        folder_b = os.path.join(self.tmp.name, "b")
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(folder_a, "1.jpg"),
+                "folder": folder_a,
+                "filename": "1.jpg",
+                "proxy_path": os.path.join(folder_a, ".cache", "1_proxy.jpg"),
+                "thumb_path": os.path.join(folder_a, ".cache", "1_proxy.jpg"),
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(folder_b, "2.jpg"),
+                "folder": folder_b,
+                "filename": "2.jpg",
+                "proxy_path": os.path.join(folder_b, ".cache", "2_proxy.jpg"),
+            }
+        )
+        self.assertEqual(len(self.db.cache_paths_for_folder(folder_a)), 1)
+        self.assertEqual(len(self.db.cache_paths_for_folder(folder_b)), 1)
+        photo_id = self.db.get_photo_by_path(os.path.join(folder_a, "1.jpg"))["id"]
+        self.db.update_cache_paths(
+            photo_id, os.path.join(folder_a, ".cache", "new.jpg")
+        )
+        paths = self.db.cache_paths_for_folder(folder_a)[0]
+        self.assertEqual(
+            paths["proxy_path"], os.path.join(folder_a, ".cache", "new.jpg")
+        )
+
     def test_parse_capture_datetime_variants(self) -> None:
         self.assertIsNotNone(parse_capture_datetime("2023:01:02 03:04:05"))
         self.assertIsNotNone(parse_capture_datetime("2023-01-02"))

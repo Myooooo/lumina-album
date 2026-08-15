@@ -631,6 +631,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     cache_dir=str(thumb_dir),
                     quality=cfg.proxy_quality,
                 )
+                database.update_cache_paths(photo_id, proxy_path)
                 return send_file(proxy_path, mimetype="image/jpeg", conditional=True)
             except (OSError, ValueError):
                 return jsonify({"error": "无法生成缩略图"}), 500
