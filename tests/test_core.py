@@ -157,6 +157,28 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(self.db.remove_folder(folder), 1)
         self.assertIsNone(self.db.get_photo(photo_id))
 
+    def test_all_folders_returns_most_recent_first(self) -> None:
+        for idx, folder in enumerate(["older", "newer"]):
+            path = os.path.join(self.tmp.name, folder, "1.jpg")
+            self.db.upsert_photo(
+                {
+                    "path": path,
+                    "folder": folder,
+                    "filename": "1.jpg",
+                    "status": "analyzed",
+                }
+            )
+        # Re-upserting newer refreshes created_at, making it first.
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.tmp.name, "newer", "1.jpg"),
+                "folder": os.path.join(self.tmp.name, "newer"),
+                "filename": "1.jpg",
+                "status": "analyzed",
+            }
+        )
+        self.assertEqual(self.db.all_folders()[0], os.path.join(self.tmp.name, "newer"))
+
     def test_parse_capture_datetime_variants(self) -> None:
         self.assertIsNotNone(parse_capture_datetime("2023:01:02 03:04:05"))
         self.assertIsNotNone(parse_capture_datetime("2023-01-02"))
@@ -284,6 +306,37 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_name["good.jpg"]["title"], "温柔的黄昏")
         self.assertEqual(by_name["bad.jpg"]["status"], "error")
         self.assertIn("无法读取", by_name["bad.jpg"]["error"])
+
+    def test_rebuild_index_refreshes_exif(self) -> None:
+        image_path = os.path.join(self.folder, "camera.jpg")
+        img = Image.new("RGB", (40, 40))
+        exif = Image.Exif()
+        exif[271] = "Canon"
+        exif[272] = "EOS R"
+        exif[33437] = (28, 10)
+        exif[33434] = (1, 125)
+        exif[34855] = 100
+        exif[37386] = (50, 1)
+        img.save(image_path, exif=exif)
+        self.db.upsert_photo(
+            {
+                "path": image_path,
+                "folder": self.folder,
+                "filename": "camera.jpg",
+                "status": "analyzed",
+                "score": 5,
+                "exif": {},
+            }
+        )
+        from photo_reviewer.scanner import start_rebuild_index
+
+        job = start_rebuild_index(self.folder, self.db, self.cfg)
+        wait_for_job(job.id)
+        row = self.db.get_photo_by_path(image_path)
+        self.assertEqual(row["exif"]["fnumber"], 2.8)
+        self.assertEqual(row["exif"]["exposure"], "1/125s")
+        self.assertEqual(row["exif"]["iso"], 100)
+        self.assertEqual(row["exif"]["focal_length"], "50mm")
 
 
 class ServerApiTests(unittest.TestCase):

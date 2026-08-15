@@ -14,6 +14,7 @@ from pathlib import Path
 from .cache import cleanup_folder_cache, load_scan_results_from_cache
 from .config import Config
 from .db import Database
+from .exif import extract_exif
 from .pipeline import (
     analyze_prepared,
     base_record,
@@ -205,13 +206,27 @@ def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> 
         return False
 
 
-def _index_one(image_path: str, folder: str, db: Database, config: Config) -> bool:
+def _index_one(
+    image_path: str,
+    folder: str,
+    db: Database,
+    config: Config,
+    refresh_exif: bool = False,
+) -> bool:
     """Generate one proxy and upsert its index row."""
     try:
         prepared = prepare_proxy(image_path, folder, config)
+        if refresh_exif:
+            location, exif = extract_exif(image_path)
+            prepared.location = location
+            prepared.exif = exif or {}
         existing = db.get_photo_by_path(prepared.image_path)
         status = existing.get("status") if existing else "pending"
-        db.upsert_photo(base_record(prepared, existing=existing, status=status))
+        record = base_record(prepared, existing=existing, status=status)
+        if refresh_exif:
+            record["location"] = prepared.location
+            record["exif"] = prepared.exif
+        db.upsert_photo(record)
         return True
     except Exception as exc:  # noqa: BLE001
         _record_photo_error(image_path, folder, db, exc)
@@ -219,7 +234,12 @@ def _index_one(image_path: str, folder: str, db: Database, config: Config) -> bo
 
 
 def _run_index_phase(
-    job_id: str, images: list[str], folder: str, db: Database, config: Config
+    job_id: str,
+    images: list[str],
+    folder: str,
+    db: Database,
+    config: Config,
+    refresh_exif: bool = False,
 ) -> bool:
     """Build proxies for a list of images with bounded concurrency."""
     JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
@@ -228,7 +248,9 @@ def _run_index_phase(
         max_workers=workers, thread_name_prefix="lumina-index"
     ) as executor:
         futures = {
-            executor.submit(_index_one, image_path, folder, db, config): image_path
+            executor.submit(
+                _index_one, image_path, folder, db, config, refresh_exif
+            ): image_path
             for image_path in images
         }
         for processed, future in enumerate(as_completed(futures), start=1):
@@ -361,7 +383,7 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                     "could not remove stale photo row for %s", path, exc_info=True
                 )
 
-        if not _run_index_phase(job_id, images, folder, db, config):
+        if not _run_index_phase(job_id, images, folder, db, config, refresh_exif=True):
             return
         if not JOBS.get(job_id).cancelled:
             try:

@@ -844,11 +844,18 @@ class Database:
         return sorted(years, reverse=True)
 
     def all_folders(self) -> list[str]:
+        """Return indexed folders, most recently active first."""
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    "SELECT DISTINCT folder FROM photos WHERE folder IS NOT NULL AND folder != ''"
+                    """
+                    SELECT folder
+                    FROM photos
+                    WHERE folder IS NOT NULL AND folder != ''
+                    GROUP BY folder
+                    ORDER BY MAX(created_at) DESC
+                    """
                 ).fetchall()
                 return [r["folder"] for r in rows]
             finally:

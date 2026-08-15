@@ -22,6 +22,20 @@ def _decimal_from_dms(dms, ref) -> float | None:
     return value
 
 
+def _rational_float(value) -> float | None:
+    """Convert a PIL/EXIF rational (tuple, float or int) to a float."""
+    if isinstance(value, tuple) and len(value) == 2:
+        try:
+            num, den = float(value[0]), float(value[1])
+            return num / den if den else None
+        except (TypeError, ValueError):
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
     """Return (location_string, exif_dict) from a photo file."""
     location = None
@@ -62,9 +76,10 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
                 except (TypeError, ValueError):
                     exif_data["exposure"] = str(exposure)
             if fnumber:
-                try:
-                    exif_data["fnumber"] = round(float(fnumber), 1)
-                except (TypeError, ValueError):
+                fnumber_value = _rational_float(fnumber)
+                if fnumber_value is not None:
+                    exif_data["fnumber"] = round(fnumber_value, 1)
+                else:
                     exif_data["fnumber"] = str(fnumber)
             if iso:
                 try:
@@ -72,10 +87,12 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
                 except (TypeError, ValueError):
                     exif_data["iso"] = str(iso)
             if focal:
-                try:
-                    exif_data["focal_length"] = str(focal).replace("/1", "") + "mm"
-                except (TypeError, ValueError, AttributeError):
-                    exif_data["focal_length"] = str(focal)
+                focal_value = _rational_float(focal)
+                if focal_value is not None:
+                    focal_text = f"{focal_value:g}"
+                else:
+                    focal_text = str(focal).replace("/1", "")
+                exif_data["focal_length"] = f"{focal_text}mm"
 
             try:
                 gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)

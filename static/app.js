@@ -3,6 +3,14 @@
 
 const state = {
   folder: localStorage.getItem("photoFolder") || "",
+  folderHistory: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("photoFolderHistory") || "[]");
+      return Array.isArray(saved) ? saved.filter((x) => typeof x === "string") : [];
+    } catch (e) {
+      return [];
+    }
+  })(),
   photos: [],
   selected: new Set(),
   currentDirPath: "",
@@ -37,6 +45,59 @@ async function api(url, options = {}) {
     throw new Error(detail || `HTTP ${resp.status}`);
   }
   return resp.json();
+}
+
+function folderPathKey(path) {
+  return String(path || "").replace(/[\/]+$/, "").toLowerCase();
+}
+
+function rememberFolder(folder) {
+  const clean = String(folder || "").trim();
+  if (!clean) return;
+  state.folderHistory = [
+    clean,
+    ...state.folderHistory.filter((item) => folderPathKey(item) !== folderPathKey(clean)),
+  ].slice(0, 20);
+  try {
+    localStorage.setItem("photoFolderHistory", JSON.stringify(state.folderHistory));
+  } catch (e) {
+    // localStorage may be unavailable; memory history still works.
+  }
+}
+
+async function selectBestFolder() {
+  let folders = [];
+  try {
+    const data = await api("/api/folders");
+    folders = data.folders || [];
+  } catch (e) {
+    folders = [];
+  }
+  const candidates = [state.folder, ...state.folderHistory].filter(Boolean);
+  const chosen =
+    candidates.find((candidate) =>
+      folders.some((folder) => folderPathKey(folder) === folderPathKey(candidate))
+    ) ||
+    folders[0] ||
+    "";
+  if (chosen) rememberFolder(chosen);
+  return chosen;
+}
+
+async function loadInitialFolder() {
+  state.folder = await selectBestFolder();
+  localStorage.setItem("photoFolder", state.folder);
+  $("folderInput").value = state.folder;
+  if (state.folder) {
+    await loadPhotos();
+  } else {
+    state.photos = [];
+    renderGallery();
+    updateSelectionBar();
+    loadStats();
+    loadTags();
+    loadYears();
+  }
 }
 
 function updateActiveStat() {
@@ -462,6 +523,7 @@ async function startScan() {
     return;
   }
   state.folder = folder;
+  rememberFolder(folder);
   localStorage.setItem("photoFolder", folder);
   const force = $("forceScan").checked;
   try {
@@ -484,6 +546,7 @@ async function startRebuildIndex() {
     return;
   }
   state.folder = folder;
+  rememberFolder(folder);
   localStorage.setItem("photoFolder", folder);
   try {
     const data = await api("/api/rebuild-index", {
@@ -663,17 +726,25 @@ function preloadImage(url) {
   });
 }
 
+function visiblePhotoOrder() {
+  return [...document.querySelectorAll(".polaroid-card")]
+    .map((card) => Number(card.dataset.id))
+    .filter((id) => Number.isFinite(id));
+}
+
 async function navigatePreview(delta) {
-  if (!state.photos.length) return;
-  const idx = state.photos.findIndex((p) => p.id === state.currentPreviewId);
+  // Use the currently rendered gallery order so prev/next always follows the
+  // active filters and sort, even if the list was refreshed behind the modal.
+  const order = visiblePhotoOrder();
+  if (!order.length) return;
+  const idx = order.indexOf(state.currentPreviewId);
   if (idx < 0) return;
-  const nextIdx = (idx + delta + state.photos.length) % state.photos.length;
-  const nextPhoto = state.photos[nextIdx];
+  const nextId = order[(idx + delta + order.length) % order.length];
   const token = ++state.previewNavToken;
-  const url = `/api/original/${nextPhoto.id}`;
+  const url = `/api/original/${nextId}`;
   await preloadImage(url);
   if (token !== state.previewNavToken) return;
-  state.currentPreviewId = nextPhoto.id;
+  state.currentPreviewId = nextId;
   const img = $("previewImage");
   const animClass = delta < 0 ? "preview-switch-left" : "preview-switch-right";
   img.classList.remove("preview-switch-left", "preview-switch-right");
@@ -698,6 +769,7 @@ async function toggleFolderHistory() {
       panel.querySelectorAll(".folder-history-item").forEach((el) => {
         el.addEventListener("click", () => {
           state.folder = el.dataset.path;
+          rememberFolder(state.folder);
           localStorage.setItem("photoFolder", state.folder);
           $("folderInput").value = state.folder;
           panel.classList.add("hidden");
@@ -980,14 +1052,15 @@ async function removeCurrentFolder() {
     state.selected.clear();
     state.photoSignature = "";
     localStorage.removeItem("photoFolder");
-    $("folderInput").value = "";
-    renderGallery();
-    updateSelectionBar();
+    state.folder = await selectBestFolder();
+    localStorage.setItem("photoFolder", state.folder);
+    $("folderInput").value = state.folder;
+    await loadPhotos();
     updateTrashActions();
-    loadStats();
-    loadTags();
-    loadYears();
-    showToast(`已移除 ${data.removed || 0} 条照片记录和缓存，原图未做任何改动。`, "success");
+    const fallback = state.folder
+      ? `已自动回到上一个有效目录：${state.folder}`
+      : "当前没有其他已索引目录，已留空。";
+    showToast(`已移除 ${data.removed || 0} 条照片记录和缓存，原图未做任何改动。${fallback}`, "success");
   } catch (e) {
     showToast("移除当前目录失败：" + e.message, "error");
   }
@@ -1090,6 +1163,7 @@ function init() {
     const val = $("folderInput").value.trim();
     if (val) {
       state.folder = val;
+      rememberFolder(val);
       localStorage.setItem("photoFolder", val);
       loadPhotos();
     }
@@ -1164,6 +1238,7 @@ function init() {
   $("dirChooseBtn").addEventListener("click", () => {
     if (state.currentDirPath) {
       state.folder = state.currentDirPath;
+      rememberFolder(state.folder);
       localStorage.setItem("photoFolder", state.folder);
       $("folderInput").value = state.folder;
       closeModal("dirModal");
@@ -1213,11 +1288,7 @@ function init() {
     el.addEventListener("click", () => applyStatFilter(el.dataset.filter));
   });
 
-  if (state.folder) {
-    loadPhotos();
-  } else {
-    loadStats();
-  }
+  loadInitialFolder();
 }
 
 document.addEventListener("DOMContentLoaded", init);
