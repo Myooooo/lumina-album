@@ -758,12 +758,31 @@ async function restorePhotos(ids) {
 async function reanalyze(id) {
   showLoading("重新解读这张照片…");
   try {
-    await api("/api/reanalyze", {
+    const updated = await api("/api/reanalyze", {
       method: "POST",
       body: JSON.stringify({ id }),
     });
+
+    // Patch the current card immediately so the latest title/score/tags are
+    // visible even before the next list refresh completes.
+    const idx = state.photos.findIndex((p) => p.id === id);
+    if (idx >= 0 && updated) {
+      state.photos[idx] = updated;
+      renderGallery({ animate: false });
+    }
+
     await loadPhotos();
-    if (state.currentPreviewId === id) updatePreview();
+    const stillVisible = state.photos.some((p) => p.id === id);
+    if (state.currentPreviewId === id) {
+      if (stillVisible) {
+        updatePreview({ skipImage: true });
+      } else {
+        closeModal("previewModal");
+      }
+    }
+    if ($("statusFilter").value === "pending" && !stillVisible) {
+      showToast("重新解读完成，照片已移入已收录。", "success");
+    }
   } catch (e) {
     showToast("重新解读失败：" + e.message, "error");
   } finally {

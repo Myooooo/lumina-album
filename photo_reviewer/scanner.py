@@ -298,9 +298,16 @@ def _run_index_phase(
     config: Config,
     refresh_exif: bool = False,
     resolve_location: bool = False,
+    processed_offset: int = 0,
 ) -> bool:
     """Build proxies for a list of images with bounded concurrency."""
-    JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
+    JOBS.update(
+        job_id,
+        phase="index",
+        total=processed_offset + len(images),
+        processed=processed_offset,
+        current="",
+    )
     workers = max(1, min(32, int(config.index_concurrency or 4)))
     with ThreadPoolExecutor(
         max_workers=workers, thread_name_prefix="lumina-index"
@@ -319,7 +326,9 @@ def _run_index_phase(
         }
         for processed, future in enumerate(as_completed(futures), start=1):
             image_path = futures[future]
-            JOBS.update(job_id, processed=processed, current=image_path)
+            JOBS.update(
+                job_id, processed=processed_offset + processed, current=image_path
+            )
             job = JOBS.get(job_id)
             if not job or job.cancelled:
                 JOBS.update(job_id, status="cancelled")
@@ -446,9 +455,17 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
         active_paths = set(db.paths_for_folder(folder))
         removed = active_paths - current_set
         added = [image_path for image_path in images if image_path not in active_paths]
+        total_work = len(removed) + len(added)
+        JOBS.update(
+            job_id,
+            phase="index",
+            total=max(1, total_work),
+            processed=0,
+            current="",
+        )
 
         # Deleted files: remove their DB row and their proxy cache immediately.
-        for path in removed:
+        for processed, path in enumerate(removed, start=1):
             try:
                 row = db.get_photo_by_path(path)
                 if row:
@@ -464,19 +481,28 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                 logger.warning(
                     "could not remove stale photo row for %s", path, exc_info=True
                 )
+            JOBS.update(job_id, processed=processed, current=path)
 
         # Already indexed photos are skipped: only newly discovered files are
         # indexed here (proxy + EXIF), without touching existing results.
-        if not _run_index_phase(
-            job_id,
-            added,
-            folder,
-            db,
-            config,
-            refresh_exif=True,
-            resolve_location=True,
-        ):
-            return
+        if added:
+            if not _run_index_phase(
+                job_id,
+                added,
+                folder,
+                db,
+                config,
+                refresh_exif=True,
+                resolve_location=True,
+                processed_offset=len(removed),
+            ):
+                return
+        else:
+            JOBS.update(
+                job_id,
+                processed=max(1, total_work),
+                current="没有需要更新的照片",
+            )
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)

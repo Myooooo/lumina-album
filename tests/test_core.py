@@ -513,6 +513,26 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(new_row["exif"]["iso"], 100)
         self.assertEqual(new_row["exif"]["focal_length"], "50mm")
 
+    def test_rebuild_without_changes_has_nonzero_progress(self) -> None:
+        image_path = os.path.join(self.folder, "existing.jpg")
+        Image.new("RGB", (40, 40)).save(image_path)
+        self.db.upsert_photo(
+            {
+                "path": image_path,
+                "folder": self.folder,
+                "filename": "existing.jpg",
+                "status": "analyzed",
+                "score": 5,
+            }
+        )
+        from photo_reviewer.scanner import start_rebuild_index
+
+        job = start_rebuild_index(self.folder, self.db, self.cfg)
+        result = wait_for_job(job.id)
+        self.assertEqual(result.status, "completed")
+        self.assertGreaterEqual(result.total, 1)
+        self.assertGreaterEqual(result.processed, 1)
+
     def test_initial_scan_resolves_location_once_during_indexing(self) -> None:
         image_path = os.path.join(self.folder, "gps.jpg")
         Image.new("RGB", (40, 40)).save(image_path)
