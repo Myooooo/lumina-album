@@ -29,6 +29,7 @@ PERSISTED_FIELDS = (
     "proxy_max_edge",
     "proxy_quality",
     "scan_concurrency",
+    "index_concurrency",
     "request_timeout",
     "model_retries",
     "trash_dir_name",
@@ -65,6 +66,7 @@ class Config:
 
     # Scanning.
     scan_concurrency: int = int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
+    index_concurrency: int = int(os.getenv("PHOTO_INDEX_CONCURRENCY", "4"))
     request_timeout: int = int(os.getenv("PHOTO_REQUEST_TIMEOUT", "120"))
     model_retries: int = int(os.getenv("PHOTO_MODEL_RETRIES", "2"))
     # Storage.
@@ -130,6 +132,7 @@ class Config:
                     "proxy_max_edge",
                     "proxy_quality",
                     "scan_concurrency",
+                    "index_concurrency",
                     "request_timeout",
                     "model_retries",
                     "port",
@@ -156,6 +159,7 @@ class Config:
             "system_prompt": self.system_prompt,
             "proxy_max_edge": self.proxy_max_edge,
             "scan_concurrency": self.scan_concurrency,
+            "index_concurrency": self.index_concurrency,
             "request_timeout": self.request_timeout,
             "model_retries": self.model_retries,
             "data_dir": self.data_dir,

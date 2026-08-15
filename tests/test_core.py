@@ -123,6 +123,37 @@ class DatabaseTests(unittest.TestCase):
             paths["proxy_path"], os.path.join(folder_a, ".cache", "new.jpg")
         )
 
+    def test_edit_metadata_and_remove_folder(self) -> None:
+        folder = os.path.join(self.tmp.name, "pics")
+        photo_path = os.path.join(folder, "1.jpg")
+        self.db.upsert_photo(
+            {
+                "path": photo_path,
+                "folder": folder,
+                "filename": "1.jpg",
+                "status": "analyzed",
+                "score": 5.0,
+                "dimensions": {"technical": 5},
+                "tags": ["旧"],
+                "reason": "旧评语",
+            }
+        )
+        photo_id = self.db.get_photo_by_path(photo_path)["id"]
+        self.db.update_metadata(
+            photo_id,
+            9.5,
+            {"technical": 9, "composition": 8, "memory": 7, "uniqueness": 6},
+            ["新标签", "风景"],
+            "新评语",
+            "杭州",
+        )
+        photo = self.db.get_photo(photo_id)
+        self.assertEqual(photo["score"], 9.5)
+        self.assertEqual(photo["dimensions"]["memory"], 7)
+        self.assertEqual(photo["tags"], ["新标签", "风景"])
+        self.assertEqual(self.db.remove_folder(folder), 1)
+        self.assertIsNone(self.db.get_photo(photo_id))
+
     def test_parse_capture_datetime_variants(self) -> None:
         self.assertIsNotNone(parse_capture_datetime("2023:01:02 03:04:05"))
         self.assertIsNotNone(parse_capture_datetime("2023-01-02"))
@@ -196,6 +227,35 @@ class ScannerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def test_index_phase_uses_configured_concurrency(self) -> None:
+        self.cfg.index_concurrency = 2
+        for idx in range(4):
+            Image.new("RGB", (32, 32)).save(os.path.join(self.folder, f"{idx}.jpg"))
+        active = [0]
+        peak = [0]
+        original_prepare_proxy = None
+        from photo_reviewer import scanner as scanner_module
+
+        original_prepare_proxy = scanner_module.prepare_proxy
+
+        def slow_prepare(image_path, folder, config):
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+            time.sleep(0.08)
+            try:
+                return original_prepare_proxy(image_path, folder, config)
+            finally:
+                active[0] -= 1
+
+        with (
+            patch("photo_reviewer.scanner.prepare_proxy", side_effect=slow_prepare),
+            patch("photo_reviewer.scanner.analyze_prepared", side_effect=fake_analysis),
+        ):
+            job = start_scan(self.folder, self.db, self.cfg)
+            result = wait_for_job(job.id)
+        self.assertEqual(result.status, "completed")
+        self.assertGreaterEqual(peak[0], 2)
+
     def test_scan_analyzes_images_and_marks_corrupt_files(self) -> None:
         Image.new("RGB", (64, 64), (180, 120, 80)).save(
             os.path.join(self.folder, "good.jpg")
@@ -259,6 +319,59 @@ class ServerApiTests(unittest.TestCase):
         data = resp.get_json()
         self.assertEqual([p["filename"] for p in data["photos"]], ["a.jpg"])
         self.assertTrue(data["warning"])
+
+    def test_edit_endpoint_updates_metadata(self) -> None:
+        photo_id = self.db.get_photo_by_path(os.path.join(self.folder, "a.jpg"))["id"]
+        resp = self.client.post(
+            f"/api/photo/{photo_id}/edit",
+            json={
+                "score": 9.2,
+                "dimensions": {
+                    "technical": 9,
+                    "composition": 8,
+                    "memory": 9,
+                    "uniqueness": 7,
+                },
+                "tags": ["夏日", "海边"],
+                "reason": "新的回忆",
+                "location": "青岛",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertEqual(data["score"], 9.2)
+        self.assertEqual(data["tags"], ["夏日", "海边"])
+        self.assertEqual(data["location"], "青岛")
+
+    def test_remove_folder_clears_cache_but_keeps_photos(self) -> None:
+        photo_path = os.path.join(self.folder, "a.jpg")
+        Path(photo_path).write_bytes(b"original")
+        cache_dir = Path(self.folder) / self.cfg.cache_dir_name
+        cache_dir.mkdir()
+        (cache_dir / "dummy_proxy.jpg").write_bytes(b"cache")
+        resp = self.client.post("/api/folder/remove", json={"folder": self.folder})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["removed"], 1)
+        self.assertFalse(cache_dir.exists())
+        self.assertTrue(Path(photo_path).exists())
+        self.assertEqual(self.db.stats(self.folder)["total"], 0)
+
+    def test_empty_trash_deletes_files_and_rows(self) -> None:
+        photo_path = os.path.join(self.folder, "a.jpg")
+        Path(photo_path).write_bytes(b"original")
+        trash_dir = Path(self.folder) / self.cfg.trash_dir_name
+        trash_dir.mkdir()
+        trash_path = trash_dir / "a.jpg"
+        trash_path.write_bytes(b"trash-file")
+        photo_id = self.db.get_photo_by_path(photo_path)["id"]
+        os.remove(photo_path)  # mimic _move_to_trash: original path is now empty
+        self.db.mark_deleted([photo_id], {photo_id: str(trash_path)})
+        resp = self.client.post("/api/trash/empty", json={"folder": self.folder})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["deleted"], 1)
+        self.assertFalse(trash_path.exists())
+        self.assertIsNone(self.db.get_photo(photo_id))
+        # The original path was already moved away before this test.
 
     def test_invalid_ids_return_400(self) -> None:
         self.assertEqual(

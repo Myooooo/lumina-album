@@ -17,7 +17,12 @@ from typing import Any
 from flask import Flask, jsonify, request, send_file
 
 from .api_client import SYSTEM_PROMPT, SemanticSearchError, semantic_search
-from .cache import cleanup_folder_cache, ensure_cache_dirs, load_scan_results_from_cache
+from .cache import (
+    cache_dir_for_folder,
+    cleanup_folder_cache,
+    ensure_cache_dirs,
+    load_scan_results_from_cache,
+)
 from .config import PERSISTED_FIELDS, Config
 from .db import Database, sort_photos
 from .exif import extract_exif
@@ -291,6 +296,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     setattr(cfg, key, max(minimum, int(data[key])))
                 except (TypeError, ValueError):
                     return jsonify({"error": f"{key} 参数不合法"}), 400
+        if "index_concurrency" in data:
+            try:
+                cfg.index_concurrency = max(1, min(32, int(data["index_concurrency"])))
+            except (TypeError, ValueError):
+                return jsonify({"error": "index_concurrency 参数不合法"}), 400
         if "geocoding_provider" in data:
             cfg.geocoding_provider = (
                 str(data["geocoding_provider"]).strip() or "nominatim"
@@ -768,6 +778,105 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", folder, exc_info=True)
         return jsonify({"purged": purged, "errors": errors})
+
+    @app.post("/api/folder/remove")
+    def api_folder_remove():
+        data = request.get_json(force=True, silent=True) or {}
+        folder = data.get("folder", "").strip()
+        if not folder:
+            return jsonify({"error": "请提供文件夹路径"}), 400
+        folder = os.path.abspath(os.path.expanduser(folder))
+        for existing in JOBS.list():
+            if existing.folder == folder and existing.status == "running":
+                return jsonify({"error": "该文件夹正在整理中，请稍后再试"}), 409
+        removed = database.remove_folder(folder)
+        cache_dir = cache_dir_for_folder(folder, cfg.cache_dir_name)
+        cache_removed = False
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir, ignore_errors=True)
+            cache_removed = not cache_dir.exists()
+        return jsonify({"removed": removed, "cache_removed": cache_removed})
+
+    @app.post("/api/photo/<int:photo_id>/edit")
+    def api_photo_edit(photo_id: int):
+        photo = database.get_photo(photo_id)
+        if not photo:
+            return jsonify({"error": "照片不存在"}), 404
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            score = float(data.get("score", photo.get("score") or 0.0))
+            score = max(0.0, min(10.0, score))
+        except (TypeError, ValueError):
+            return jsonify({"error": "总分不合法"}), 400
+        dimensions = dict(photo.get("dimensions") or {})
+        raw_dimensions = data.get("dimensions") or {}
+        if isinstance(raw_dimensions, dict):
+            for key in ("technical", "composition", "memory", "uniqueness"):
+                if key in raw_dimensions:
+                    try:
+                        dimensions[key] = max(
+                            0.0, min(10.0, float(raw_dimensions[key]))
+                        )
+                    except (TypeError, ValueError):
+                        return jsonify({"error": f"{key} 评分不合法"}), 400
+        tags = data.get("tags", photo.get("tags") or [])
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.replace("，", ",").split(",") if t.strip()]
+        if not isinstance(tags, list):
+            return jsonify({"error": "标签不合法"}), 400
+        tags = [str(t).strip() for t in tags if str(t).strip()][:20]
+        reason = str(data.get("reason", photo.get("reason") or "")).strip()
+        location_value = data.get("location", photo.get("location") or "")
+        location = str(location_value).strip() if location_value else None
+        database.update_metadata(photo_id, score, dimensions, tags, reason, location)
+        updated = database.get_photo(photo_id)
+        return jsonify(_photo_payload(updated))
+
+    @app.post("/api/trash/empty")
+    def api_trash_empty():
+        data = request.get_json(force=True, silent=True) or {}
+        folder = data.get("folder", "").strip() or None
+        if folder:
+            folder = os.path.abspath(os.path.expanduser(folder))
+        photos = database.list_photos(
+            folder=folder,
+            status="deleted",
+            exclude_deleted=False,
+            sort="filename",
+            limit=100000,
+        )
+        deleted = 0
+        errors = []
+        touched_folders = set()
+        for photo in photos:
+            candidates = []
+            if photo.get("path"):
+                candidates.append(photo["path"])
+            original = photo.get("original_path")
+            if original and original not in candidates:
+                candidates.append(original)
+            for candidate in candidates:
+                if candidate and os.path.exists(candidate):
+                    try:
+                        os.remove(candidate)
+                    except OSError as exc:
+                        errors.append(
+                            {"id": photo["id"], "error": f"删除文件失败: {exc}"}
+                        )
+                        break
+            else:
+                _remove_photo_cache(photo)
+                database.delete_rows([photo["id"]])
+                deleted += 1
+                touched_folders.add(
+                    photo.get("folder") or os.path.dirname(photo.get("path") or "")
+                )
+        for touched in touched_folders:
+            try:
+                cleanup_folder_cache(touched, database, cfg.cache_dir_name)
+            except (OSError, sqlite3.Error):
+                logger.warning("cache cleanup failed for %s", touched, exc_info=True)
+        return jsonify({"deleted": deleted, "errors": errors})
 
     @app.post("/api/cache/clean")
     def api_cache_clean():

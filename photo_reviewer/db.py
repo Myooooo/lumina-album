@@ -277,7 +277,7 @@ class Database:
                 row = conn.execute(
                     "SELECT * FROM photos WHERE id=?", (photo_id,)
                 ).fetchone()
-                return dict(row) if row else None
+                return self._row_to_dict(row) if row else None
             finally:
                 conn.close()
 
@@ -288,7 +288,7 @@ class Database:
                 row = conn.execute(
                     "SELECT * FROM photos WHERE path=?", (path,)
                 ).fetchone()
-                return dict(row) if row else None
+                return self._row_to_dict(row) if row else None
             finally:
                 conn.close()
 
@@ -506,6 +506,51 @@ class Database:
                     ),
                 )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def update_metadata(
+        self,
+        photo_id: int,
+        score: float,
+        dimensions: dict[str, float],
+        tags: list[str],
+        reason: str,
+        location: str | None,
+    ) -> None:
+        """Update user-editable analysis metadata without touching the file."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    UPDATE photos SET
+                        score=?, dimensions=?, tags=?, reason=?, location=?,
+                        analyzed_at=?
+                    WHERE id=?
+                    """,
+                    (
+                        score,
+                        json.dumps(dimensions, ensure_ascii=False),
+                        json.dumps(tags, ensure_ascii=False),
+                        reason,
+                        location,
+                        utc_now(),
+                        photo_id,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def remove_folder(self, folder: str) -> int:
+        """Delete every database row that belongs to one photo folder."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute("DELETE FROM photos WHERE folder=?", (folder,))
+                conn.commit()
+                return max(0, cursor.rowcount)
             finally:
                 conn.close()
 

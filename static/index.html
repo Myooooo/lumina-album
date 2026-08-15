@@ -35,6 +35,9 @@
     <div class="stat clickable-stat" data-filter="favorite"><span class="stat-num" id="statFavorite">0</span><span class="stat-label">已珍藏</span></div>
     <div class="stat clickable-stat" data-filter="pending"><span class="stat-num" id="statPending">0</span><span class="stat-label">待整理</span></div>
     <div class="stat clickable-stat" data-filter="deleted"><span class="stat-num" id="statDeleted">0</span><span class="stat-label">已收起</span></div>
+    <div class="stats-actions hidden" id="trashActions">
+      <button id="emptyTrashBtn" class="btn danger">清空回收站</button>
+    </div>
   </section>
 
   <section class="filters">
@@ -130,6 +133,7 @@
         <button id="previewDeleteBtn" class="btn danger" title="暂时收起"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
         <button id="previewRestoreBtn" class="btn" title="恢复"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
         <button id="previewPermanentDeleteBtn" class="btn danger" title="彻底移除"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button id="previewEditBtn" class="btn" title="编辑回忆信息"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>
         <button id="previewReanalyzeBtn" class="btn" title="重新解读"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
         <button id="previewFavoriteBtn" class="btn" title="珍藏"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
       </div>
@@ -181,6 +185,9 @@
         <label>请求超时（秒）
           <input id="setTimeout" type="number" min="5" />
         </label>
+        <label>索引线程数
+          <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
+        </label>
         <label>地理编码服务
           <select id="setGeocodingProvider">
             <option value="nominatim">Nominatim（免费，无需 Key）</option>
@@ -192,8 +199,47 @@
         </label>
       </div>
       <div class="modal-actions">
+        <button id="removeFolderBtn" class="btn danger remove-folder-btn">移除当前目录</button>
         <button id="cleanCacheBtn" class="btn">清理缓存</button>
         <button id="saveSettingsBtn" class="btn primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit app-generated metadata modal -->
+  <div id="editModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" data-close="editModal"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <h2>编辑这段回忆</h2>
+      <div class="form-grid edit-grid">
+        <label>总分
+          <input id="editScore" type="number" min="0" max="10" step="0.1" />
+        </label>
+        <label>技术
+          <input id="editTechnical" type="number" min="0" max="10" step="0.1" />
+        </label>
+        <label>构图
+          <input id="editComposition" type="number" min="0" max="10" step="0.1" />
+        </label>
+        <label>回忆
+          <input id="editMemory" type="number" min="0" max="10" step="0.1" />
+        </label>
+        <label>独特
+          <input id="editUniqueness" type="number" min="0" max="10" step="0.1" />
+        </label>
+        <label>地点
+          <input id="editLocation" type="text" placeholder="例如：杭州，西湖边" />
+        </label>
+        <label class="full-row">标签
+          <input id="editTags" type="text" placeholder="用逗号分隔，例如：风景，旅行，黄昏" />
+        </label>
+        <label class="full-row">简评
+          <textarea id="editReason" rows="3" placeholder="为这段回忆写一句温柔的话"></textarea>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="editCancelBtn" class="btn">取消</button>
+        <button id="editSaveBtn" class="btn primary">保存</button>
       </div>
     </div>
   </div>

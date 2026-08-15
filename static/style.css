@@ -170,6 +170,15 @@ body {
   transition: transform .2s;
 }
 .stat:hover { transform: translateY(-2px); }
+.stats-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+.stats-actions .btn.danger {
+  background: linear-gradient(135deg, #d98787, #bc5b5b);
+  box-shadow: 0 6px 16px rgba(160, 60, 50, 0.18);
+}
 .stat-num { display: block; font-size: 24px; font-weight: 700; color: #6b4e3a; }
 .stat-label { color: var(--muted); font-size: 12px; letter-spacing: .5px; }
 
@@ -521,7 +530,9 @@ body {
 }
 .form-grid .checkbox { flex-direction: row; align-items: center; gap: 8px; }
 .form-grid .full-row { grid-column: 1 / -1; }
+.edit-grid { max-width: 760px; }
 .modal-actions { text-align: right; margin-top: 16px; display: flex; gap: 10px; justify-content: flex-end; }
+.remove-folder-btn { margin-right: auto; }
 
 /* ---------- Animations ---------- */
 @keyframes fadeSlideIn {

@@ -205,6 +205,44 @@ def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> 
         return False
 
 
+def _index_one(image_path: str, folder: str, db: Database, config: Config) -> bool:
+    """Generate one proxy and upsert its index row."""
+    try:
+        prepared = prepare_proxy(image_path, folder, config)
+        existing = db.get_photo_by_path(prepared.image_path)
+        status = existing.get("status") if existing else "pending"
+        db.upsert_photo(base_record(prepared, existing=existing, status=status))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _record_photo_error(image_path, folder, db, exc)
+        return False
+
+
+def _run_index_phase(
+    job_id: str, images: list[str], folder: str, db: Database, config: Config
+) -> bool:
+    """Build proxies for a list of images with bounded concurrency."""
+    JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
+    workers = max(1, min(32, int(config.index_concurrency or 4)))
+    with ThreadPoolExecutor(
+        max_workers=workers, thread_name_prefix="lumina-index"
+    ) as executor:
+        futures = {
+            executor.submit(_index_one, image_path, folder, db, config): image_path
+            for image_path in images
+        }
+        for processed, future in enumerate(as_completed(futures), start=1):
+            image_path = futures[future]
+            JOBS.update(job_id, processed=processed, current=image_path)
+            job = JOBS.get(job_id)
+            if not job or job.cancelled:
+                JOBS.update(job_id, status="cancelled")
+                for pending in futures:
+                    pending.cancel()
+                return False
+    return True
+
+
 def _scan_worker(
     job_id: str, folder: str, db: Database, config: Config, force: bool
 ) -> None:
@@ -232,29 +270,8 @@ def _scan_worker(
                 image_path for image_path in images if image_path not in active_paths
             ]
 
-        if to_index:
-            JOBS.update(
-                job_id, phase="index", total=len(to_index), processed=0, current=""
-            )
-            for idx, image_path in enumerate(to_index, start=1):
-                job = JOBS.get(job_id)
-                if not job or job.cancelled:
-                    JOBS.update(job_id, status="cancelled")
-                    return
-                JOBS.update(job_id, processed=idx, current=image_path)
-                try:
-                    prepared = prepare_proxy(image_path, folder, config)
-                    existing = db.get_photo_by_path(prepared.image_path)
-                    status = existing.get("status") if existing else "pending"
-                    db.upsert_photo(
-                        base_record(prepared, existing=existing, status=status)
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    _record_photo_error(image_path, folder, db, exc)
-
-            if JOBS.get(job_id).cancelled:
-                JOBS.update(job_id, status="cancelled")
-                return
+        if to_index and not _run_index_phase(job_id, to_index, folder, db, config):
+            return
 
         # Analyze pending photos, or every photo when the user forced a full
         # re-analysis. Corrupted files stay in the queue so they can be retried
@@ -344,20 +361,8 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                     "could not remove stale photo row for %s", path, exc_info=True
                 )
 
-        JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
-        for idx, image_path in enumerate(images, start=1):
-            job = JOBS.get(job_id)
-            if not job or job.cancelled:
-                JOBS.update(job_id, status="cancelled")
-                return
-            JOBS.update(job_id, processed=idx, current=image_path)
-            try:
-                prepared = prepare_proxy(image_path, folder, config)
-                existing = db.get_photo_by_path(prepared.image_path)
-                status = existing.get("status") if existing else "pending"
-                db.upsert_photo(base_record(prepared, existing=existing, status=status))
-            except Exception as exc:  # noqa: BLE001
-                _record_photo_error(image_path, folder, db, exc)
+        if not _run_index_phase(job_id, images, folder, db, config):
+            return
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)

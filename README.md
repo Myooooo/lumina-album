@@ -10,6 +10,9 @@
 - 首次扫描建立索引并生成代理图；后续扫描只分析尚未评分的照片
 - 支持“重新整理全部”强制重扫，以及“同步相册”同步文件夹中新增或删除的照片
 - 收藏、暂时收起、恢复、彻底移除；收起时默认只移动原图到 `.photo-trash/`
+- 详情页可编辑总分、各项评分、标签、地点和简评，不修改原文件
+- 回收站页面可一键清空当前回收站
+- 设置中可移除当前目录的数据库记录与代理缓存，原图不受影响
 - 筛选：最低分、标签、拍摄年份、搜索方式
 - 排序：总分、拍摄时间、文件名、分析时间、文件大小；没有拍摄时间的照片排在最后
 - 搜索：关键词、智能（关键词 + 语义）、语义三种模式
@@ -84,7 +87,8 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_MODEL` | `local-model` | 模型名称 |
 | `PHOTO_PROXY_MAX_EDGE` | `1024` | 代理图最大边长 |
 | `PHOTO_PROXY_QUALITY` | `85` | JPEG 代理图质量 |
-| `PHOTO_SCAN_CONCURRENCY` | `1` | 同时分析的照片数（本地模型较慢时保持 1） |
+| `PHOTO_SCAN_CONCURRENCY` | `1` | 同时调用模型分析的照片数 |
+| `PHOTO_INDEX_CONCURRENCY` | `4` | 建立索引/生成代理图时的最大线程数 |
 | `PHOTO_REQUEST_TIMEOUT` | `120` | 模型请求超时（秒） |
 | `PHOTO_MODEL_RETRIES` | `2` | 模型连接失败或 5xx 时的重试次数 |
 | `PHOTO_DATA_DIR` | `./data` | 数据库目录 |

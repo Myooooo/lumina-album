@@ -44,6 +44,11 @@ function updateActiveStat() {
   document.querySelectorAll(".clickable-stat").forEach((el) => {
     el.classList.toggle("active", el.dataset.filter === current);
   });
+  updateTrashActions();
+}
+
+function updateTrashActions() {
+  $("trashActions").classList.toggle("hidden", $("statusFilter").value !== "deleted");
 }
 
 function applyStatFilter(filter) {
@@ -847,6 +852,7 @@ async function openSettings() {
     $("setSystemPrompt").value = cfg.system_prompt || "";
     $("setMaxEdge").value = cfg.proxy_max_edge || 1024;
     $("setTimeout").value = cfg.request_timeout || 120;
+    $("setIndexThreads").value = cfg.index_concurrency || 4;
     $("setGeocodingProvider").value = cfg.geocoding_provider || "nominatim";
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
     $("settingsModal").classList.remove("hidden");
@@ -863,6 +869,7 @@ async function saveSettings() {
     system_prompt: $("setSystemPrompt").value,
     proxy_max_edge: parseInt($("setMaxEdge").value, 10) || 1024,
     request_timeout: parseInt($("setTimeout").value, 10) || 120,
+    index_concurrency: parseInt($("setIndexThreads").value, 10) || 4,
     geocoding_provider: $("setGeocodingProvider").value,
     geocoding_api_key: $("setGeocodingApiKey").value,
   };
@@ -885,6 +892,128 @@ async function cleanCache() {
     showToast(`缓存清理完成：释放 ${data.freed} 个缓存文件，${(data.freed_size / 1024 / 1024).toFixed(2)} MB，涉及 ${data.photos_affected || 0} 张照片`, "success");
   } catch (e) {
     showToast("清理缓存失败：" + e.message, "error");
+  }
+}
+
+function openEditPreview() {
+  const photo = state.photos.find((p) => p.id === state.currentPreviewId);
+  if (!photo) return;
+  const dims = photo.dimensions || {};
+  $("editScore").value = scoreText(photo.score);
+  $("editTechnical").value = dims.technical ?? 0;
+  $("editComposition").value = dims.composition ?? 0;
+  $("editMemory").value = dims.memory ?? 0;
+  $("editUniqueness").value = dims.uniqueness ?? 0;
+  $("editLocation").value = photo.location || "";
+  $("editTags").value = (photo.tags || []).join("，");
+  $("editReason").value = photo.reason || "";
+  $("editModal").classList.remove("hidden");
+}
+
+async function saveEditedPhoto() {
+  const id = state.currentPreviewId;
+  const photo = state.photos.find((p) => p.id === id);
+  if (!photo) return;
+  const score = parseFloat($("editScore").value);
+  if (Number.isNaN(score) || score < 0 || score > 10) {
+    showToast("总分需要在 0 到 10 之间", "error");
+    return;
+  }
+  const dimensions = {};
+  for (const key of ["technical", "composition", "memory", "uniqueness"]) {
+    const el = $("edit" + key[0].toUpperCase() + key.slice(1));
+    const value = parseFloat(el.value);
+    if (Number.isNaN(value) || value < 0 || value > 10) {
+      showToast("各项评分需要在 0 到 10 之间", "error");
+      return;
+    }
+    dimensions[key] = value;
+  }
+  const tags = $("editTags").value
+    .replace(/，/g, ",")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  try {
+    await api(`/api/photo/${id}/edit`, {
+      method: "POST",
+      body: JSON.stringify({
+        score,
+        dimensions,
+        tags,
+        reason: $("editReason").value.trim(),
+        location: $("editLocation").value.trim(),
+      }),
+    });
+    closeModal("editModal");
+    await loadPhotos();
+    if (state.currentPreviewId === id) updatePreview({ skipImage: true });
+    showToast("这段回忆已经更新。", "success");
+  } catch (e) {
+    showToast("保存失败：" + e.message, "error");
+  }
+}
+
+async function removeCurrentFolder() {
+  const folder = state.folder || $("folderInput").value.trim();
+  if (!folder) {
+    showToast("请先选择一个照片文件夹", "error");
+    return;
+  }
+  const ok = await confirmDialog(
+    "确定从拾光相册中移除当前目录吗？" + String.fromCharCode(10) + 
+    "只会清除数据库记录和该目录的代理缓存，不会改动任何照片原图。",
+    { title: "移除当前目录", confirmText: "移除目录", danger: true }
+  );
+  if (!ok) return;
+  try {
+    const data = await api("/api/folder/remove", {
+      method: "POST",
+      body: JSON.stringify({ folder }),
+    });
+    closeModal("settingsModal");
+    if (!$("previewModal").classList.contains("hidden")) closeModal("previewModal");
+    state.folder = "";
+    state.photos = [];
+    state.selected.clear();
+    state.photoSignature = "";
+    localStorage.removeItem("photoFolder");
+    $("folderInput").value = "";
+    renderGallery();
+    updateSelectionBar();
+    updateTrashActions();
+    loadStats();
+    loadTags();
+    loadYears();
+    showToast(`已移除 ${data.removed || 0} 条照片记录和缓存，原图未做任何改动。`, "success");
+  } catch (e) {
+    showToast("移除当前目录失败：" + e.message, "error");
+  }
+}
+
+async function emptyTrash() {
+  const scope = state.folder ? "当前目录" : "全部目录";
+  const ok = await confirmDialog(
+    `确定清空${scope}的回收站吗？` + String.fromCharCode(10) + 
+    "回收站中的照片原文件将被彻底删除，此操作无法恢复。",
+    { title: "清空回收站", confirmText: "彻底清空", danger: true }
+  );
+  if (!ok) return;
+  try {
+    const data = await api("/api/trash/empty", {
+      method: "POST",
+      body: JSON.stringify({ folder: state.folder || undefined }),
+    });
+    state.selected.clear();
+    await loadPhotos();
+    if (state.currentPreviewId) {
+      const still = state.photos.some((p) => p.id === state.currentPreviewId);
+      if (!still) closeModal("previewModal");
+      else updatePreview({ skipImage: true });
+    }
+    showToast(`回收站已清空，共移除 ${data.deleted || 0} 张照片。`, "success");
+  } catch (e) {
+    showToast("清空回收站失败：" + e.message, "error");
   }
 }
 
@@ -997,6 +1126,7 @@ function init() {
 
   $("previewPrevBtn").addEventListener("click", () => navigatePreview(-1));
   $("previewNextBtn").addEventListener("click", () => navigatePreview(1));
+  $("previewEditBtn").addEventListener("click", openEditPreview);
   $("previewDeleteBtn").addEventListener("click", () => deletePhotos([state.currentPreviewId]));
   $("previewRestoreBtn").addEventListener("click", () => restorePhotos([state.currentPreviewId]));
   $("previewPermanentDeleteBtn").addEventListener("click", () => permanentDeletePhotos([state.currentPreviewId]));
@@ -1039,6 +1169,10 @@ function init() {
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
   $("cleanCacheBtn").addEventListener("click", cleanCache);
+  $("removeFolderBtn").addEventListener("click", removeCurrentFolder);
+  $("editSaveBtn").addEventListener("click", saveEditedPhoto);
+  $("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
+  $("emptyTrashBtn").addEventListener("click", emptyTrash);
   $("usePromptTemplateBtn").addEventListener("click", loadPromptTemplate);
   $("clearPromptBtn").addEventListener("click", clearPrompt);
 
@@ -1070,6 +1204,7 @@ function init() {
 
   document.querySelectorAll("select").forEach(enhanceSelect);
   updateFilterHighlights();
+  updateTrashActions();
   document.querySelectorAll(".clickable-stat").forEach((el) => {
     el.addEventListener("click", () => applyStatFilter(el.dataset.filter));
   });
