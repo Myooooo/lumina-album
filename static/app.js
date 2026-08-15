@@ -630,7 +630,7 @@ async function restorePhotos(ids) {
 }
 
 async function reanalyze(id) {
-  showLoading("正在让大模型重新欣赏这张照片…");
+  showLoading("重新欣赏这张照片…");
   try {
     await api("/api/reanalyze", {
       method: "POST",
