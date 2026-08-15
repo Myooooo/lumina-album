@@ -316,6 +316,38 @@ class ApiClientTests(unittest.TestCase):
             )
 
 
+class GeocodeTests(unittest.TestCase):
+    def test_amap_uses_formatted_address(self) -> None:
+        from unittest.mock import patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        payload = {
+            "status": "1",
+            "info": "OK",
+            "regeocode": {"formatted_address": "北京市朝阳区望京街道方恒国际"},
+        }
+        with patch("photo_reviewer.geocode._get_json", return_value=payload):
+            result = reverse_geocode(
+                39.990464, 116.481488, provider="amap", api_key="test-key", interval=0.1
+            )
+        self.assertEqual(result, "北京市朝阳区望京街道方恒国际")
+
+    def test_amap_error_status_returns_none(self) -> None:
+        from unittest.mock import patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        with patch(
+            "photo_reviewer.geocode._get_json",
+            return_value={"status": "0", "info": "INVALID_USER_KEY"},
+        ):
+            result = reverse_geocode(
+                39.990464, 116.481488, provider="amap", api_key="bad", interval=0.1
+            )
+        self.assertIsNone(result)
+
+
 class ScannerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -444,6 +476,45 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["location"], "杭州")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][2], self.cfg.geocoding_interval)
+
+    def test_reanalyze_syncs_exif_before_model_call(self) -> None:
+        image_path = os.path.join(self.folder, "camera.jpg")
+        img = Image.new("RGB", (40, 40))
+        exif = Image.Exif()
+        exif[271] = "Canon"
+        exif[272] = "EOS R"
+        exif[33437] = (28, 10)
+        exif[33434] = (1, 125)
+        exif[34855] = 100
+        exif[37386] = (50, 1)
+        img.save(image_path, exif=exif)
+        self.db.upsert_photo(
+            {
+                "path": image_path,
+                "folder": self.folder,
+                "filename": "camera.jpg",
+                "status": "analyzed",
+                "score": 5,
+                "exif": {},
+                "location": "杭州",
+            }
+        )
+        photo_id = self.db.get_photo_by_path(image_path)["id"]
+        from photo_reviewer.scanner import reanalyze_photo
+
+        with (
+            patch(
+                "photo_reviewer.scanner.analyze_prepared",
+                side_effect=RuntimeError("model offline"),
+            ),
+            self.assertRaises(RuntimeError),
+        ):
+            reanalyze_photo(photo_id, self.db, self.cfg)
+        row = self.db.get_photo(photo_id)
+        self.assertEqual(row["exif"]["fnumber"], 2.8)
+        self.assertEqual(row["exif"]["exposure"], "1/125s")
+        self.assertEqual(row["exif"]["iso"], 100)
+        self.assertEqual(row["location"], "杭州")
 
 
 class ServerApiTests(unittest.TestCase):

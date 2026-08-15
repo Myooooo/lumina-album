@@ -243,6 +243,8 @@ def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> 
             config,
             existing.get("location") if existing else None,
         )
+        if existing:
+            db.update_exif(existing["id"], prepared.location, prepared.exif)
         result = analyze_prepared(prepared, config)
         persist_analysis(db, prepared, result, config)
         return True
@@ -509,6 +511,9 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
             config,
             photo.get("location"),
         )
+        # Sync metadata first so camera/EXIF/location are refreshed even if
+        # the model call fails afterwards.
+        db.update_exif(photo_id, prepared.location, prepared.exif)
         result = analyze_prepared(prepared, config)
         persist_analysis(db, prepared, result, config)
     except Exception as exc:

@@ -82,20 +82,11 @@ def reverse_geocode(
         )
         if not data:
             return None
+        if str(data.get("status")) != "1":
+            return None
         regeocode = data.get("regeocode") or {}
         formatted = regeocode.get("formatted_address")
-        if formatted:
-            return str(formatted).strip()
-        address_component = regeocode.get("addressComponent") or {}
-        return (
-            str(
-                address_component.get("township")
-                or address_component.get("city")
-                or address_component.get("province")
-                or ""
-            ).strip()
-            or None
-        )
+        return str(formatted).strip() if formatted else None
 
     data = _get_json(
         "https://nominatim.openstreetmap.org/reverse",
