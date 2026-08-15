@@ -470,7 +470,7 @@ function renderGallery(options = {}) {
           <img class="polaroid-photo" src="/api/thumbnail/${photo.id}" alt="${escapeHtml(photo.filename)}" loading="lazy" />
           <div class="polaroid-body">
             ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
-            ${photo.reason ? `<div class="photo-comment">“${escapeHtml(photo.reason)}”</div>` : ""}
+            ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
             <div class="back-tags">${tagsHtml || ""}</div>
             <div class="score-pills">
               <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
@@ -1065,7 +1065,7 @@ function updatePreview(options = {}) {
 
     ${photo.reason ? `
       <div class="preview-quote-card">
-        ${ICONS.quote} “${escapeHtml(photo.reason)}”
+        ${ICONS.quote} ${escapeHtml(photo.reason)}
       </div>
     ` : ""}
 
@@ -1104,7 +1104,7 @@ function updatePreview(options = {}) {
 
     <div class="dimension-section">
       <div class="dimension-section-title">
-        <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.score} 回忆评分与维度解读</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.score} 多维度评分</span>
         <span class="badge score">总分 ${scoreText(photo.score)}</span>
       </div>
       <div class="dimension-list">

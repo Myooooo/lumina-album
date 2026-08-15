@@ -738,13 +738,12 @@ select {
 
 .photo-comment {
   font-family: var(--font-hand);
-  font-size: 15px;
+  font-size: 18px;
   color: var(--text-secondary);
-  line-height: 1.6;
-  margin: 8px 4px 10px;
-  text-align: center;
+  line-height: 1.5;
+  margin: 12px 8px 12px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   letter-spacing: .5px;

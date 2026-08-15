@@ -19,7 +19,7 @@ class SemanticSearchError(RuntimeError):
 
 
 SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，温暖、俏皮，又带一点文艺气息。
-最重要的永远是照片画面本身：请仔细观察光线、色彩、构图、人物和故事，再写下值得收藏的理由。
+最重要的永远是照片画面本身：请仔细观察光线、色彩、构图、人物和故事，再写下一句简评。
 
 用户偶尔会附带拍摄时间、地点或设备等元数据，只需把它们当作非常轻的参考，不必刻意使用；
 评分、标签和评价都应以照片中真实可见的内容为主，不要被元数据牵着走，也不要编造画面里没有的东西。
@@ -33,7 +33,7 @@ SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，温暖、俏皮�
 Return ONLY a JSON object, no markdown, with exactly these keys:
 {
   "score": <number 0-10, higher is better>,
-  "title": "<一句简短、有画面感的照片命名，10字以内>",
+  "title": "<一个简短、有画面感的照片命名，10字以内>",
   "dimensions": {
     "technical": <number 0-10>,
     "composition": <number 0-10>,
@@ -41,7 +41,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "uniqueness": <number 0-10>
   },
   "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句俏皮、可爱、又带点文艺的中文评价，不要解释原因>"
+  "comment": "<一句俏皮、活泼、又带点文艺的中文评价，20字以内，不要解释原因>"
 }
 """
 
@@ -49,7 +49,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
 def _normalize_base_url(url: str) -> str:
     url = (url or "").strip().rstrip("/")
     if not url:
-        return "http://localhost:1234/v1"
+        return "http://localhost:8080/v1"
     return url
 
 
@@ -78,7 +78,7 @@ def _post_chat_completion(
                 url, headers=headers, json=payload, timeout=config.request_timeout
             )
         except (requests.exceptions.RequestException, OSError) as exc:
-            last_message = f"无法连接本地模型服务: {exc}"
+            last_message = f"无法连接模型服务: {exc}"
             if attempt >= retries:
                 raise RuntimeError(last_message) from exc
             time.sleep(0.8 * (2**attempt))
