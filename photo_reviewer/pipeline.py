@@ -52,6 +52,7 @@ PRESERVED_FIELDS = (
     "recommendation",
     "tags",
     "reason",
+    "title",
     "model",
     "dimensions",
     "location",

@@ -432,18 +432,22 @@ def _scan_worker(
         JOBS.update(job_id, status="error", error=str(exc))
 
 
-def start_rebuild_index(folder: str, db: Database, config: Config) -> ScanJob:
-    job = JOBS.create(folder, False)
+def start_rebuild_index(
+    folder: str, db: Database, config: Config, force: bool = False
+) -> ScanJob:
+    job = JOBS.create(folder, force)
     thread = threading.Thread(
         target=_rebuild_worker,
-        args=(job.id, folder, db, config),
+        args=(job.id, folder, db, config, force),
         daemon=True,
     )
     thread.start()
     return job
 
 
-def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> None:
+def _rebuild_worker(
+    job_id: str, folder: str, db: Database, config: Config, force: bool = False
+) -> None:
     job = JOBS.get(job_id)
     if not job:
         return
@@ -455,7 +459,10 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
         active_paths = set(db.paths_for_folder(folder))
         removed = active_paths - current_set
         added = [image_path for image_path in images if image_path not in active_paths]
-        total_work = len(removed) + len(added)
+        # With the "重新整理全部" checkbox enabled, every current photo is
+        # refreshed (EXIF/GPS/location) while analysis results are preserved.
+        to_index = list(images) if force else added
+        total_work = len(removed) + len(to_index)
         JOBS.update(
             job_id,
             phase="index",
@@ -485,10 +492,10 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
 
         # Already indexed photos are skipped: only newly discovered files are
         # indexed here (proxy + EXIF), without touching existing results.
-        if added:
+        if to_index:
             if not _run_index_phase(
                 job_id,
-                added,
+                to_index,
                 folder,
                 db,
                 config,

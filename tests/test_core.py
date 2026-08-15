@@ -513,6 +513,53 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(new_row["exif"]["iso"], 100)
         self.assertEqual(new_row["exif"]["focal_length"], "50mm")
 
+    def test_force_rebuild_refreshes_exif_and_keeps_model_data(self) -> None:
+        image_path = os.path.join(self.folder, "camera.jpg")
+        img = Image.new("RGB", (40, 40))
+        exif = Image.Exif()
+        exif[271] = "Canon"
+        exif[272] = "EOS R"
+        exif[33437] = (28, 10)
+        exif[33434] = (1, 125)
+        exif[34855] = 100
+        exif[37386] = (50, 1)
+        img.save(image_path, exif=exif)
+        self.db.upsert_photo(
+            {
+                "path": image_path,
+                "folder": self.folder,
+                "filename": "camera.jpg",
+                "status": "analyzed",
+                "score": 8.8,
+                "title": "旧标题",
+                "tags": ["旧标签"],
+                "reason": "旧评语",
+                "dimensions": {"technical": 9},
+                "model": "old-model",
+                "favorite": 1,
+                "exif": {},
+                "location": "杭州",
+            }
+        )
+        from photo_reviewer.scanner import start_rebuild_index
+
+        with patch("photo_reviewer.scanner.analyze_prepared") as analyze:
+            job = start_rebuild_index(self.folder, self.db, self.cfg, force=True)
+            wait_for_job(job.id)
+            analyze.assert_not_called()
+
+        row = self.db.get_photo_by_path(image_path)
+        self.assertEqual(row["exif"]["fnumber"], 2.8)
+        self.assertEqual(row["exif"]["iso"], 100)
+        self.assertEqual(row["score"], 8.8)
+        self.assertEqual(row["title"], "旧标题")
+        self.assertEqual(row["tags"], ["旧标签"])
+        self.assertEqual(row["reason"], "旧评语")
+        self.assertEqual(row["dimensions"], {"technical": 9})
+        self.assertEqual(row["model"], "old-model")
+        self.assertEqual(row["favorite"], 1)
+        self.assertEqual(row["location"], "杭州")
+
     def test_rebuild_without_changes_has_nonzero_progress(self) -> None:
         image_path = os.path.join(self.folder, "existing.jpg")
         Image.new("RGB", (40, 40)).save(image_path)

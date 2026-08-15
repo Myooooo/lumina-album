@@ -611,10 +611,11 @@ async function startRebuildIndex() {
   state.folder = folder;
   rememberFolder(folder);
   localStorage.setItem("photoFolder", folder);
+  const force = $("forceScan").checked;
   try {
     const data = await api("/api/rebuild-index", {
       method: "POST",
-      body: JSON.stringify({ folder }),
+      body: JSON.stringify({ folder, force }),
     });
     state.currentJobId = data.job_id;
     showProgress("正在同步相册…");
@@ -1515,7 +1516,6 @@ function init() {
   }
 
   $("dirGoBtn").addEventListener("click", () => loadDirList($("dirPathInput").value.trim()));
-  $("dirUpBtn").addEventListener("click", () => loadDirList(state.currentDirPath ? state.currentDirPath.replace(/[\/][^\/]*$/, "") : ""));
   $("dirChooseBtn").addEventListener("click", () => {
     if (state.currentDirPath) {
       state.folder = state.currentDirPath;

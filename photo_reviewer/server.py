@@ -375,6 +375,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     def api_rebuild_index():
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip()
+        force = bool(data.get("force", False))
         if not folder:
             return jsonify({"error": "请提供文件夹路径"}), 400
         try:
@@ -386,7 +387,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 return jsonify(
                     {"error": "该文件夹已有任务正在运行", "job_id": existing.id}
                 ), 409
-        job = start_rebuild_index(folder, database, cfg)
+        job = start_rebuild_index(folder, database, cfg, force=force)
         return jsonify(
             {
                 "job_id": job.id,
