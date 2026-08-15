@@ -971,9 +971,10 @@ async function openSettings() {
     $("setMaxEdge").value = cfg.proxy_max_edge || 1024;
     $("setTimeout").value = cfg.request_timeout || 120;
     $("setIndexThreads").value = cfg.index_concurrency || 4;
-    $("setGeocodingProvider").value = cfg.geocoding_provider || "nominatim";
+    setSelectValue($("setGeocodingProvider"), cfg.geocoding_provider || "nominatim");
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
+    $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
     $("settingsModal").classList.remove("hidden");
   } catch (e) {
     showToast("读取设置失败：" + e.message, "error");
@@ -992,6 +993,7 @@ async function saveSettings() {
     geocoding_provider: $("setGeocodingProvider").value,
     geocoding_api_key: $("setGeocodingApiKey").value,
     geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
+    geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
   };
   try {
     await api("/api/config", {

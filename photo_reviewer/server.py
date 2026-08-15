@@ -158,6 +158,7 @@ def _ensure_exif(
             cfg.geocoding_provider,
             cfg.geocoding_api_key,
             interval=cfg.geocoding_interval,
+            retries=cfg.geocoding_retries,
         )
         if place:
             database.update_exif(photo["id"], place, exif)
@@ -318,6 +319,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 )
             except (TypeError, ValueError):
                 return jsonify({"error": "geocoding_interval 参数不合法"}), 400
+        if "geocoding_retries" in data:
+            try:
+                cfg.geocoding_retries = max(0, min(10, int(data["geocoding_retries"])))
+            except (TypeError, ValueError):
+                return jsonify({"error": "geocoding_retries 参数不合法"}), 400
         _save_settings_to_db(database, cfg)
         return jsonify(cfg.to_dict())
 

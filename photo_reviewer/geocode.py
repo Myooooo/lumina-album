@@ -13,25 +13,26 @@ def _get_json(
     url: str,
     params: dict,
     headers: dict | None = None,
-    retries: int = 2,
+    retries: int = 3,
     timeout: int = 8,
 ) -> dict[str, Any] | None:
-    """Small retry helper for the two reverse-geocoding providers."""
+    """GET JSON from a geocoding provider with exponential retries.
+
+    The first retry happens after 1 second, then the delay doubles.
+    """
     for attempt in range(retries + 1):
         try:
             resp = requests.get(url, params=params, headers=headers, timeout=timeout)
         except requests.exceptions.RequestException:
             if attempt >= retries:
                 return None
-            time.sleep(0.5 * (2**attempt))
+            time.sleep(1.0 * (2**attempt))
             continue
-        if resp.status_code in (429, 500, 502, 503, 504):
+        if resp.status_code != 200:
             if attempt >= retries:
                 return None
-            time.sleep(0.5 * (2**attempt))
+            time.sleep(1.0 * (2**attempt))
             continue
-        if resp.status_code >= 400:
-            return None
         try:
             return resp.json()
         except ValueError:
@@ -61,6 +62,7 @@ def reverse_geocode(
     provider: str = "nominatim",
     api_key: str = "",
     interval: float = 1.0,
+    retries: int = 3,
 ) -> str | None:
     """Convert coordinates to a human-readable Chinese place name.
 
@@ -79,14 +81,16 @@ def reverse_geocode(
                 "extensions": "base",
                 "output": "json",
             },
+            retries=retries,
         )
-        if not data:
-            return None
-        if str(data.get("status")) != "1":
-            return None
-        regeocode = data.get("regeocode") or {}
-        formatted = regeocode.get("formatted_address")
-        return str(formatted).strip() if formatted else None
+        if data and str(data.get("status")) == "1":
+            regeocode = data.get("regeocode") or {}
+            formatted = regeocode.get("formatted_address")
+            if formatted:
+                return str(formatted).strip()
+
+        # AMap returned nothing useful; fall back to the free provider.
+        _wait_for_queue_slot(interval)
 
     data = _get_json(
         "https://nominatim.openstreetmap.org/reverse",
@@ -98,5 +102,6 @@ def reverse_geocode(
             "zoom": 16,
         },
         headers={"User-Agent": "LocalPhotoAlbum/1.0 (personal use)"},
+        retries=retries,
     )
     return (data.get("display_name") or data.get("name") or None) if data else None

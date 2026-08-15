@@ -37,6 +37,7 @@ PERSISTED_FIELDS = (
     "geocoding_provider",
     "geocoding_api_key",
     "geocoding_interval",
+    "geocoding_retries",
     "host",
     "port",
     "debug",
@@ -90,6 +91,7 @@ class Config:
         default_factory=lambda: os.getenv("PHOTO_GEOCODING_API_KEY", "")
     )
     geocoding_interval: float = float(os.getenv("PHOTO_GEOCODING_INTERVAL", "1.0"))
+    geocoding_retries: int = int(os.getenv("PHOTO_GEOCODING_RETRIES", "3"))
     host: str = field(default_factory=lambda: os.getenv("PHOTO_HOST", "127.0.0.1"))
     port: int = int(os.getenv("PHOTO_PORT", "5000"))
     debug: bool = _env_bool("PHOTO_DEBUG", False)
@@ -137,6 +139,7 @@ class Config:
                     "index_concurrency",
                     "request_timeout",
                     "model_retries",
+                    "geocoding_retries",
                     "port",
                 }:
                     try:
@@ -175,6 +178,7 @@ class Config:
             "geocoding_provider": self.geocoding_provider,
             "geocoding_api_key": self.geocoding_api_key,
             "geocoding_interval": self.geocoding_interval,
+            "geocoding_retries": self.geocoding_retries,
             "image_extensions": list(self.image_extensions),
         }
 

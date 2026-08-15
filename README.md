@@ -97,6 +97,7 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_GEOCODING_PROVIDER` | `nominatim` | 逆地理编码服务：`nominatim` 或 `amap` |
 | `PHOTO_GEOCODING_API_KEY` | 空 | 高德地图 Key（使用 `amap` 时填写） |
 | `PHOTO_GEOCODING_INTERVAL` | `1.0` | 地理编码请求队列的最小间隔（秒） |
+| `PHOTO_GEOCODING_RETRIES` | `3` | 单个地理编码请求失败后的重试次数（1 秒起翻倍） |
 | `PHOTO_HOST` | `127.0.0.1` | Web 监听地址 |
 | `PHOTO_PORT` | `5000` | Web 监听端口 |
 

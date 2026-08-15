@@ -333,6 +333,50 @@ class GeocodeTests(unittest.TestCase):
             )
         self.assertEqual(result, "北京市朝阳区望京街道方恒国际")
 
+    def test_amap_failure_falls_back_to_nominatim(self) -> None:
+        from unittest.mock import patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        with patch(
+            "photo_reviewer.geocode._get_json",
+            side_effect=[None, {"display_name": "杭州市西湖区"}],
+        ) as get_json:
+            result = reverse_geocode(
+                30.25,
+                120.17,
+                provider="amap",
+                api_key="bad-key",
+                interval=0.1,
+                retries=2,
+            )
+        self.assertEqual(result, "杭州市西湖区")
+        self.assertEqual(get_json.call_count, 2)
+        self.assertIn("nominatim", get_json.call_args_list[1].args[0])
+
+    def test_geocoding_retries_non_200(self) -> None:
+        from unittest.mock import Mock, patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        responses = [Mock(status_code=500), Mock(status_code=503)]
+        good = Mock(status_code=200)
+        good.json.return_value = {"display_name": "上海市黄浦区"}
+        responses.append(good)
+        with (
+            patch("photo_reviewer.geocode.requests.get", side_effect=responses),
+            patch("photo_reviewer.geocode.time.sleep") as sleep,
+        ):
+            result = reverse_geocode(
+                31.23,
+                121.47,
+                provider="nominatim",
+                interval=0.1,
+                retries=2,
+            )
+        self.assertEqual(result, "上海市黄浦区")
+        self.assertGreaterEqual(sleep.call_count, 2)
+
     def test_amap_error_status_returns_none(self) -> None:
         from unittest.mock import patch
 
@@ -460,8 +504,8 @@ class ScannerTests(unittest.TestCase):
         def fake_extract(path):
             return ("30.25000, 120.17000", {"latitude": 30.25, "longitude": 120.17})
 
-        def fake_geocode(lat, lon, provider, api_key, interval=1.0):
-            calls.append((lat, lon, interval))
+        def fake_geocode(lat, lon, provider, api_key, interval=1.0, retries=3):
+            calls.append((lat, lon, interval, retries))
             return "杭州"
 
         with (
@@ -476,6 +520,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["location"], "杭州")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][2], self.cfg.geocoding_interval)
+        self.assertEqual(calls[0][3], self.cfg.geocoding_retries)
 
     def test_reanalyze_syncs_exif_before_model_call(self) -> None:
         image_path = os.path.join(self.folder, "camera.jpg")
