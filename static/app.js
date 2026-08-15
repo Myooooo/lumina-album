@@ -896,7 +896,7 @@ function formatIso(value) {
 function formatFocalLength(value) {
   const text = String(value ?? "").trim().replace(/mm$/i, "");
   const n = parseExifNumber(text);
-  if (Number.isFinite(n)) return `${Number(n.toFixed(1))}mm`;
+  if (Number.isFinite(n)) return `${Number(n.toFixed(2))}mm`;
   return text ? `${text}mm` : "";
 }
 
@@ -973,6 +973,7 @@ async function openSettings() {
     $("setIndexThreads").value = cfg.index_concurrency || 4;
     $("setGeocodingProvider").value = cfg.geocoding_provider || "nominatim";
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
+    $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("settingsModal").classList.remove("hidden");
   } catch (e) {
     showToast("读取设置失败：" + e.message, "error");
@@ -990,6 +991,7 @@ async function saveSettings() {
     index_concurrency: parseInt($("setIndexThreads").value, 10) || 4,
     geocoding_provider: $("setGeocodingProvider").value,
     geocoding_api_key: $("setGeocodingApiKey").value,
+    geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
   };
   try {
     await api("/api/config", {

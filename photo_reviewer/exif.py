@@ -46,15 +46,22 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
             if not exif:
                 return location, exif_data
 
+            # Some phones keep exposure/aperture/ISO/focal-length in the Exif
+            # sub-IFD rather than the top-level tags.
+            sub_exif = exif.get_ifd(ExifTags.IFD.Exif) or {}
+
             def tag_value(key):
                 try:
-                    return exif.get(key)
+                    value = sub_exif.get(key)
+                    if value is None:
+                        value = exif.get(key)
+                    return value
                 except (KeyError, TypeError, ValueError):
                     return None
 
             make = tag_value(271)
             model = tag_value(272)
-            datetime_original = tag_value(306)
+            datetime_original = tag_value(36867) or tag_value(306)
             exposure = tag_value(33434)
             fnumber = tag_value(33437)
             iso = tag_value(34855)
@@ -70,10 +77,15 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
             if datetime_original:
                 exif_data["datetime_original"] = str(datetime_original).strip()
             if exposure:
-                try:
-                    num, den = exposure
-                    exif_data["exposure"] = f"{num}/{den}s" if den else str(exposure)
-                except (TypeError, ValueError):
+                exposure_value = _rational_float(exposure)
+                if exposure_value is not None and exposure_value > 0:
+                    if exposure_value < 1:
+                        exif_data["exposure"] = (
+                            f"1/{max(1, round(1 / exposure_value))}s"
+                        )
+                    else:
+                        exif_data["exposure"] = f"{exposure_value:g}s"
+                else:
                     exif_data["exposure"] = str(exposure)
             if fnumber:
                 fnumber_value = _rational_float(fnumber)

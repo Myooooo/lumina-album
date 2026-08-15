@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -38,14 +39,37 @@ def _get_json(
     return None
 
 
+_GEOCODE_LOCK = threading.Lock()
+_LAST_GEOCODE_REQUEST = 0.0
+
+
+def _wait_for_queue_slot(interval: float) -> None:
+    """Serialize geocoding requests and enforce the configured minimum interval."""
+    global _LAST_GEOCODE_REQUEST
+    interval = max(0.1, float(interval or 1.0))
+    with _GEOCODE_LOCK:
+        now = time.monotonic()
+        remaining = interval - (now - _LAST_GEOCODE_REQUEST)
+        if remaining > 0:
+            time.sleep(remaining)
+        _LAST_GEOCODE_REQUEST = time.monotonic()
+
+
 def reverse_geocode(
-    lat: float, lon: float, provider: str = "nominatim", api_key: str = ""
+    lat: float,
+    lon: float,
+    provider: str = "nominatim",
+    api_key: str = "",
+    interval: float = 1.0,
 ) -> str | None:
     """Convert coordinates to a human-readable Chinese place name.
 
     Defaults to Nominatim (free, no API key). If ``provider`` is ``amap`` and
     an API key is provided, uses AMap (高德) reverse geocoding instead.
+    All requests pass through a serialized queue with ``interval`` seconds
+    between two requests.
     """
+    _wait_for_queue_slot(interval)
     if provider == "amap" and api_key:
         data = _get_json(
             "https://restapi.amap.com/v3/geocode/regeo",

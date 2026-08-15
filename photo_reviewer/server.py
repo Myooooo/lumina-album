@@ -157,6 +157,7 @@ def _ensure_exif(
             exif["longitude"],
             cfg.geocoding_provider,
             cfg.geocoding_api_key,
+            interval=cfg.geocoding_interval,
         )
         if place:
             database.update_exif(photo["id"], place, exif)
@@ -212,6 +213,8 @@ def _load_settings_from_db(database: Database, cfg: Config) -> None:
                 )
             elif isinstance(current, int):
                 setattr(cfg, key, int(float(str(value).strip())))
+            elif isinstance(current, float):
+                setattr(cfg, key, float(str(value).strip()))
             else:
                 setattr(cfg, key, value)
         except (TypeError, ValueError):
@@ -308,6 +311,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             )
         if "geocoding_api_key" in data:
             cfg.geocoding_api_key = str(data["geocoding_api_key"])
+        if "geocoding_interval" in data:
+            try:
+                cfg.geocoding_interval = max(
+                    0.1, min(10.0, float(data["geocoding_interval"]))
+                )
+            except (TypeError, ValueError):
+                return jsonify({"error": "geocoding_interval 参数不合法"}), 400
         _save_settings_to_db(database, cfg)
         return jsonify(cfg.to_dict())
 

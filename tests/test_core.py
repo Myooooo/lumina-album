@@ -193,6 +193,46 @@ class DatabaseTests(unittest.TestCase):
             "30.25000, 120.17000",
         )
 
+    def test_extract_exif_reads_phone_sub_ifd(self) -> None:
+        from unittest.mock import patch
+
+        from PIL import ExifTags
+
+        from photo_reviewer.exif import extract_exif
+
+        class FakeExif:
+            def get(self, key):
+                return {"271": "HUAWEI", "272": "LIO-AN00"}.get(str(key))
+
+            def get_ifd(self, ifd):
+                if ifd == ExifTags.IFD.Exif:
+                    return {
+                        33434: 0.000942,
+                        33437: 1.6,
+                        34855: 50,
+                        37386: 5.56,
+                        36867: "2020:08:19 16:45:51",
+                    }
+                return {}
+
+        class FakeImage:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def getexif(self):
+                return FakeExif()
+
+        with patch("PIL.Image.open", return_value=FakeImage()):
+            _, exif = extract_exif("fake.jpg")
+        self.assertEqual(exif["make"], "HUAWEI")
+        self.assertEqual(exif["exposure"], "1/1062s")
+        self.assertEqual(exif["fnumber"], 1.6)
+        self.assertEqual(exif["iso"], 50)
+        self.assertEqual(exif["focal_length"], "5.56mm")
+
     def test_resolve_location_keeps_old_address_when_geocoding_fails(self) -> None:
         from unittest.mock import patch
 
@@ -379,6 +419,31 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(new_row["exif"]["exposure"], "1/125s")
         self.assertEqual(new_row["exif"]["iso"], 100)
         self.assertEqual(new_row["exif"]["focal_length"], "50mm")
+
+    def test_initial_scan_resolves_location_once_during_indexing(self) -> None:
+        image_path = os.path.join(self.folder, "gps.jpg")
+        Image.new("RGB", (40, 40)).save(image_path)
+        calls = []
+
+        def fake_extract(path):
+            return ("30.25000, 120.17000", {"latitude": 30.25, "longitude": 120.17})
+
+        def fake_geocode(lat, lon, provider, api_key, interval=1.0):
+            calls.append((lat, lon, interval))
+            return "杭州"
+
+        with (
+            patch("photo_reviewer.scanner.extract_exif", side_effect=fake_extract),
+            patch("photo_reviewer.scanner.reverse_geocode", side_effect=fake_geocode),
+            patch("photo_reviewer.scanner.analyze_prepared", side_effect=fake_analysis),
+        ):
+            job = start_scan(self.folder, self.db, self.cfg)
+            wait_for_job(job.id)
+
+        row = self.db.get_photo_by_path(image_path)
+        self.assertEqual(row["location"], "杭州")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][2], self.cfg.geocoding_interval)
 
 
 class ServerApiTests(unittest.TestCase):

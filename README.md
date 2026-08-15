@@ -17,7 +17,7 @@
 - 排序：总分、拍摄时间、文件名、分析时间、文件大小；没有拍摄时间的照片排在最后
 - 搜索：关键词、智能（关键词 + 语义）、语义三种模式
 - 详情页：原图、相机参数、拍摄时间、地点、评分维度、标签和简评，支持上一张 / 下一张
-- 设置可持久化：API 地址、Key、模型、超时、代理图尺寸、地理编码、自定义系统提示词
+- 设置可持久化：API 地址、Key、模型、超时、代理图尺寸、地理编码服务与控流间隔、自定义系统提示词
 - 清理缓存时只处理所选照片文件夹下的 `.photo-review-cache/`
 
 ## 安装与运行
@@ -96,6 +96,7 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_TRASH_DIR_NAME` | `.photo-trash` | 收起区目录名 |
 | `PHOTO_GEOCODING_PROVIDER` | `nominatim` | 逆地理编码服务：`nominatim` 或 `amap` |
 | `PHOTO_GEOCODING_API_KEY` | 空 | 高德地图 Key（使用 `amap` 时填写） |
+| `PHOTO_GEOCODING_INTERVAL` | `1.0` | 地理编码请求队列的最小间隔（秒） |
 | `PHOTO_HOST` | `127.0.0.1` | Web 监听地址 |
 | `PHOTO_PORT` | `5000` | Web 监听端口 |
 

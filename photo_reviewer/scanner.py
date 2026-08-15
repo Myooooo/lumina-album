@@ -226,6 +226,7 @@ def _resolve_location(
             exif["longitude"],
             config.geocoding_provider,
             config.geocoding_api_key,
+            interval=config.geocoding_interval,
         )
         if place:
             return place
@@ -268,6 +269,10 @@ def _index_one(
                 location = _resolve_location(location, exif, existing, config)
             else:
                 location = _preserve_resolved_location(location, existing)
+            if location:
+                exif["location"] = location
+            if location and not is_coordinate_location(location):
+                exif["geocoded"] = True
             prepared.location = location
             prepared.exif = exif or {}
         status = existing.get("status") if existing else "pending"
@@ -349,7 +354,13 @@ def _scan_worker(
             ]
 
         if to_index and not _run_index_phase(
-            job_id, to_index, folder, db, config, refresh_exif=True
+            job_id,
+            to_index,
+            folder,
+            db,
+            config,
+            refresh_exif=True,
+            resolve_location=True,
         ):
             return
 
@@ -453,7 +464,15 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
 
         # Already indexed photos are skipped: only newly discovered files are
         # indexed here (proxy + EXIF), without touching existing results.
-        if not _run_index_phase(job_id, added, folder, db, config, refresh_exif=True):
+        if not _run_index_phase(
+            job_id,
+            added,
+            folder,
+            db,
+            config,
+            refresh_exif=True,
+            resolve_location=True,
+        ):
             return
         if not JOBS.get(job_id).cancelled:
             try:

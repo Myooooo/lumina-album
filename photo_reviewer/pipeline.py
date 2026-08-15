@@ -129,15 +129,21 @@ def enrich_metadata(
     is kept instead of being overwritten by raw coordinates.
     """
     location, exif = extract_exif(prepared.image_path)
-    if exif.get("latitude") is not None and exif.get("longitude") is not None:
+    if exif.get("geocoded"):
+        # Indexing already resolved this location; avoid a duplicate request.
+        location = exif.get("location") or location
+    elif exif.get("latitude") is not None and exif.get("longitude") is not None:
         place = reverse_geocode(
             exif["latitude"],
             exif["longitude"],
             config.geocoding_provider,
             config.geocoding_api_key,
+            interval=config.geocoding_interval,
         )
         if place:
             location = place
+            exif["location"] = location
+            exif["geocoded"] = True
         elif existing_location and not is_coordinate_location(existing_location):
             location = existing_location
     elif location is None and existing_location:

@@ -36,6 +36,7 @@ PERSISTED_FIELDS = (
     "cache_dir_name",
     "geocoding_provider",
     "geocoding_api_key",
+    "geocoding_interval",
     "host",
     "port",
     "debug",
@@ -88,6 +89,7 @@ class Config:
     geocoding_api_key: str = field(
         default_factory=lambda: os.getenv("PHOTO_GEOCODING_API_KEY", "")
     )
+    geocoding_interval: float = float(os.getenv("PHOTO_GEOCODING_INTERVAL", "1.0"))
     host: str = field(default_factory=lambda: os.getenv("PHOTO_HOST", "127.0.0.1"))
     port: int = int(os.getenv("PHOTO_PORT", "5000"))
     debug: bool = _env_bool("PHOTO_DEBUG", False)
@@ -141,6 +143,11 @@ class Config:
                         value = int(value)
                     except (TypeError, ValueError):
                         continue
+                elif key == "geocoding_interval":
+                    try:
+                        value = float(value)
+                    except (TypeError, ValueError):
+                        continue
                 elif key == "debug":
                     value = bool(value)
                 setattr(self, key, value)
@@ -167,6 +174,7 @@ class Config:
             "cache_dir_name": self.cache_dir_name,
             "geocoding_provider": self.geocoding_provider,
             "geocoding_api_key": self.geocoding_api_key,
+            "geocoding_interval": self.geocoding_interval,
             "image_extensions": list(self.image_extensions),
         }
 
