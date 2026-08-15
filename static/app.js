@@ -854,6 +854,52 @@ function formatCaptureTime(value) {
   return `${y}年${mo}月${d}日 ${hh}:${mm}${ss ? ":" + ss : ""}`;
 }
 
+function parseExifNumber(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return Number.NaN;
+  const tuple = text.match(/^\(?\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\)?$/);
+  if (tuple) {
+    const num = Number(tuple[1]);
+    const den = Number(tuple[2]);
+    return den ? num / den : Number.NaN;
+  }
+  const fraction = text.match(/^([+-]?\d+(?:\.\d+)?)\s*\/\s*([+-]?\d+(?:\.\d+)?)$/);
+  if (fraction) {
+    const num = Number(fraction[1]);
+    const den = Number(fraction[2]);
+    return den ? num / den : Number.NaN;
+  }
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
+function formatFnumber(value) {
+  const n = parseExifNumber(value);
+  if (Number.isFinite(n)) return n.toFixed(1).replace(/\.0$/, "");
+  return String(value).trim();
+}
+
+function formatExposure(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const n = parseExifNumber(text);
+  if (Number.isFinite(n)) return text.toLowerCase().endsWith("s") ? text : `${n}s`;
+  return text.toLowerCase().endsWith("s") ? text : `${text}s`;
+}
+
+function formatIso(value) {
+  const n = parseExifNumber(value);
+  if (Number.isFinite(n)) return String(Math.round(n));
+  return String(value ?? "").trim();
+}
+
+function formatFocalLength(value) {
+  const text = String(value ?? "").trim().replace(/mm$/i, "");
+  const n = parseExifNumber(text);
+  if (Number.isFinite(n)) return `${Number(n.toFixed(1))}mm`;
+  return text ? `${text}mm` : "";
+}
+
 function updatePreview(options = {}) {
   const id = state.currentPreviewId;
   const photo = state.photos.find((p) => p.id === id);
@@ -877,10 +923,10 @@ function updatePreview(options = {}) {
   const exif = photo.exif || {};
   const cameraText = [exif.make, exif.model].filter(Boolean).join(" ");
   const shotParts = [];
-  if (exif.fnumber) shotParts.push(`f/${exif.fnumber}`);
-  if (exif.exposure) shotParts.push(exif.exposure);
-  if (exif.iso) shotParts.push(`ISO ${exif.iso}`);
-  if (exif.focal_length) shotParts.push(exif.focal_length);
+  if (exif.fnumber) shotParts.push(`f/${formatFnumber(exif.fnumber)}`);
+  if (exif.exposure) shotParts.push(formatExposure(exif.exposure));
+  if (exif.iso) shotParts.push(`ISO ${formatIso(exif.iso)}`);
+  if (exif.focal_length) shotParts.push(formatFocalLength(exif.focal_length));
   const cameraHtml = (cameraText || shotParts.length) ? `
     ${cameraText ? `<div class="camera-info">${ICONS.camera} ${escapeHtml(cameraText)}</div>` : ""}
     ${shotParts.length ? `<div class="shot-info">${shotParts.map((p) => `<span class="tag">${escapeHtml(p)}</span>`).join("")}</div>` : ""}

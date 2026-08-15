@@ -337,8 +337,24 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(by_name["bad.jpg"]["status"], "error")
         self.assertIn("无法读取", by_name["bad.jpg"]["error"])
 
-    def test_rebuild_index_refreshes_exif(self) -> None:
-        image_path = os.path.join(self.folder, "camera.jpg")
+    def test_rebuild_index_skips_existing_and_indexes_new_exif(self) -> None:
+        # Existing indexed photo must stay untouched.
+        existing_path = os.path.join(self.folder, "existing.jpg")
+        Image.new("RGB", (40, 40)).save(existing_path)
+        self.db.upsert_photo(
+            {
+                "path": existing_path,
+                "folder": self.folder,
+                "filename": "existing.jpg",
+                "status": "analyzed",
+                "score": 5,
+                "exif": {"make": "Old"},
+                "location": "杭州",
+            }
+        )
+
+        # Newly discovered photo should get proxy + EXIF.
+        new_path = os.path.join(self.folder, "new.jpg")
         img = Image.new("RGB", (40, 40))
         exif = Image.Exif()
         exif[271] = "Canon"
@@ -347,28 +363,22 @@ class ScannerTests(unittest.TestCase):
         exif[33434] = (1, 125)
         exif[34855] = 100
         exif[37386] = (50, 1)
-        img.save(image_path, exif=exif)
-        self.db.upsert_photo(
-            {
-                "path": image_path,
-                "folder": self.folder,
-                "filename": "camera.jpg",
-                "status": "analyzed",
-                "score": 5,
-                "exif": {},
-                "location": "杭州",
-            }
-        )
+        img.save(new_path, exif=exif)
+
         from photo_reviewer.scanner import start_rebuild_index
 
         job = start_rebuild_index(self.folder, self.db, self.cfg)
         wait_for_job(job.id)
-        row = self.db.get_photo_by_path(image_path)
-        self.assertEqual(row["exif"]["fnumber"], 2.8)
-        self.assertEqual(row["exif"]["exposure"], "1/125s")
-        self.assertEqual(row["exif"]["iso"], 100)
-        self.assertEqual(row["exif"]["focal_length"], "50mm")
-        self.assertEqual(row["location"], "杭州")
+
+        old_row = self.db.get_photo_by_path(existing_path)
+        self.assertEqual(old_row["exif"], {"make": "Old"})
+        self.assertEqual(old_row["location"], "杭州")
+
+        new_row = self.db.get_photo_by_path(new_path)
+        self.assertEqual(new_row["exif"]["fnumber"], 2.8)
+        self.assertEqual(new_row["exif"]["exposure"], "1/125s")
+        self.assertEqual(new_row["exif"]["iso"], 100)
+        self.assertEqual(new_row["exif"]["focal_length"], "50mm")
 
 
 class ServerApiTests(unittest.TestCase):

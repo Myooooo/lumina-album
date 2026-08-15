@@ -431,19 +431,29 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
         current_set = set(images)
         active_paths = set(db.paths_for_folder(folder))
         removed = active_paths - current_set
+        added = [image_path for image_path in images if image_path not in active_paths]
+
+        # Deleted files: remove their DB row and their proxy cache immediately.
         for path in removed:
             try:
                 row = db.get_photo_by_path(path)
                 if row:
+                    for key in ("thumb_path", "proxy_path"):
+                        cached = row.get(key)
+                        if cached and os.path.exists(cached):
+                            try:
+                                os.remove(cached)
+                            except OSError:
+                                logger.debug("proxy file is already gone: %s", cached)
                     db.delete_rows([row["id"]])
             except sqlite3.Error:
                 logger.warning(
                     "could not remove stale photo row for %s", path, exc_info=True
                 )
 
-        if not _run_index_phase(
-            job_id, images, folder, db, config, refresh_exif=True, resolve_location=True
-        ):
+        # Already indexed photos are skipped: only newly discovered files are
+        # indexed here (proxy + EXIF), without touching existing results.
+        if not _run_index_phase(job_id, added, folder, db, config, refresh_exif=True):
             return
         if not JOBS.get(job_id).cancelled:
             try:
