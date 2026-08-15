@@ -15,10 +15,10 @@
       <input id="folderInput" type="text" placeholder="选择存放回忆的文件夹，例如 D:\Photos" />
       <button id="browseBtn" class="btn" title="浏览文件夹"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></button>
       <button id="openFolderBtn" class="btn" title="在文件管理器中打开"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M6 15h12l2-5H4z"/></svg></button>
-      <button id="historyBtn" class="btn" title="已索引文件夹"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></button>
-      <button id="scanBtn" class="btn primary">开始分析</button>
-      <button id="rebuildIndexBtn" class="btn" title="重建索引">重建索引</button>
-      <label class="force-label"><input type="checkbox" id="forceScan" /> 分析全部</label>
+      <button id="historyBtn" class="btn" title="整理过的文件夹"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></button>
+      <button id="scanBtn" class="btn primary">开始整理</button>
+      <button id="rebuildIndexBtn" class="btn" title="同步相册">同步相册</button>
+      <label class="force-label"><input type="checkbox" id="forceScan" /> 重新整理全部</label>
       <button id="settingsBtn" class="btn" title="设置"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></button>
     </div>
     <div id="folderHistory" class="folder-history hidden"></div>
@@ -31,15 +31,15 @@
 
   <section class="stats" id="statsBar">
     <div class="stat clickable-stat" data-filter="all"><span class="stat-num" id="statTotal">0</span><span class="stat-label">全部回忆</span></div>
-    <div class="stat clickable-stat" data-filter="analyzed"><span class="stat-num" id="statAnalyzed">0</span><span class="stat-label">已扫描</span></div>
+    <div class="stat clickable-stat" data-filter="analyzed"><span class="stat-num" id="statAnalyzed">0</span><span class="stat-label">已收录</span></div>
     <div class="stat clickable-stat" data-filter="favorite"><span class="stat-num" id="statFavorite">0</span><span class="stat-label">已珍藏</span></div>
     <div class="stat clickable-stat" data-filter="pending"><span class="stat-num" id="statPending">0</span><span class="stat-label">待整理</span></div>
-    <div class="stat clickable-stat" data-filter="deleted"><span class="stat-num" id="statDeleted">0</span><span class="stat-label">回收站</span></div>
+    <div class="stat clickable-stat" data-filter="deleted"><span class="stat-num" id="statDeleted">0</span><span class="stat-label">已收起</span></div>
   </section>
 
   <section class="filters">
     <div class="filter-group" data-filter-key="min_score">
-      <label>最低分</label>
+      <label>最低回忆分</label>
       <select id="minScoreFilter">
         <option value="">不限</option>
         <option value="0">0</option>
@@ -82,7 +82,7 @@
       </select>
     </div>
     <div class="filter-group grow" data-filter-key="search">
-      <input id="searchInput" type="search" placeholder="搜索" />
+      <input id="searchInput" type="search" placeholder="想找哪段回忆？" />
     </div>
     <button id="searchBtn" class="btn" title="搜索"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
     <button id="resetFiltersBtn" class="btn" title="重置筛选">重置筛选</button>
@@ -91,10 +91,10 @@
   <div class="hidden">
     <select id="statusFilter" data-no-custom>
       <option value="all">全部回忆</option>
-      <option value="analyzed" selected>已扫描</option>
+      <option value="analyzed" selected>已收录</option>
       <option value="favorite">已珍藏</option>
       <option value="pending">待整理</option>
-      <option value="deleted">回收站</option>
+      <option value="deleted">已收起</option>
     </select>
     <select id="favoriteFilter" data-no-custom>
       <option value="">全部</option>
@@ -109,9 +109,9 @@
 
   <div id="selectionBar" class="selection-bar hidden">
     <span>已选 <strong id="selectedCount">0</strong> 张</span>
-    <button id="deleteSelectedBtn" class="btn danger" title="移入回收站"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+    <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
     <button id="restoreSelectedBtn" class="btn" title="恢复"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
-    <button id="reanalyzeSelectedBtn" class="btn" title="重新分析选中照片"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+    <button id="reanalyzeSelectedBtn" class="btn" title="重新解读选中照片"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
     <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     <button id="clearSelectionBtn" class="btn" title="取消选择"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
   </div>
@@ -127,10 +127,10 @@
         <div id="previewInfo" class="preview-info"></div>
       </div>
       <div class="preview-actions">
-        <button id="previewDeleteBtn" class="btn danger" title="移入回收站"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
+        <button id="previewDeleteBtn" class="btn danger" title="暂时收起"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
         <button id="previewRestoreBtn" class="btn" title="恢复"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
         <button id="previewPermanentDeleteBtn" class="btn danger" title="彻底移除"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-        <button id="previewReanalyzeBtn" class="btn" title="重新评价"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+        <button id="previewReanalyzeBtn" class="btn" title="重新解读"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
         <button id="previewFavoriteBtn" class="btn" title="珍藏"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></button>
       </div>
     </div>

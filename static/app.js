@@ -5,11 +5,11 @@ const state = {
   folder: localStorage.getItem("photoFolder") || "",
   photos: [],
   selected: new Set(),
-  flipped: new Set(),
   currentDirPath: "",
   currentPreviewId: null,
   previewNavToken: 0,
   pollingTimer: null,
+  pollTick: 0,
   currentJobId: null,
 };
 
@@ -17,17 +17,17 @@ const ICONS = {
   heart: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
   heartFilled: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
   pin: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
-  arrowUp: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>',
-  folder: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
-  folderOpen: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><path d="M6 15h12l2-5H4z"/></svg>',
+
+
+
   refresh: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   trash: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
   restore: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>',
   close: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
-  search: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
-  settings: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>',
-  eye: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
-  sparkle: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+
+
+
+
   camera: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
   clock: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
 };
@@ -312,50 +312,83 @@ function getFilterParams() {
   return params;
 }
 
-async function loadPhotos() {
-  updateFilterHighlights();
+function renderSkeleton() {
+  const gallery = $("gallery");
+  $("emptyState").classList.add("hidden");
+  gallery.innerHTML = Array.from({ length: 8 }).map((_, idx) => `
+    <div class="polaroid-card skeleton-card" style="animation-delay:${(idx % 6) * 0.05}s">
+      <div class="polaroid-inner">
+        <div class="skeleton-photo"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line short"></div>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadPhotos(options = {}) {
+  const quiet = !!options.quiet;
+  if (!quiet) updateFilterHighlights();
+  const shouldSkeleton = !quiet && !state.photos.length;
+  if (shouldSkeleton) renderSkeleton();
+
   const params = getFilterParams();
   const mode = $("searchMode").value;
   const query = $("searchInput").value.trim();
+  const scrollY = quiet ? window.scrollY : 0;
   let data;
-  if ((mode === "semantic" || mode === "smart") && query) {
-    const statusVal = $("statusFilter").value;
-    const body = {
-      folder: state.folder || undefined,
-      query,
-      mode,
-      status: statusVal === "all" ? undefined : statusVal,
-      min_score: $("minScoreFilter").value || undefined,
-      tag: $("tagFilter").value || undefined,
-      favorite: $("favoriteFilter").value || undefined,
-      year: $("yearFilter").value || undefined,
-      sort: $("sortFilter").value,
-    };
-    showLoading("正在用大模型寻找相关回忆…");
-    try {
-      data = await api("/api/search", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-    } finally {
-      hideLoading();
+  try {
+    if ((mode === "semantic" || mode === "smart") && query) {
+      const statusVal = $("statusFilter").value;
+      const body = {
+        folder: state.folder || undefined,
+        query,
+        mode,
+        status: statusVal === "all" ? undefined : statusVal,
+        min_score: $("minScoreFilter").value || undefined,
+        tag: $("tagFilter").value || undefined,
+        favorite: $("favoriteFilter").value || undefined,
+        year: $("yearFilter").value || undefined,
+        sort: $("sortFilter").value,
+      };
+      if (!quiet) showLoading("正在用大模型寻找相关回忆…");
+      try {
+        data = await api("/api/search", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+      } finally {
+        if (!quiet) hideLoading();
+      }
+    } else {
+      data = await api(`/api/photos?${params.toString()}`);
     }
-  } else {
-    data = await api(`/api/photos?${params.toString()}`);
+
+    if (data.warning && !quiet) showToast(data.warning, "warning");
+    state.photos = data.photos || [];
+    const ids = new Set(state.photos.map((p) => p.id));
+    for (const id of [...state.selected]) {
+      if (!ids.has(id)) state.selected.delete(id);
+    }
+    renderGallery({ animate: !quiet });
+    if (quiet) window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
+    updateSelectionBar();
+    if (!quiet) {
+      loadStats();
+      loadTags();
+      loadYears();
+    }
+  } catch (e) {
+    if (quiet) {
+      console.warn("后台刷新照片失败", e);
+      return;
+    }
+    if (shouldSkeleton) {
+      state.photos = [];
+      renderGallery();
+    }
+    showToast("读取照片失败：" + e.message, "error");
   }
-  state.photos = data.photos || [];
-  const ids = new Set(state.photos.map((p) => p.id));
-  for (const id of [...state.selected]) {
-    if (!ids.has(id)) state.selected.delete(id);
-  }
-  for (const id of [...state.flipped]) {
-    if (!ids.has(id)) state.flipped.delete(id);
-  }
-  renderGallery();
-  updateSelectionBar();
-  loadStats();
-  loadTags();
-  loadYears();
 }
 
 async function loadTags() {
@@ -391,7 +424,7 @@ async function loadYears() {
   }
 }
 
-function renderGallery() {
+function renderGallery(options = {}) {
   const gallery = $("gallery");
   const empty = $("emptyState");
   gallery.innerHTML = "";
@@ -404,7 +437,11 @@ function renderGallery() {
   state.photos.forEach((photo, idx) => {
     const card = document.createElement("div");
     card.className = "polaroid-card";
-    card.style.animationDelay = `${(idx % 16) * 0.025}s`;
+    if (options.animate === false) {
+      card.style.animation = "none";
+    } else {
+      card.style.animationDelay = `${(idx % 16) * 0.025}s`;
+    }
     card.dataset.id = photo.id;
 
     const isDeleted = photo.status === "deleted";
@@ -419,7 +456,7 @@ function renderGallery() {
       `;
     } else {
       deleteActions = `
-        <button class="btn small danger delete-btn" title="移入回收站">${ICONS.trash}</button>
+        <button class="btn small danger delete-btn" title="暂时收起">${ICONS.trash}</button>
       `;
     }
 
@@ -442,7 +479,7 @@ function renderGallery() {
                 <input type="checkbox" />
               </label>
               <span class="card-btn-group">
-                <button class="btn small reanalyze-btn" title="重新评价">${ICONS.refresh}</button>
+                <button class="btn small reanalyze-btn" title="重新解读">${ICONS.refresh}</button>
                 ${deleteActions}
               </span>
             </div>
@@ -451,6 +488,10 @@ function renderGallery() {
       </div>
     `;
     gallery.appendChild(card);
+
+    const photoImg = card.querySelector(".polaroid-photo");
+    photoImg.addEventListener("load", () => photoImg.classList.add("is-loaded"));
+    photoImg.addEventListener("error", () => photoImg.classList.add("is-loaded"));
 
     card.addEventListener("click", (e) => {
       if (e.target.closest("button") || e.target.closest("input") || e.target.closest("a")) return;
@@ -504,7 +545,7 @@ function renderGallery() {
     } else {
       card.querySelector(".delete-btn").addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (await confirmDialog(`确定将“${photo.filename}”移入回收站？`, { title: "移入回收站", confirmText: "移入回收站", danger: true })) {
+        if (await confirmDialog(`确定把“${photo.filename}”暂时收起吗？`, { title: "暂时收起", confirmText: "暂时收起", danger: true })) {
           await deletePhotos([photo.id]);
         }
       });
@@ -539,7 +580,7 @@ function updateSelectionBar() {
 async function startScan() {
   const folder = $("folderInput").value.trim();
   if (!folder) {
-    showToast("请先输入照片文件夹路径", "error");
+    showToast("先告诉我们照片文件夹在哪里吧", "error");
     return;
   }
   state.folder = folder;
@@ -551,17 +592,17 @@ async function startScan() {
       body: JSON.stringify({ folder, force }),
     });
     state.currentJobId = data.job_id;
-    showProgress("开始扫描…");
+    showProgress("开始整理…");
     pollScan();
   } catch (e) {
-    showToast("启动扫描失败：" + e.message, "error");
+    showToast("开始整理失败：" + e.message, "error");
   }
 }
 
 async function startRebuildIndex() {
   const folder = $("folderInput").value.trim() || state.folder;
   if (!folder) {
-    showToast("请先选择文件夹", "error");
+    showToast("先选择一份回忆文件夹吧", "error");
     return;
   }
   state.folder = folder;
@@ -572,10 +613,10 @@ async function startRebuildIndex() {
       body: JSON.stringify({ folder }),
     });
     state.currentJobId = data.job_id;
-    showProgress("正在建立索引…");
+    showProgress("正在同步相册…");
     pollScan();
   } catch (e) {
-    showToast("重建索引失败：" + e.message, "error");
+    showToast("同步相册失败：" + e.message, "error");
   }
 }
 
@@ -583,6 +624,7 @@ function showProgress(text) {
   $("scanProgress").classList.remove("hidden");
   $("progressText").textContent = text;
   $("progressFill").style.width = "0%";
+  state.pollTick = 0;
 }
 
 function hideProgress() {
@@ -603,25 +645,28 @@ function pollScan() {
         $("progressFill").style.width = pct + "%";
         $("progressText").textContent =
           job.status === "completed"
-            ? `扫描完成：${job.processed}/${job.total}`
+            ? `整理完成：${job.processed}/${job.total}`
             : job.status === "cancelled"
-            ? "扫描已取消"
-            : "扫描出错：" + (job.error || "");
+            ? "整理已取消"
+            : "整理出错：" + (job.error || "");
         setTimeout(hideProgress, 1500);
         state.currentJobId = null;
         loadPhotos();
-        loadStats();
         return;
       }
       const pct = job.total ? Math.round((job.processed / job.total) * 100) : 0;
       $("progressFill").style.width = pct + "%";
-      const phaseText = job.phase === "analyze" ? "正在分析" : "建立索引";
+      const phaseText = job.phase === "analyze" ? "正在聆听" : "整理照片";
       $("progressText").textContent = `${phaseText} ${job.processed}/${job.total}：${job.current || ""}`;
-      loadPhotos();
+      state.pollTick += 1;
+      loadStats();
+      if (state.pollTick % 4 === 0 && !$("searchInput").value.trim()) {
+        loadPhotos({ quiet: true });
+      }
       state.pollingTimer = setTimeout(pollScan, 1000);
     })
     .catch((e) => {
-      $("progressText").textContent = "获取进度失败：" + e.message;
+      $("progressText").textContent = "读取进度失败：" + e.message;
       setTimeout(hideProgress, 2000);
     });
 }
@@ -632,14 +677,14 @@ async function deletePhotos(ids) {
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
-  if (!await confirmDialog(`确定将选中的 ${ids.length} 张照片移入回收站？`, { title: "移入回收站", confirmText: "移入回收站", danger: true })) return;
+  if (!await confirmDialog(`确定把选中的 ${ids.length} 张照片暂时收起吗？`, { title: "暂时收起", confirmText: "暂时收起", danger: true })) return;
   try {
     const data = await api("/api/delete", {
       method: "POST",
       body: JSON.stringify({ ids }),
     });
     if (data.errors && data.errors.length) {
-      showToast("部分照片删除失败：" + data.errors.map((e) => e.error).join("; "), "error");
+      showToast("部分照片暂时收起失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
     state.selected.clear();
     await loadPhotos();
@@ -649,7 +694,7 @@ async function deletePhotos(ids) {
       else updatePreview();
     }
   } catch (e) {
-    showToast("删除失败：" + e.message, "error");
+    showToast("暂时收起失败：" + e.message, "error");
   }
 }
 
@@ -659,14 +704,14 @@ async function permanentDeletePhotos(ids) {
     return p && p.status === "deleted";
   });
   if (!ids.length) return;
-  if (!await confirmDialog(`确定永久删除 ${ids.length} 张照片？\n文件将从磁盘移除，且不可恢复！`, { title: "永久删除", confirmText: "永久删除", danger: true })) return;
+  if (!await confirmDialog(`确定彻底移除 ${ids.length} 张照片？\n文件将从磁盘移除，且不可恢复。`, { title: "彻底移除", confirmText: "彻底移除", danger: true })) return;
   try {
     const data = await api("/api/delete/permanent", {
       method: "POST",
       body: JSON.stringify({ ids }),
     });
     if (data.errors && data.errors.length) {
-      showToast("部分照片永久删除失败：" + data.errors.map((e) => e.error).join("; "), "error");
+      showToast("部分照片彻底移除失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
     state.selected.clear();
     await loadPhotos();
@@ -676,7 +721,7 @@ async function permanentDeletePhotos(ids) {
       else updatePreview();
     }
   } catch (e) {
-    showToast("永久删除失败：" + e.message, "error");
+    showToast("彻底移除失败：" + e.message, "error");
   }
 }
 
@@ -716,7 +761,7 @@ async function reanalyze(id) {
     await loadPhotos();
     if (state.currentPreviewId === id) updatePreview();
   } catch (e) {
-    showToast("重新分析失败：" + e.message, "error");
+    showToast("重新解读失败：" + e.message, "error");
   } finally {
     hideLoading();
   }
@@ -767,7 +812,7 @@ async function toggleFolderHistory() {
   try {
     const data = await api("/api/folders");
     if (!data.folders || !data.folders.length) {
-      panel.innerHTML = `<div class="folder-history-empty">暂无已索引文件夹</div>`;
+      panel.innerHTML = `<div class="folder-history-empty">暂无整理过的文件夹</div>`;
     } else {
       panel.innerHTML = data.folders.map((f) => `<div class="folder-history-item" data-path="${escapeHtml(f)}">${escapeHtml(f)}</div>`).join("");
       panel.querySelectorAll(".folder-history-item").forEach((el) => {
@@ -789,7 +834,7 @@ async function toggleFolderHistory() {
 async function openFolder() {
   const folder = $("folderInput").value.trim() || state.folder;
   if (!folder) {
-    showToast("请先选择文件夹", "error");
+    showToast("先选择一份回忆文件夹吧", "error");
     return;
   }
   try {
@@ -808,13 +853,13 @@ async function reanalyzeSelected(ids) {
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
-  if (!await confirmDialog(`确定重新分析选中的 ${ids.length} 张照片吗？`, { title: "重新分析", confirmText: "重新分析" })) return;
-  showLoading(`正在重新分析选中的 ${ids.length} 张照片…`);
+  if (!await confirmDialog(`确定重新解读选中的 ${ids.length} 张照片吗？`, { title: "重新解读", confirmText: "重新解读" })) return;
+  showLoading(`正在重新解读选中的 ${ids.length} 张照片…`);
   let ok = 0;
   let fail = 0;
   try {
     for (let i = 0; i < ids.length; i++) {
-      $("loadingText").textContent = `正在重新分析照片 ${i + 1}/${ids.length}…`;
+      $("loadingText").textContent = `正在重新解读照片 ${i + 1}/${ids.length}…`;
       try {
         await api("/api/reanalyze", { method: "POST", body: JSON.stringify({ id: ids[i] }) });
         ok++;
@@ -824,7 +869,7 @@ async function reanalyzeSelected(ids) {
     }
     state.selected.clear();
     await loadPhotos();
-    showToast(`重新分析完成：成功 ${ok} 张，失败 ${fail} 张`, fail ? "error" : "success");
+    showToast(`重新解读完成：成功 ${ok} 张，失败 ${fail} 张`, fail ? "error" : "success");
   } finally {
     hideLoading();
   }
