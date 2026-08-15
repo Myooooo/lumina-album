@@ -103,8 +103,31 @@ def prepare_proxy(image_path: str, folder: str, config: Config) -> PreparedPhoto
     )
 
 
-def enrich_metadata(prepared: PreparedPhoto, config: Config) -> PreparedPhoto:
-    """Extract EXIF data and, when GPS is present, resolve a place name."""
+def is_coordinate_location(value) -> bool:
+    """Return True when a location string looks like raw lat,lon coordinates."""
+    text = str(value or "").strip()
+    if not text or "," not in text:
+        return False
+    parts = [part.strip() for part in text.split(",")]
+    if len(parts) != 2:
+        return False
+    try:
+        lat, lon = float(parts[0]), float(parts[1])
+    except ValueError:
+        return False
+    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
+
+
+def enrich_metadata(
+    prepared: PreparedPhoto,
+    config: Config,
+    existing_location: str | None = None,
+) -> PreparedPhoto:
+    """Extract EXIF and resolve a place name when GPS is present.
+
+    If reverse geocoding fails, a previously resolved human-readable address
+    is kept instead of being overwritten by raw coordinates.
+    """
     location, exif = extract_exif(prepared.image_path)
     if exif.get("latitude") is not None and exif.get("longitude") is not None:
         place = reverse_geocode(
@@ -115,14 +138,25 @@ def enrich_metadata(prepared: PreparedPhoto, config: Config) -> PreparedPhoto:
         )
         if place:
             location = place
+        elif existing_location and not is_coordinate_location(existing_location):
+            location = existing_location
+    elif location is None and existing_location:
+        location = existing_location
     prepared.location = location
     prepared.exif = exif or {}
     return prepared
 
 
-def prepare_for_analysis(image_path: str, folder: str, config: Config) -> PreparedPhoto:
+def prepare_for_analysis(
+    image_path: str,
+    folder: str,
+    config: Config,
+    existing_location: str | None = None,
+) -> PreparedPhoto:
     """Prepare proxy + metadata, then return an analysis-ready object."""
-    return enrich_metadata(prepare_proxy(image_path, folder, config), config)
+    return enrich_metadata(
+        prepare_proxy(image_path, folder, config), config, existing_location
+    )
 
 
 def base_record(

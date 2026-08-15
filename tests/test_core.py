@@ -179,6 +179,36 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertEqual(self.db.all_folders()[0], os.path.join(self.tmp.name, "newer"))
 
+    def test_resolved_location_is_preserved_over_raw_coordinates(self) -> None:
+        from photo_reviewer.scanner import _preserve_resolved_location
+
+        self.assertEqual(
+            _preserve_resolved_location("30.25000, 120.17000", {"location": "杭州"}),
+            "杭州",
+        )
+        self.assertEqual(
+            _preserve_resolved_location(
+                "30.25000, 120.17000", {"location": "30.1, 120.2"}
+            ),
+            "30.25000, 120.17000",
+        )
+
+    def test_resolve_location_keeps_old_address_when_geocoding_fails(self) -> None:
+        from unittest.mock import patch
+
+        from photo_reviewer.config import Config
+        from photo_reviewer.scanner import _resolve_location
+
+        cfg = Config(data_dir=self.tmp.name)
+        with patch("photo_reviewer.scanner.reverse_geocode", return_value=None):
+            result = _resolve_location(
+                "30.25000, 120.17000",
+                {"latitude": 30.25, "longitude": 120.17},
+                {"location": "杭州"},
+                cfg,
+            )
+        self.assertEqual(result, "杭州")
+
     def test_parse_capture_datetime_variants(self) -> None:
         self.assertIsNotNone(parse_capture_datetime("2023:01:02 03:04:05"))
         self.assertIsNotNone(parse_capture_datetime("2023-01-02"))
@@ -326,6 +356,7 @@ class ScannerTests(unittest.TestCase):
                 "status": "analyzed",
                 "score": 5,
                 "exif": {},
+                "location": "杭州",
             }
         )
         from photo_reviewer.scanner import start_rebuild_index
@@ -337,6 +368,7 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(row["exif"]["exposure"], "1/125s")
         self.assertEqual(row["exif"]["iso"], 100)
         self.assertEqual(row["exif"]["focal_length"], "50mm")
+        self.assertEqual(row["location"], "杭州")
 
 
 class ServerApiTests(unittest.TestCase):

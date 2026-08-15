@@ -15,9 +15,11 @@ from .cache import cleanup_folder_cache, load_scan_results_from_cache
 from .config import Config
 from .db import Database
 from .exif import extract_exif
+from .geocode import reverse_geocode
 from .pipeline import (
     analyze_prepared,
     base_record,
+    is_coordinate_location,
     persist_analysis,
     prepare_for_analysis,
     prepare_proxy,
@@ -194,10 +196,52 @@ def _record_photo_error(
     )
 
 
+def _preserve_resolved_location(
+    location: str | None, existing: dict | None
+) -> str | None:
+    """Keep an existing human-readable address when EXIF only has coordinates."""
+    if location is None and existing and existing.get("location"):
+        return existing["location"]
+    if (
+        location
+        and is_coordinate_location(location)
+        and existing
+        and existing.get("location")
+        and not is_coordinate_location(existing["location"])
+    ):
+        return existing["location"]
+    return location
+
+
+def _resolve_location(
+    location: str | None,
+    exif: dict,
+    existing: dict | None,
+    config: Config,
+) -> str | None:
+    """Resolve coordinates to a place name, preserving an older address on failure."""
+    if exif.get("latitude") is not None and exif.get("longitude") is not None:
+        place = reverse_geocode(
+            exif["latitude"],
+            exif["longitude"],
+            config.geocoding_provider,
+            config.geocoding_api_key,
+        )
+        if place:
+            return place
+    return _preserve_resolved_location(location, existing)
+
+
 def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> bool:
     """Analyze one photo and persist the result; errors are recorded per photo."""
     try:
-        prepared = prepare_for_analysis(image_path, folder, config)
+        existing = db.get_photo_by_path(image_path)
+        prepared = prepare_for_analysis(
+            image_path,
+            folder,
+            config,
+            existing.get("location") if existing else None,
+        )
         result = analyze_prepared(prepared, config)
         persist_analysis(db, prepared, result, config)
         return True
@@ -212,15 +256,20 @@ def _index_one(
     db: Database,
     config: Config,
     refresh_exif: bool = False,
+    resolve_location: bool = False,
 ) -> bool:
     """Generate one proxy and upsert its index row."""
     try:
         prepared = prepare_proxy(image_path, folder, config)
+        existing = db.get_photo_by_path(prepared.image_path)
         if refresh_exif:
             location, exif = extract_exif(image_path)
+            if resolve_location:
+                location = _resolve_location(location, exif, existing, config)
+            else:
+                location = _preserve_resolved_location(location, existing)
             prepared.location = location
             prepared.exif = exif or {}
-        existing = db.get_photo_by_path(prepared.image_path)
         status = existing.get("status") if existing else "pending"
         record = base_record(prepared, existing=existing, status=status)
         if refresh_exif:
@@ -240,6 +289,7 @@ def _run_index_phase(
     db: Database,
     config: Config,
     refresh_exif: bool = False,
+    resolve_location: bool = False,
 ) -> bool:
     """Build proxies for a list of images with bounded concurrency."""
     JOBS.update(job_id, phase="index", total=len(images), processed=0, current="")
@@ -249,7 +299,13 @@ def _run_index_phase(
     ) as executor:
         futures = {
             executor.submit(
-                _index_one, image_path, folder, db, config, refresh_exif
+                _index_one,
+                image_path,
+                folder,
+                db,
+                config,
+                refresh_exif,
+                resolve_location,
             ): image_path
             for image_path in images
         }
@@ -292,7 +348,9 @@ def _scan_worker(
                 image_path for image_path in images if image_path not in active_paths
             ]
 
-        if to_index and not _run_index_phase(job_id, to_index, folder, db, config):
+        if to_index and not _run_index_phase(
+            job_id, to_index, folder, db, config, refresh_exif=True
+        ):
             return
 
         # Analyze pending photos, or every photo when the user forced a full
@@ -383,7 +441,9 @@ def _rebuild_worker(job_id: str, folder: str, db: Database, config: Config) -> N
                     "could not remove stale photo row for %s", path, exc_info=True
                 )
 
-        if not _run_index_phase(job_id, images, folder, db, config, refresh_exif=True):
+        if not _run_index_phase(
+            job_id, images, folder, db, config, refresh_exif=True, resolve_location=True
+        ):
             return
         if not JOBS.get(job_id).cancelled:
             try:
@@ -414,7 +474,12 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
 
     folder = photo.get("folder") or os.path.dirname(image_path)
     try:
-        prepared = prepare_for_analysis(image_path, folder, config)
+        prepared = prepare_for_analysis(
+            image_path,
+            folder,
+            config,
+            photo.get("location"),
+        )
         result = analyze_prepared(prepared, config)
         persist_analysis(db, prepared, result, config)
     except Exception as exc:
