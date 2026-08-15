@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import builtins
 import os
 import threading
 import uuid
@@ -75,7 +74,7 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def list(self) -> builtins.list[ScanJob]:
+    def list(self) -> list[ScanJob]:
         with self._lock:
             return list(self._jobs.values())
 
@@ -149,7 +148,8 @@ def start_scan(
     folder: str, db: Database, config: Config, force: bool = False
 ) -> ScanJob:
     job = JOBS.create(folder, force)
-    # If the folder already has an index, skip the proxy/index phase.
+    # Existing folders start in analysis phase; the worker indexes any
+    # newly discovered files before calling the model.
     job.phase = "analyze" if db.paths_for_folder(folder) else "index"
     thread = threading.Thread(
         target=_scan_worker,
@@ -207,15 +207,15 @@ def _scan_worker(
     job = JOBS.get(job_id)
     if not job:
         return
-    active_paths = set(db.paths_for_folder(folder))
-    JOBS.update(
-        job_id,
-        status="running",
-        phase="index" if not active_paths else "analyze",
-        error=None,
-    )
     try:
         load_scan_results_from_cache(folder, db, config.cache_dir_name)
+        active_paths = set(db.paths_for_folder(folder))
+        JOBS.update(
+            job_id,
+            status="running",
+            phase="index" if not active_paths else "analyze",
+            error=None,
+        )
         skip_dirs = [config.data_dir, config.trash_dir_name, config.cache_dir_name]
         images = discover_images(folder, config.image_extensions, skip_dirs=skip_dirs)
 

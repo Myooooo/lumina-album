@@ -159,21 +159,26 @@ def analyze_image(
         "max_tokens": 700,
     }
 
-    resp = _post_chat_completion(payload, config)
+    parse_retries = max(0, int(getattr(config, "model_retries", 2) or 2))
+    last_parse_error: Exception | None = None
+    for attempt in range(parse_retries + 1):
+        resp = _post_chat_completion(payload, config)
+        try:
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            parsed = _parse_model_json(content)
+            _validate_result(parsed)
+            return parsed
+        except (ValueError, KeyError, IndexError, TypeError, RuntimeError) as exc:
+            last_parse_error = exc
+            if attempt >= parse_retries:
+                break
+            time.sleep(0.8 * (2**attempt))
+            continue
 
-    try:
-        data = resp.json()
-    except ValueError as exc:
-        raise RuntimeError(f"模型返回的不是有效 JSON: {resp.text[:500]}") from exc
-
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"模型返回格式不正确: {resp.text[:500]}") from exc
-
-    parsed = _parse_model_json(content)
-    _validate_result(parsed)
-    return parsed
+    raise RuntimeError(
+        f"模型返回的内容无法解析: {str(last_parse_error or '未知错误')[:300]}"
+    ) from last_parse_error
 
 
 def _parse_model_json(content: Any) -> dict[str, Any]:

@@ -54,7 +54,10 @@ python app.py
 | `PHOTO_API_KEY` | `not-needed` | API Key |
 | `PHOTO_MODEL` | `local-model` | 模型名称 |
 | `PHOTO_PROXY_MAX_EDGE` | `1024` | 代理图最大边长 |
+| `PHOTO_PROXY_QUALITY` | `85` | JPEG 代理图质量 |
+| `PHOTO_SCAN_CONCURRENCY` | `1` | 同时分析的照片数（本地模型较慢时保持 1） |
 | `PHOTO_REQUEST_TIMEOUT` | `120` | 模型请求超时（秒） |
+| `PHOTO_MODEL_RETRIES` | `2` | 模型连接失败或 5xx 时的重试次数 |
 | `PHOTO_DATA_DIR` | `./data` | 数据库目录 |
 | `PHOTO_CACHE_DIR_NAME` | `.photo-review-cache` | 代理图缓存目录名 |
 | `PHOTO_TRASH_DIR_NAME` | `.photo-trash` | 回收站目录名 |

@@ -7,7 +7,10 @@ turns one image file into a database record and a model result.
 from __future__ import annotations
 
 import os
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from collections.abc import Iterator
 
 from .api_client import analyze_image, build_analysis_context
 from .cache import ensure_cache_dirs
@@ -15,6 +18,32 @@ from .config import Config
 from .exif import extract_exif
 from .geocode import reverse_geocode
 from .thumbnailer import make_proxy
+
+
+class AnalysisGate:
+    """Limits the number of concurrent local-model calls process-wide."""
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._active = 0
+
+    @contextmanager
+    def slot(self, limit: int) -> Iterator[None]:
+        limit = max(1, int(limit or 1))
+        with self._condition:
+            while self._active >= limit:
+                self._condition.wait()
+            self._active += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._condition.notify()
+
+
+ANALYSIS_GATE = AnalysisGate()
+
 
 # Fields that should survive an index refresh even though the index phase
 # itself does not recompute them.
@@ -148,11 +177,12 @@ def analysis_record(
 
 def analyze_prepared(prepared: PreparedPhoto, config: Config) -> dict:
     """Call the local vision model for one prepared photo."""
-    return analyze_image(
-        prepared.proxy_path,
-        config,
-        context=build_analysis_context(prepared.location, prepared.exif),
-    )
+    with ANALYSIS_GATE.slot(config.scan_concurrency):
+        return analyze_image(
+            prepared.proxy_path,
+            config,
+            context=build_analysis_context(prepared.location, prepared.exif),
+        )
 
 
 def persist_analysis(db, prepared: PreparedPhoto, result: dict, config: Config) -> int:
