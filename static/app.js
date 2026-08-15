@@ -10,6 +10,7 @@ const state = {
   previewNavToken: 0,
   pollingTimer: null,
   pollTick: 0,
+  photoSignature: "",
   currentJobId: null,
 };
 
@@ -365,7 +366,16 @@ async function loadPhotos(options = {}) {
     }
 
     if (data.warning && !quiet) showToast(data.warning, "warning");
-    state.photos = data.photos || [];
+    const nextPhotos = data.photos || [];
+    const nextSignature = nextPhotos
+      .map((p) => `${p.id}:${p.status}:${p.score}:${p.favorite ? 1 : 0}`)
+      .join("|");
+    if (quiet && nextSignature === state.photoSignature) {
+      state.photos = nextPhotos;
+      return;
+    }
+    state.photoSignature = nextSignature;
+    state.photos = nextPhotos;
     const ids = new Set(state.photos.map((p) => p.id));
     for (const id of [...state.selected]) {
       if (!ids.has(id)) state.selected.delete(id);
