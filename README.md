@@ -46,6 +46,26 @@ python app.py
 - 收起区：每个照片文件夹下的 `.photo-trash/日期/`
 - 照片、评分和分析结果只保存在本机；数据库、备份和设置文件已被 `.gitignore` 忽略，请勿手动提交
 
+## 项目结构
+
+```
+app.py                          # 启动入口
+photo_reviewer/
+  api_client.py                 # 本地模型调用、重试与结构化解析
+  pipeline.py                   # 单张照片处理管道（代理图/EXIF/分析/入库）
+  scanner.py                    # 目录扫描、任务队列与并发控制
+  server.py                     # Flask API
+  cache.py / thumbnailer.py     # 代理图缓存与图片处理
+  db.py                         # SQLite 存储、排序与筛选
+  exif.py / geocode.py          # EXIF 与逆地理编码
+static/
+  index.html / style.css
+  app.js                        # 页面状态与业务流程
+  js/icons.js                   # 内联 SVG 图标
+  js/ui-kit.js                  # Toast / Confirm / Loading / 下拉组件
+tests/                          # 本地回归测试
+```
+
 ## 开发与测试
 
 ```bash
