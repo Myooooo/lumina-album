@@ -631,15 +631,20 @@ class Database:
             try:
                 for pid in ids:
                     orig = original_paths.get(pid) or self._get_original_path(pid)
+                    # Photos that were never analyzed by the model return to
+                    # "pending" (待整理); analyzed ones return to "analyzed".
+                    row = conn.execute(
+                        "SELECT analyzed_at FROM photos WHERE id=?", (pid,)
+                    ).fetchone()
+                    status = "analyzed" if (row and row["analyzed_at"]) else "pending"
                     if orig:
                         conn.execute(
-                            "UPDATE photos SET status='analyzed', path=? WHERE id=?",
-                            (orig, pid),
+                            "UPDATE photos SET status=?, path=? WHERE id=?",
+                            (status, orig, pid),
                         )
                     else:
                         conn.execute(
-                            "UPDATE photos SET status='analyzed' WHERE id=?",
-                            (pid,),
+                            "UPDATE photos SET status=? WHERE id=?", (status, pid)
                         )
                 conn.commit()
             finally:

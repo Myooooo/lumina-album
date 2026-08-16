@@ -129,6 +129,48 @@ class DatabaseTests(unittest.TestCase):
             paths["thumb_path"], os.path.join(folder_a, ".cache", "new_thumb.jpg")
         )
 
+    def test_restore_deleted_returns_pending_when_never_analyzed(self) -> None:
+        folder = os.path.join(self.tmp.name, "pics")
+        pending_path = os.path.join(folder, "pending.jpg")
+        analyzed_path = os.path.join(folder, "analyzed.jpg")
+        self.db.upsert_photo(
+            {
+                "path": pending_path,
+                "folder": folder,
+                "filename": "pending.jpg",
+                "status": "pending",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "path": analyzed_path,
+                "folder": folder,
+                "filename": "analyzed.jpg",
+                "status": "analyzed",
+                "score": 7.5,
+                "analyzed_at": "2024-01-01T00:00:00",
+            }
+        )
+        pending_id = self.db.get_photo_by_path(pending_path)["id"]
+        analyzed_id = self.db.get_photo_by_path(analyzed_path)["id"]
+        trash_p = os.path.join(folder, ".trash", "pending.jpg")
+        trash_a = os.path.join(folder, ".trash", "analyzed.jpg")
+        self.db.mark_deleted(
+            [pending_id, analyzed_id],
+            {pending_id: trash_p, analyzed_id: trash_a},
+        )
+        # Restoring both: pending stays pending, analyzed stays analyzed.
+        self.db.restore_deleted(
+            [pending_id, analyzed_id],
+            {pending_id: pending_path, analyzed_id: analyzed_path},
+        )
+        self.assertEqual(
+            self.db.get_photo(pending_id)["status"], "pending"
+        )
+        self.assertEqual(
+            self.db.get_photo(analyzed_id)["status"], "analyzed"
+        )
+
     def test_edit_metadata_and_remove_folder(self) -> None:
         folder = os.path.join(self.tmp.name, "pics")
         photo_path = os.path.join(folder, "1.jpg")
