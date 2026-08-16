@@ -1050,7 +1050,6 @@ select {
   display: flex;
   gap: 28px;
   margin-top: 8px;
-  align-items: flex-start;
 }
 
 .preview-media-col {
