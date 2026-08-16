@@ -908,6 +908,8 @@ class ServerApiTests(unittest.TestCase):
                 "scan_concurrency": 2,
                 "model_retries": 4,
                 "gallery_thumb_size": 320,
+                "proxy_quality": 75,
+                "thumb_quality": 45,
             },
         )
         self.assertEqual(resp.status_code, 200)
@@ -915,6 +917,8 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(cfg["scan_concurrency"], 2)
         self.assertEqual(cfg["model_retries"], 4)
         self.assertEqual(cfg["gallery_thumb_size"], 320)
+        self.assertEqual(cfg["proxy_quality"], 75)
+        self.assertEqual(cfg["thumb_quality"], 45)
 
     def test_scan_jobs_endpoint_reports_running_job(self) -> None:
         from photo_reviewer.scanner import JOBS

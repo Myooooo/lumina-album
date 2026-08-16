@@ -419,14 +419,8 @@ def _scan_worker(
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)
-                backup_path = (
-                    Path(__file__).resolve().parent.parent / "photo-library.backup.db"
-                )
-                db.backup_to(str(backup_path))
             except (OSError, sqlite3.Error):
-                logger.warning(
-                    "post-scan cleanup/backup failed for %s", folder, exc_info=True
-                )
+                logger.warning("post-scan cleanup failed for %s", folder, exc_info=True)
             JOBS.update(job_id, status="completed")
     except Exception as exc:  # noqa: BLE001
         JOBS.update(job_id, status="error", error=str(exc))
@@ -513,14 +507,8 @@ def _rebuild_worker(
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)
-                backup_path = (
-                    Path(__file__).resolve().parent.parent / "photo-library.backup.db"
-                )
-                db.backup_to(str(backup_path))
             except (OSError, sqlite3.Error):
-                logger.warning(
-                    "post-scan cleanup/backup failed for %s", folder, exc_info=True
-                )
+                logger.warning("post-scan cleanup failed for %s", folder, exc_info=True)
             JOBS.update(job_id, status="completed")
     except Exception as exc:  # noqa: BLE001
         JOBS.update(job_id, status="error", error=str(exc))

@@ -41,7 +41,7 @@ python app.py
 
 ## 数据与隐私
 
-- 数据库：`data/library.db`；设置：`data/settings.json`
+- 数据库与配置：`data/library.db`（设置保存在 SQLite 的 settings 表）
 - 代理图缓存：每个照片文件夹下的 `.photo-review-cache/`
 - 收起区：每个照片文件夹下的 `.photo-trash/日期/`
 - 照片、评分与分析结果只保存在本机；数据库和设置文件已被 `.gitignore` 忽略

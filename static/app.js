@@ -1298,8 +1298,10 @@ async function openSettings() {
     const promptText = stripPromptFormat(cfg.system_prompt || promptPresets.playful || "");
     $("setSystemPrompt").value = promptText;
     highlightPromptPreset(promptText);
-    $("setMaxEdge").value = cfg.proxy_max_edge || 1024;
-    $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 480;
+    $("setMaxEdge").value = cfg.proxy_max_edge || 1280;
+    $("setProxyQuality").value = cfg.proxy_quality ?? 80;
+    $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 640;
+    $("setThumbQuality").value = cfg.thumb_quality ?? 50;
     $("setModelConcurrency").value = cfg.scan_concurrency || 1;
     $("setModelRetries").value = cfg.model_retries ?? 3;
     $("setTimeout").value = cfg.request_timeout || 120;
@@ -1320,8 +1322,10 @@ async function saveSettings() {
     api_key: $("setApiKey").value,
     model: $("setModel").value.trim(),
     system_prompt: stripPromptFormat($("setSystemPrompt").value),
-    proxy_max_edge: parseInt($("setMaxEdge").value, 10) || 1024,
-    gallery_thumb_size: parseInt($("setGalleryThumbSize").value, 10) || 480,
+    proxy_max_edge: parseInt($("setMaxEdge").value, 10) || 1280,
+    proxy_quality: parseInt($("setProxyQuality").value, 10) || 80,
+    gallery_thumb_size: parseInt($("setGalleryThumbSize").value, 10) || 640,
+    thumb_quality: parseInt($("setThumbQuality").value, 10) || 50,
     scan_concurrency: parseInt($("setModelConcurrency").value, 10) || 1,
     model_retries: parseInt($("setModelRetries").value, 10) || 3,
     request_timeout: parseInt($("setTimeout").value, 10) || 120,

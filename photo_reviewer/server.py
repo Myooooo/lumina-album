@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -192,22 +191,8 @@ def _cleanup_cache(
 
 
 def _load_settings_from_db(database: Database, cfg: Config) -> None:
-    """Load persisted settings from the SQLite ``settings`` table.
-
-    If the database has no settings yet (for example after the data directory
-    was recreated), a local backup file outside ``data/`` is used as fallback.
-    """
+    """Load persisted settings from the SQLite ``settings`` table."""
     raw = database.get_settings()
-    if not raw:
-        backup_path = (
-            Path(__file__).resolve().parent.parent / "photo-review-settings.json"
-        )
-        if backup_path.exists():
-            try:
-                with open(backup_path, "r", encoding="utf-8") as fh:
-                    raw = json.load(fh)
-            except (OSError, ValueError):
-                raw = {}
     for key in PERSISTED_FIELDS:
         if key not in raw:
             continue
@@ -229,27 +214,9 @@ def _load_settings_from_db(database: Database, cfg: Config) -> None:
 
 
 def _save_settings_to_db(database: Database, cfg: Config) -> None:
-    """Persist current config into the SQLite ``settings`` table.
-
-    Also writes a small backup file outside ``data/`` so settings can survive
-    accidental deletion of the data directory.
-    """
+    """Persist current config into the SQLite ``settings`` table."""
     data = {key: getattr(cfg, key) for key in PERSISTED_FIELDS}
     database.save_settings(data)
-    try:
-        backup_path = (
-            Path(__file__).resolve().parent.parent / "photo-review-settings.json"
-        )
-        backup_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    except OSError:
-        pass
-    try:
-        db_backup = Path(__file__).resolve().parent.parent / "photo-library.backup.db"
-        database.backup_to(str(db_backup))
-    except (OSError, sqlite3.Error):
-        logger.warning("could not write database backup", exc_info=True)
 
 
 def _load_legacy_cache_safely(
@@ -266,12 +233,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     from .db import get_db
 
     cfg = config or CONFIG
-    backup_path = Path(__file__).resolve().parent.parent / "photo-library.backup.db"
-    if not os.path.exists(cfg.db_path) and backup_path.exists():
-        try:
-            shutil.copy2(backup_path, cfg.db_path)
-        except OSError:
-            pass
     database = db or get_db(cfg.db_path)
     _load_settings_from_db(database, cfg)
     static_dir = str(Path(__file__).resolve().parent.parent / "static")
@@ -306,6 +267,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             if key in data:
                 try:
                     setattr(cfg, key, max(minimum, int(data[key])))
+                except (TypeError, ValueError):
+                    return jsonify({"error": f"{key} 参数不合法"}), 400
+        for key in ("proxy_quality", "thumb_quality"):
+            if key in data:
+                try:
+                    setattr(cfg, key, max(1, min(100, int(data[key]))))
                 except (TypeError, ValueError):
                     return jsonify({"error": f"{key} 参数不合法"}), 400
         if "scan_concurrency" in data:

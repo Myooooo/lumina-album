@@ -773,20 +773,6 @@ class Database:
             finally:
                 conn.close()
 
-    def backup_to(self, backup_path: str) -> bool:
-        """Create a consistent SQLite backup copy of the database."""
-        try:
-            src = self._connect()
-            dst = sqlite3.connect(backup_path)
-            try:
-                src.backup(dst)
-            finally:
-                dst.close()
-                src.close()
-            return True
-        except (sqlite3.Error, OSError):
-            return False
-
     def all_tags(self, folder: str | None = None) -> list[str]:
         """Return all distinct tags for a folder (or across all folders)."""
         clauses = []

@@ -1,8 +1,9 @@
 """Configuration for the local photo review system.
 
 Settings can be provided through environment variables, and are persisted to
-``<data_dir>/settings.json`` when changed from the web UI.  On the next start
-the saved settings are loaded automatically, so no configuration is lost.
+the SQLite database under ``<data_dir>/library.db`` when changed from the web
+UI. On the next start the saved settings are loaded automatically, so no
+configuration is lost.
 """
 
 from __future__ import annotations
@@ -175,6 +176,8 @@ class Config:
             "system_prompt": self.system_prompt,
             "proxy_max_edge": self.proxy_max_edge,
             "gallery_thumb_size": self.gallery_thumb_size,
+            "proxy_quality": self.proxy_quality,
+            "thumb_quality": self.thumb_quality,
             "scan_concurrency": self.scan_concurrency,
             "index_concurrency": self.index_concurrency,
             "request_timeout": self.request_timeout,
