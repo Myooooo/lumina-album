@@ -22,6 +22,7 @@ const state = {
   pollTick: 0,
   photoSignature: "",
   pageSize: 100,
+  offset: 0,
   hasMore: false,
   renderedCount: 0,
   loadingMore: false,
@@ -394,6 +395,7 @@ async function loadPhotos(options = {}) {
     }
     state.photoSignature = nextSignature;
     state.photos = nextPhotos;
+    state.offset = nextPhotos.length;
     state.hasMore = hasMore;
     state.renderedCount = 0;
     const ids = new Set(state.photos.map((p) => p.id));
@@ -427,10 +429,11 @@ async function loadMorePhotos() {
   state.loadingMore = true;
   $("loadMoreBtn").classList.add("loading");
   try {
-    const params = getFilterParams(state.photos.length);
+    const params = getFilterParams(state.offset);
     const data = await api(`/api/photos?${params.toString()}`);
     const nextPhotos = data.photos || [];
     state.photos = state.photos.concat(nextPhotos);
+    state.offset += nextPhotos.length;
     state.hasMore = !!data.has_more;
     renderGallery({ append: true, animate: true });
     updateLoadMoreButton();
@@ -606,13 +609,17 @@ function renderGallery(options = {}) {
     } else {
       card.querySelector(".delete-btn").addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (await confirmDialog(`确定把“${photo.filename}”暂时收起吗？`, { title: "暂时收起", confirmText: "暂时收起", danger: true })) {
-          await deletePhotos([photo.id]);
-        }
+        await deletePhotos([photo.id]);
       });
     }
   });
   state.renderedCount = state.photos.length;
+}
+
+function rerenderLoadedGallery() {
+  const scrollY = window.scrollY;
+  renderGallery({ animate: false });
+  window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
 }
 
 function updateCardFavorite(id) {
@@ -742,7 +749,14 @@ async function deletePhotos(ids) {
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
-  if (!await confirmDialog(`确定把选中的 ${ids.length} 张照片暂时收起吗？`, { title: "暂时收起", confirmText: "暂时收起", danger: true })) return;
+  let confirmMessage;
+  if (ids.length === 1) {
+    const photo = state.photos.find((p) => p.id === ids[0]);
+    confirmMessage = `确定把“${photo ? photo.filename : "这张照片"}”暂时收起吗？`;
+  } else {
+    confirmMessage = `确定把选中的 ${ids.length} 张照片暂时收起吗？`;
+  }
+  if (!await confirmDialog(confirmMessage, { title: "暂时收起", confirmText: "暂时收起", danger: true })) return;
   try {
     const data = await api("/api/delete", {
       method: "POST",
@@ -751,12 +765,14 @@ async function deletePhotos(ids) {
     if (data.errors && data.errors.length) {
       showToast("部分照片暂时收起失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
+    state.photos = state.photos.filter((p) => !ids.includes(p.id));
     state.selected.clear();
-    await loadPhotos();
+    rerenderLoadedGallery();
+    loadStats();
     if (state.currentPreviewId) {
       const p = state.photos.find((x) => x.id === state.currentPreviewId);
       if (!p) closeModal("previewModal");
-      else updatePreview();
+      else updatePreview({ skipImage: true });
     }
   } catch (e) {
     showToast("暂时收起失败：" + e.message, "error");
@@ -778,12 +794,14 @@ async function permanentDeletePhotos(ids) {
     if (data.errors && data.errors.length) {
       showToast("部分照片彻底移除失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
+    state.photos = state.photos.filter((p) => !ids.includes(p.id));
     state.selected.clear();
-    await loadPhotos();
+    rerenderLoadedGallery();
+    loadStats();
     if (state.currentPreviewId) {
       const p = state.photos.find((x) => x.id === state.currentPreviewId);
       if (!p) closeModal("previewModal");
-      else updatePreview();
+      else updatePreview({ skipImage: true });
     }
   } catch (e) {
     showToast("彻底移除失败：" + e.message, "error");
@@ -804,12 +822,14 @@ async function restorePhotos(ids) {
     if (data.errors && data.errors.length) {
       showToast("部分照片恢复失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
+    state.photos = state.photos.filter((p) => !ids.includes(p.id));
     state.selected.clear();
-    await loadPhotos();
+    rerenderLoadedGallery();
+    loadStats();
     if (state.currentPreviewId) {
       const p = state.photos.find((x) => x.id === state.currentPreviewId);
       if (!p) closeModal("previewModal");
-      else updatePreview();
+      else updatePreview({ skipImage: true });
     }
   } catch (e) {
     showToast("恢复失败：" + e.message, "error");
@@ -825,14 +845,17 @@ async function reanalyze(id) {
     });
 
     // Patch the current card immediately so the latest title/score/tags are
-    // visible even before the next list refresh completes.
+    // visible without reloading the whole list.
     const idx = state.photos.findIndex((p) => p.id === id);
     if (idx >= 0 && updated) {
-      state.photos[idx] = updated;
-      renderGallery({ animate: false });
+      if ($("statusFilter").value === "pending") {
+        state.photos = state.photos.filter((p) => p.id !== id);
+      } else {
+        state.photos[idx] = updated;
+      }
+      rerenderLoadedGallery();
     }
 
-    await loadPhotos();
     const stillVisible = state.photos.some((p) => p.id === id);
     if (state.currentPreviewId === id) {
       if (stillVisible) {
@@ -954,14 +977,22 @@ async function reanalyzeSelected(ids) {
     for (let i = 0; i < ids.length; i++) {
       $("loadingText").textContent = `正在重新解读照片 ${i + 1}/${ids.length}…`;
       try {
-        await api("/api/reanalyze", { method: "POST", body: JSON.stringify({ id: ids[i] }) });
+        const updated = await api("/api/reanalyze", { method: "POST", body: JSON.stringify({ id: ids[i] }) });
+        const idx = state.photos.findIndex((p) => p.id === ids[i]);
+        if (idx >= 0 && updated) {
+          if ($("statusFilter").value === "pending") {
+            state.photos = state.photos.filter((p) => p.id !== ids[i]);
+          } else {
+            state.photos[idx] = updated;
+          }
+        }
         ok++;
       } catch (e) {
         fail++;
       }
     }
     state.selected.clear();
-    await loadPhotos();
+    rerenderLoadedGallery();
     showToast(`重新解读完成：成功 ${ok} 张，失败 ${fail} 张`, fail ? "error" : "success");
   } finally {
     hideLoading();
@@ -1338,7 +1369,7 @@ async function saveEditedPhoto() {
     .map((t) => t.trim())
     .filter(Boolean);
   try {
-    await api(`/api/photo/${id}/edit`, {
+    const updated = await api(`/api/photo/${id}/edit`, {
       method: "POST",
       body: JSON.stringify({
         score,
@@ -1350,7 +1381,9 @@ async function saveEditedPhoto() {
       }),
     });
     closeModal("editModal");
-    await loadPhotos();
+    const idx = state.photos.findIndex((p) => p.id === id);
+    if (idx >= 0 && updated) state.photos[idx] = updated;
+    rerenderLoadedGallery();
     if (state.currentPreviewId === id) updatePreview({ skipImage: true });
     showToast("这段回忆已经更新。", "success");
   } catch (e) {
