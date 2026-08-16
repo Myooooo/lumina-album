@@ -67,7 +67,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "memory": <number 0-10>,
     "uniqueness": <number 0-10>
   },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准>],
+  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
   "comment": "<一句克制、文艺的中文评价，不要解释原因>"
 }
 """,
@@ -90,7 +90,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "memory": <number 0-10>,
     "uniqueness": <number 0-10>
   },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准>],
+  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
   "comment": "<一句温柔、略带感伤的中文评价，不要解释原因>"
 }
 """,
@@ -113,7 +113,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "memory": <number 0-10>,
     "uniqueness": <number 0-10>
   },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准>],
+  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
   "comment": "<一句俏皮、幽默的中文评价，不要解释原因>"
 }
 """,
@@ -136,7 +136,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "memory": <number 0-10>,
     "uniqueness": <number 0-10>
   },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准>],
+  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
   "comment": "<一句温暖、治愈的中文评价，不要解释原因>"
 }
 """,
