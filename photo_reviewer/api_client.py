@@ -18,7 +18,7 @@ class SemanticSearchError(RuntimeError):
     """Raised when the local model cannot complete a semantic search."""
 
 
-SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，温暖、俏皮，又带一点文艺气息。
+SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，活泼又带一点文艺气息。
 最重要的永远是照片画面本身：请仔细观察光线、色彩、构图、人物和故事，再写下一句简评。
 
 用户偶尔会附带拍摄时间、地点或设备等元数据，只需把它们当作非常轻的参考，不必刻意使用；
@@ -41,7 +41,7 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "uniqueness": <number 0-10>
   },
   "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句俏皮、活泼、又带点文艺的中文评价，20字以内，不要解释原因>"
+  "comment": "<一句活泼又带点文艺的中文评价，20字以内，不要解释原因>"
 }
 """
 
