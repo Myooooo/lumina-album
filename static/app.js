@@ -38,6 +38,7 @@ const state = {
 };
 
 let promptPresets = {};
+const PROMPT_FORMAT_MARKER = "Return ONLY a JSON object, no markdown, with exactly these keys:";
 
 const ICONS = window.LuminaIcons;
 const $ = (id) => document.getElementById(id);
@@ -1254,9 +1255,18 @@ async function loadPromptPresets() {
   }
 }
 
+function stripPromptFormat(text) {
+  if (!text) return "";
+  const idx = text.indexOf(PROMPT_FORMAT_MARKER);
+  return idx >= 0 ? text.slice(0, idx).trim() : text.trim();
+}
+
 function activePresetFor(text) {
+  const normalized = stripPromptFormat(text);
   return (
-    Object.entries(promptPresets).find(([, template]) => template === text)?.[0] || ""
+    Object.entries(promptPresets).find(
+      ([, template]) => stripPromptFormat(template) === normalized
+    )?.[0] || ""
   );
 }
 
@@ -1273,8 +1283,9 @@ function applyPromptPreset(name) {
     showToast("提示词预设不可用", "error");
     return;
   }
-  $("setSystemPrompt").value = template;
-  highlightPromptPreset(template);
+  const promptText = stripPromptFormat(template);
+  $("setSystemPrompt").value = promptText;
+  highlightPromptPreset(promptText);
 }
 
 async function openSettings() {
@@ -1284,8 +1295,9 @@ async function openSettings() {
     $("setApiBase").value = cfg.api_base_url || "";
     $("setApiKey").value = cfg.api_key || "";
     $("setModel").value = cfg.model || "";
-    $("setSystemPrompt").value = cfg.system_prompt || promptPresets.playful || "";
-    highlightPromptPreset($("setSystemPrompt").value);
+    const promptText = stripPromptFormat(cfg.system_prompt || promptPresets.playful || "");
+    $("setSystemPrompt").value = promptText;
+    highlightPromptPreset(promptText);
     $("setMaxEdge").value = cfg.proxy_max_edge || 1024;
     $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 480;
     $("setModelConcurrency").value = cfg.scan_concurrency || 1;
@@ -1307,7 +1319,7 @@ async function saveSettings() {
     api_base_url: $("setApiBase").value.trim(),
     api_key: $("setApiKey").value,
     model: $("setModel").value.trim(),
-    system_prompt: $("setSystemPrompt").value,
+    system_prompt: stripPromptFormat($("setSystemPrompt").value),
     proxy_max_edge: parseInt($("setMaxEdge").value, 10) || 1024,
     gallery_thumb_size: parseInt($("setGalleryThumbSize").value, 10) || 480,
     scan_concurrency: parseInt($("setModelConcurrency").value, 10) || 1,

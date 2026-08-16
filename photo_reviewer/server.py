@@ -17,10 +17,11 @@ from typing import Any
 from flask import Flask, jsonify, request, send_file
 
 from .api_client import (
+    DEFAULT_STYLE_PROMPT,
     PROMPT_PRESETS,
-    SYSTEM_PROMPT,
     SemanticSearchError,
     semantic_search,
+    strip_json_format,
 )
 from .cache import (
     cache_dir_for_folder,
@@ -295,7 +296,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if "model" in data:
             cfg.model = str(data["model"]).strip() or cfg.model
         if "system_prompt" in data:
-            cfg.system_prompt = str(data["system_prompt"])
+            cfg.system_prompt = strip_json_format(str(data["system_prompt"]))
         for key, minimum in (
             ("proxy_max_edge", 64),
             ("gallery_thumb_size", 96),
@@ -340,7 +341,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
     @app.get("/api/prompt-template")
     def api_prompt_template():
-        return jsonify({"template": SYSTEM_PROMPT})
+        return jsonify({"template": DEFAULT_STYLE_PROMPT})
 
     @app.get("/api/prompt-presets")
     def api_prompt_presets():

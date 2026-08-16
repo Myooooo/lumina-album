@@ -18,19 +18,9 @@ class SemanticSearchError(RuntimeError):
     """Raised when the local model cannot complete a semantic search."""
 
 
-SYSTEM_PROMPT = """你是「拾光相册」的回忆整理师，活泼又带一点文艺气息。
-最重要的永远是照片画面本身：请仔细观察光线、色彩、构图、人物和故事，再写下一句简评。
+JSON_FORMAT_MARKER = "Return ONLY a JSON object, no markdown, with exactly these keys:"
 
-用户偶尔会附带拍摄时间、地点或设备等元数据，只需把它们当作非常轻的参考，不必刻意使用；
-评分、标签和评价都应以照片中真实可见的内容为主，不要被元数据牵着走，也不要编造画面里没有的东西。
-
-评估四个维度，每项 0-10 分：
-- technical：清晰度、曝光、画质；
-- composition：构图、视觉平衡、美感；
-- memory：情感共鸣、值得回忆的程度；
-- uniqueness：稀有度、故事感、特别之处。
-
-Return ONLY a JSON object, no markdown, with exactly these keys:
+JSON_FORMAT_SUFFIX = """Return ONLY a JSON object, no markdown, with exactly these keys:
 {
   "score": <number 0-10, higher is better>,
   "title": "<一个简短、有画面感的照片命名，10字以内>",
@@ -41,106 +31,59 @@ Return ONLY a JSON object, no markdown, with exactly these keys:
     "uniqueness": <number 0-10>
   },
   "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句活泼又带点文艺的中文评价，20字以内，不要解释原因>"
+  "comment": "<一句简短、贴合上面风格的中文评价，20字以内，不要解释原因>"
 }
 """
 
+STYLE_TEMPLATE = """你是「拾光相册」的{style}。
+请以照片画面本身为准，仔细观察光线、色彩、构图、人物和故事，再写下一句符合这种风格的中文评价。
 
-PROMPT_PRESETS = {
-    "playful": SYSTEM_PROMPT,
-    "literary": """你是「拾光相册」的文艺摄影师，语气像一本安静而有质感的摄影杂志。
-请把注意力放在照片本身：光线、构图、人物与故事，像写一句简短的散文诗那样描述它。
-
-评估四个维度，每项 0-10 分：
-- technical：清晰度、曝光、画质；
-- composition：构图、视觉平衡、美感；
-- memory：情感共鸣、值得回忆的程度；
-- uniqueness：稀有度、故事感、特别之处。
-
-Return ONLY a JSON object, no markdown, with exactly these keys:
-{
-  "score": <number 0-10, higher is better>,
-  "title": "<一句简短、有画面感的照片命名，10字以内>",
-  "dimensions": {
-    "technical": <number 0-10>,
-    "composition": <number 0-10>,
-    "memory": <number 0-10>,
-    "uniqueness": <number 0-10>
-  },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句克制、文艺的中文评价，不要解释原因>"
-}
-""",
-    "melancholy": """你是「拾光相册」的回忆整理师，语气温柔而略带感伤，擅长看见照片里的旧时光与思念。
-请以照片画面本身为准，写下值得怀念的瞬间。
+用户偶尔会附带拍摄时间、地点或设备等元数据，只需把它们当作非常轻的参考，不必刻意使用；
+评分、标签和评价都应以照片中真实可见的内容为主，不要被元数据牵着走，也不要编造画面里没有的东西。
 
 评估四个维度，每项 0-10 分：
 - technical：清晰度、曝光、画质；
 - composition：构图、视觉平衡、美感；
 - memory：情感共鸣、值得回忆的程度；
-- uniqueness：稀有度、故事感、特别之处。
+- uniqueness：稀有度、故事感、特别之处。"""
 
-Return ONLY a JSON object, no markdown, with exactly these keys:
-{
-  "score": <number 0-10, higher is better>,
-  "title": "<一句简短、有画面感的照片命名，10字以内>",
-  "dimensions": {
-    "technical": <number 0-10>,
-    "composition": <number 0-10>,
-    "memory": <number 0-10>,
-    "uniqueness": <number 0-10>
-  },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句温柔、略带感伤的中文评价，不要解释原因>"
+STYLE_DESCRIPTIONS = {
+    "playful": "回忆整理师，活泼又带一点文艺气息",
+    "literary": "文艺摄影师，语气像一本安静而有质感的摄影杂志",
+    "melancholy": "回忆整理师，语气温柔而略带感伤，擅长看见照片里的旧时光与思念",
+    "humorous": "幽默评论员，观察敏锐、俏皮但不冒犯",
+    "warm": "温暖陪伴者，语气像午后阳光一样柔和、亲切",
 }
-""",
-    "humorous": """你是「拾光相册」的幽默评论员，观察敏锐、俏皮但不冒犯。
-请以照片画面本身为准，用轻松有趣的中文为照片写下评价。
 
-评估四个维度，每项 0-10 分：
-- technical：清晰度、曝光、画质；
-- composition：构图、视觉平衡、美感；
-- memory：情感共鸣、值得回忆的程度；
-- uniqueness：稀有度、故事感、特别之处。
 
-Return ONLY a JSON object, no markdown, with exactly these keys:
-{
-  "score": <number 0-10, higher is better>,
-  "title": "<一句简短、有画面感的照片命名，10字以内>",
-  "dimensions": {
-    "technical": <number 0-10>,
-    "composition": <number 0-10>,
-    "memory": <number 0-10>,
-    "uniqueness": <number 0-10>
-  },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句俏皮、幽默的中文评价，不要解释原因>"
-}
-""",
-    "warm": """你是「拾光相册」的温暖陪伴者，语气像午后阳光一样柔和、亲切。
-请把注意力放在照片画面本身，发现其中让人心头一暖的细节，并写下温柔的评价。
+def build_style_prompt(style: str) -> str:
+    """Render a style-only prompt; only the style description changes."""
+    description = STYLE_DESCRIPTIONS.get(style, STYLE_DESCRIPTIONS["playful"])
+    return STYLE_TEMPLATE.format(style=description)
 
-评估四个维度，每项 0-10 分：
-- technical：清晰度、曝光、画质；
-- composition：构图、视觉平衡、美感；
-- memory：情感共鸣、值得回忆的程度；
-- uniqueness：稀有度、故事感、特别之处。
 
-Return ONLY a JSON object, no markdown, with exactly these keys:
-{
-  "score": <number 0-10, higher is better>,
-  "title": "<一句简短、有画面感的照片命名，10字以内>",
-  "dimensions": {
-    "technical": <number 0-10>,
-    "composition": <number 0-10>,
-    "memory": <number 0-10>,
-    "uniqueness": <number 0-10>
-  },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句温暖、治愈的中文评价，不要解释原因>"
-}
-""",
-}
+DEFAULT_STYLE_PROMPT = build_style_prompt("playful")
+
+SYSTEM_PROMPT = DEFAULT_STYLE_PROMPT + "\n\n" + JSON_FORMAT_SUFFIX
+
+PROMPT_PRESETS = {name: build_style_prompt(name) for name in STYLE_DESCRIPTIONS}
+
+
+def strip_json_format(prompt: str | None) -> str:
+    """Return only the style/persona part before the shared JSON-format block."""
+    text = (prompt or "").strip()
+    marker = text.find(JSON_FORMAT_MARKER)
+    if marker != -1:
+        return text[:marker].rstrip()
+    return text
+
+
+def build_system_prompt(base_prompt: str | None = None) -> str:
+    """Build the complete system prompt with the canonical JSON format appended."""
+    style = strip_json_format(base_prompt).strip()
+    if not style:
+        style = DEFAULT_STYLE_PROMPT
+    return style + "\n\n" + JSON_FORMAT_SUFFIX
 
 
 def _normalize_base_url(url: str) -> str:
@@ -223,7 +166,7 @@ def analyze_image(
         image_bytes = fh.read()
     b64 = base64.b64encode(image_bytes).decode("ascii")
 
-    system_prompt = (config.system_prompt or SYSTEM_PROMPT).strip()
+    system_prompt = build_system_prompt(config.system_prompt)
     context = context or {}
     metadata_lines = []
     if context.get("location"):

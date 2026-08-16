@@ -330,6 +330,34 @@ class ApiClientTests(unittest.TestCase):
         self.assertEqual(_parse_model_json('```json\n{"a": 1}\n```'), {"a": 1})
         self.assertEqual(_parse_model_json('{"a": 1}'), {"a": 1})
 
+    def test_prompt_presets_are_style_only_and_format_appends_once(self) -> None:
+        from photo_reviewer.api_client import (
+            DEFAULT_STYLE_PROMPT,
+            JSON_FORMAT_MARKER,
+            PROMPT_PRESETS,
+            SYSTEM_PROMPT,
+            build_system_prompt,
+            strip_json_format,
+        )
+
+        for name, template in PROMPT_PRESETS.items():
+            self.assertNotIn(JSON_FORMAT_MARKER, template, name)
+            self.assertIn(JSON_FORMAT_MARKER, build_system_prompt(template))
+
+        # Presets only change the style line; the rest of the body stays identical.
+        rendered = [template.splitlines() for template in PROMPT_PRESETS.values()]
+        body = [line for line in rendered[0][1:] if line.strip()]
+        for template_lines in rendered[1:]:
+            other_body = [line for line in template_lines[1:] if line.strip()]
+            self.assertEqual(other_body, body)
+
+        # Old/full prompts must not duplicate the shared JSON format block.
+        built = build_system_prompt(SYSTEM_PROMPT)
+        self.assertEqual(built.count(JSON_FORMAT_MARKER), 1)
+        self.assertTrue(built.startswith(DEFAULT_STYLE_PROMPT))
+        self.assertTrue(built.rstrip().endswith("}"))
+        self.assertEqual(strip_json_format(SYSTEM_PROMPT), DEFAULT_STYLE_PROMPT)
+
     def test_retry_on_malformed_json_then_success(self) -> None:
         bad = Mock(status_code=200)
         bad.json.return_value = {"choices": [{"message": {"content": "not-json"}}]}
@@ -851,10 +879,21 @@ class ServerApiTests(unittest.TestCase):
         self.assertFalse(second["has_more"])
 
     def test_prompt_presets_are_available(self) -> None:
+        from photo_reviewer.api_client import JSON_FORMAT_MARKER
+
         data = self.client.get("/api/prompt-presets").get_json()
         self.assertEqual(data["default"], "playful")
         for key in ("playful", "literary", "melancholy", "humorous", "warm"):
             self.assertTrue(data["presets"][key].strip())
+            self.assertNotIn(JSON_FORMAT_MARKER, data["presets"][key])
+
+    def test_config_save_strips_prompt_format_suffix(self) -> None:
+        from photo_reviewer.api_client import JSON_FORMAT_MARKER, SYSTEM_PROMPT
+
+        resp = self.client.post("/api/config", json={"system_prompt": SYSTEM_PROMPT})
+        self.assertEqual(resp.status_code, 200)
+        cfg = self.client.get("/api/config").get_json()
+        self.assertNotIn(JSON_FORMAT_MARKER, cfg["system_prompt"])
 
     def test_model_queue_and_retry_settings_persist(self) -> None:
         resp = self.client.post(
