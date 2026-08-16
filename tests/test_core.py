@@ -303,6 +303,12 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(cfg.model_retries, 3)
         self.assertEqual(cfg.scan_concurrency, 1)
 
+    def test_thumbnail_quality_defaults_to_fifty(self) -> None:
+        from photo_reviewer.config import Config
+
+        cfg = Config(data_dir=self.tmp.name)
+        self.assertEqual(cfg.thumb_quality, 50)
+
     def test_parse_capture_datetime_variants(self) -> None:
         self.assertIsNotNone(parse_capture_datetime("2023:01:02 03:04:05"))
         self.assertIsNotNone(parse_capture_datetime("2023-01-02"))

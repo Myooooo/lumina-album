@@ -24,6 +24,7 @@ def make_proxy(
     cache_dir: str = "data/thumbnails",
     quality: int = 85,
     thumb_size: int = 480,
+    thumb_quality: int = 50,
 ) -> tuple[str, int, int, str, str]:
     """Create a JPEG proxy and a small gallery thumbnail for one photo.
 
@@ -63,7 +64,7 @@ def make_proxy(
             thumb_img = img.copy()
             if max(thumb_img.size) > thumb_size:
                 thumb_img.thumbnail((thumb_size, thumb_size), Image.LANCZOS)
-            thumb_img.save(thumb_path, "JPEG", quality=min(quality, 82))
+            thumb_img.save(thumb_path, "JPEG", quality=thumb_quality)
 
         proxy_hash = _dhash(img, hash_size=8)
         return proxy_path, width, height, proxy_hash, thumb_path

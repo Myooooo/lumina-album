@@ -29,6 +29,7 @@ PERSISTED_FIELDS = (
     "proxy_max_edge",
     "gallery_thumb_size",
     "proxy_quality",
+    "thumb_quality",
     "scan_concurrency",
     "index_concurrency",
     "request_timeout",
@@ -67,6 +68,7 @@ class Config:
     proxy_max_edge: int = int(os.getenv("PHOTO_PROXY_MAX_EDGE", "1024"))
     gallery_thumb_size: int = int(os.getenv("PHOTO_GALLERY_THUMB_SIZE", "640"))
     proxy_quality: int = int(os.getenv("PHOTO_PROXY_QUALITY", "85"))
+    thumb_quality: int = int(os.getenv("PHOTO_THUMB_QUALITY", "50"))
 
     # Scanning.
     scan_concurrency: int = int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
@@ -138,6 +140,7 @@ class Config:
                     "proxy_max_edge",
                     "gallery_thumb_size",
                     "proxy_quality",
+                    "thumb_quality",
                     "scan_concurrency",
                     "index_concurrency",
                     "request_timeout",

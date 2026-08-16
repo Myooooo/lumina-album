@@ -706,6 +706,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     cache_dir=str(thumb_dir),
                     quality=cfg.proxy_quality,
                     thumb_size=cfg.gallery_thumb_size,
+                    thumb_quality=cfg.thumb_quality,
                 )
                 database.update_cache_paths(photo_id, thumb_path, proxy_path)
                 return send_file(thumb_path, mimetype="image/jpeg", conditional=True)
@@ -732,6 +733,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     cache_dir=str(proxy_dir),
                     quality=cfg.proxy_quality,
                     thumb_size=cfg.gallery_thumb_size,
+                    thumb_quality=cfg.thumb_quality,
                 )
                 database.update_proxy_path(photo_id, proxy)
             except (OSError, ValueError):

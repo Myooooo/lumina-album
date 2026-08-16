@@ -91,6 +91,7 @@ def prepare_proxy(image_path: str, folder: str, config: Config) -> PreparedPhoto
         cache_dir=str(cache_dir),
         quality=config.proxy_quality,
         thumb_size=config.gallery_thumb_size,
+        thumb_quality=config.thumb_quality,
     )
     return PreparedPhoto(
         image_path=image_path,
