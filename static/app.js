@@ -899,10 +899,23 @@ function visiblePhotoOrder() {
 }
 
 async function navigatePreview(delta) {
-  const order = visiblePhotoOrder();
+  let order = visiblePhotoOrder();
   if (!order.length) return;
-  const idx = order.indexOf(state.currentPreviewId);
+  let idx = order.indexOf(state.currentPreviewId);
   if (idx < 0) return;
+
+  // At the end of the loaded pages, fetch the next page before wrapping
+  // back to the first card.
+  if (delta > 0 && idx === order.length - 1 && state.hasMore) {
+    const loadedBefore = state.photos.length;
+    await loadMorePhotos();
+    if (state.photos.length > loadedBefore) {
+      order = visiblePhotoOrder();
+      idx = order.indexOf(state.currentPreviewId);
+      if (idx < 0) return;
+    }
+  }
+
   const nextId = order[(idx + delta + order.length) % order.length];
   const token = ++state.previewNavToken;
   const url = `/api/proxy/${nextId}`;
