@@ -811,7 +811,7 @@ class ServerApiTests(unittest.TestCase):
     def test_prompt_presets_are_available(self) -> None:
         data = self.client.get("/api/prompt-presets").get_json()
         self.assertEqual(data["default"], "playful")
-        for key in ("playful", "literary", "melancholy", "humorous"):
+        for key in ("playful", "literary", "melancholy", "humorous", "warm"):
             self.assertTrue(data["presets"][key].strip())
 
     def test_model_queue_and_retry_settings_persist(self) -> None:
@@ -828,6 +828,36 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(cfg["scan_concurrency"], 2)
         self.assertEqual(cfg["model_retries"], 4)
         self.assertEqual(cfg["gallery_thumb_size"], 320)
+
+    def test_scan_jobs_endpoint_reports_running_job(self) -> None:
+        from photo_reviewer.scanner import JOBS
+
+        job = JOBS.create(self.folder, False)
+        JOBS.update(
+            job.id,
+            status="running",
+            phase="analyze",
+            total=10,
+            processed=3,
+            current="working.jpg",
+        )
+        data = self.client.get(f"/api/scan/jobs?folder={self.folder}").get_json()
+        running = [item for item in data["jobs"] if item["job_id"] == job.id]
+        self.assertEqual(len(running), 1)
+        self.assertEqual(running[0]["status"], "running")
+        self.assertEqual(running[0]["processed"], 3)
+
+    def test_proxy_endpoint_serves_proxy_image(self) -> None:
+        proxy_dir = Path(self.folder) / self.cfg.cache_dir_name
+        proxy_dir.mkdir()
+        proxy_path = proxy_dir / "1_proxy.jpg"
+        proxy_path.write_bytes(b"proxy-image")
+        photo_id = self.db.get_photo_by_path(os.path.join(self.folder, "a.jpg"))["id"]
+        self.db.update_proxy_path(photo_id, str(proxy_path))
+        resp = self.client.get(f"/api/proxy/{photo_id}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_data(), b"proxy-image")
+        resp.close()
 
     def test_invalid_ids_return_400(self) -> None:
         self.assertEqual(

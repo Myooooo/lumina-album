@@ -65,7 +65,7 @@ class Config:
 
     # Image proxy generation.
     proxy_max_edge: int = int(os.getenv("PHOTO_PROXY_MAX_EDGE", "1024"))
-    gallery_thumb_size: int = int(os.getenv("PHOTO_GALLERY_THUMB_SIZE", "480"))
+    gallery_thumb_size: int = int(os.getenv("PHOTO_GALLERY_THUMB_SIZE", "640"))
     proxy_quality: int = int(os.getenv("PHOTO_PROXY_QUALITY", "85"))
 
     # Scanning.

@@ -432,6 +432,29 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         job = start_scan(folder, database, cfg, force=force)
         return jsonify({"job_id": job.id, "status": job.status, "folder": folder})
 
+    @app.get("/api/scan/jobs")
+    def api_scan_jobs():
+        folder = request.args.get("folder", "").strip() or None
+        jobs = []
+        for job in JOBS.list():
+            if folder and job.folder != folder:
+                continue
+            jobs.append(
+                {
+                    "job_id": job.id,
+                    "folder": job.folder,
+                    "status": job.status,
+                    "total": job.total,
+                    "processed": job.processed,
+                    "current": job.current,
+                    "phase": job.phase,
+                    "error": job.error,
+                    "cancelled": job.cancelled,
+                }
+            )
+        jobs.sort(key=lambda item: (item["status"] != "running", item["job_id"]))
+        return jsonify({"jobs": jobs})
+
     @app.get("/api/scan/status/<job_id>")
     def api_scan_status(job_id: str):
         job = JOBS.get(job_id)
@@ -688,6 +711,31 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             except (OSError, ValueError):
                 return jsonify({"error": "无法生成缩略图"}), 500
         return jsonify({"error": "缩略图不存在"}), 404
+
+    @app.get("/api/proxy/<int:photo_id>")
+    def api_proxy(photo_id: int):
+        photo = database.get_photo(photo_id)
+        if not photo:
+            return jsonify({"error": "照片不存在"}), 404
+        proxy = photo.get("proxy_path")
+        if not proxy or not os.path.exists(proxy):
+            path = photo.get("path") or photo.get("original_path")
+            if not path or not os.path.exists(path):
+                return jsonify({"error": "代理图不存在"}), 404
+            try:
+                folder = photo.get("folder") or os.path.dirname(path)
+                proxy_dir = ensure_cache_dirs(folder, cfg.cache_dir_name)
+                proxy, _, _, _, _ = make_proxy(
+                    path,
+                    max_edge=cfg.proxy_max_edge,
+                    cache_dir=str(proxy_dir),
+                    quality=cfg.proxy_quality,
+                    thumb_size=cfg.gallery_thumb_size,
+                )
+                database.update_proxy_path(photo_id, proxy)
+            except (OSError, ValueError):
+                return jsonify({"error": "无法生成代理图"}), 500
+        return send_file(proxy, mimetype="image/jpeg", conditional=True)
 
     @app.get("/api/original/<int:photo_id>")
     def api_original(photo_id: int):

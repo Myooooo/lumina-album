@@ -877,6 +877,19 @@ class Database:
             finally:
                 conn.close()
 
+    def update_proxy_path(self, photo_id: int, proxy_path: str) -> None:
+        """Persist the model/gallery proxy path."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE photos SET proxy_path=? WHERE id=?",
+                    (proxy_path, photo_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
     def update_cache_paths(
         self, photo_id: int, thumb_path: str, proxy_path: str
     ) -> None:

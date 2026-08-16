@@ -21,7 +21,7 @@ const state = {
   pollingTimer: null,
   pollTick: 0,
   photoSignature: "",
-  pageSize: 200,
+  pageSize: 100,
   hasMore: false,
   renderedCount: 0,
   loadingMore: false,
@@ -107,12 +107,28 @@ async function selectBestFolder() {
   return chosen;
 }
 
+async function resumeScanJob() {
+  if (!state.folder || state.currentJobId) return;
+  try {
+    const data = await api(`/api/scan/jobs?folder=${encodeURIComponent(state.folder)}`);
+    const running = (data.jobs || []).find((job) => job.status === "running");
+    if (running) {
+      state.currentJobId = running.job_id;
+      showProgress("正在恢复上次整理任务…");
+      pollScan();
+    }
+  } catch (e) {
+    console.warn("恢复扫描任务失败", e);
+  }
+}
+
 async function loadInitialFolder() {
   state.folder = await selectBestFolder();
   localStorage.setItem("photoFolder", state.folder);
   $("folderInput").value = state.folder;
   if (state.folder) {
     await loadPhotos();
+    resumeScanJob();
   } else {
     state.photos = [];
     renderGallery();
@@ -866,7 +882,7 @@ async function navigatePreview(delta) {
   if (idx < 0) return;
   const nextId = order[(idx + delta + order.length) % order.length];
   const token = ++state.previewNavToken;
-  const url = `/api/original/${nextId}`;
+  const url = `/api/proxy/${nextId}`;
   await preloadImage(url);
   if (token !== state.previewNavToken) return;
   state.currentPreviewId = nextId;
@@ -1042,7 +1058,7 @@ function updatePreview(options = {}) {
   const img = $("previewImage");
   if (!options.skipImage) {
     img.classList.remove("preview-switch-left", "preview-switch-right");
-    img.src = `/api/original/${id}`;
+    img.src = `/api/proxy/${id}`;
   }
   const isDeleted = photo.status === "deleted";
   $("previewDeleteBtn").classList.toggle("hidden", isDeleted);
@@ -1265,7 +1281,7 @@ async function saveSettings() {
       body: JSON.stringify(payload),
     });
     closeModal("settingsModal");
-    showToast("设置已保存，重启后仍会保留。", "success");
+    showToast("设置已保存。", "success");
   } catch (e) {
     showToast("保存设置失败：" + e.message, "error");
   }
