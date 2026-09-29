@@ -130,6 +130,17 @@ JOBS = JobManager()
 logger = logging.getLogger(__name__)
 
 
+def is_metadata_file(name: str) -> bool:
+    """Return True for sidecar/metadata files that only look like photos.
+
+    ``._DSC_0001.NEF`` is the macOS AppleDouble companion a card picks up when
+    it has been read on a Mac. It is 4 KB of resource-fork metadata with the
+    same extension as the real file, so it must never be indexed: it would
+    either shadow the actual photo or show up as a broken one.
+    """
+    return name.startswith("._")
+
+
 def _friendly_error(exc: Exception) -> str:
     """Turn low-level exceptions into a short, human-friendly Chinese message."""
     raw = str(exc)
@@ -157,6 +168,11 @@ def discover_photo_pairs(
 
     A raw file without a same-named counterpart is indexed on its own; it is
     rendered from its embedded JPEG preview.
+
+    Files whose name starts with ``._`` are skipped: those are macOS
+    AppleDouble resource forks (``._DSC_0001.NEF``), not photographs. They
+    share a stem with the real file and would otherwise shadow it or be indexed
+    as a broken raw of their own.
     """
     folder_path = Path(folder)
     if not folder_path.exists() or not folder_path.is_dir():
@@ -184,6 +200,8 @@ def discover_photo_pairs(
         if any(p in {".photo-trash", ".git", "__pycache__"} for p in parts):
             continue
         for name in files:
+            if is_metadata_file(name):
+                continue
             suffix = Path(name).suffix.lower()
             if suffix in exts:
                 kind = "image"
@@ -393,17 +411,30 @@ def _index_one(
 
 
 def _attach_new_raw_siblings(
-    pairs: list[tuple[str, str | None]], db: Database
+    pairs: list[tuple[str, str | None]],
+    db: Database,
+    only_paths: list[str] | None = None,
 ) -> int:
     """Record raw files that appeared next to already-indexed photos.
 
     Importing only the ``.nef`` half of a pair must still light up the RAW badge
     on a card whose ``.jpg`` was indexed earlier. This touches one column and
     leaves the score, tags and comment alone.
+
+    ``only_paths`` restricts the work to the files a scoped scan was asked
+    about, so an import does not rewrite rows elsewhere in the album.
     """
+    wanted = None
+    if only_paths is not None:
+        wanted = {os.path.normcase(canonical_path(p)) for p in only_paths}
     updated = 0
     for image_path, raw_path in pairs:
         if not raw_path:
+            continue
+        if wanted is not None and not (
+            os.path.normcase(canonical_path(image_path)) in wanted
+            or os.path.normcase(canonical_path(raw_path)) in wanted
+        ):
             continue
         existing = db.get_photo_by_path(image_path)
         if not existing:
@@ -527,7 +558,7 @@ def _scan_worker(
         # example an import that only brought the .nef this time). Attaching it
         # is a single column update, so it is done without re-reading EXIF or
         # re-running the model.
-        _attach_new_raw_siblings(pairs, db)
+        _attach_new_raw_siblings(pairs, db, only_paths=only_paths)
 
         if to_index and not _run_index_phase(
             job_id,
@@ -644,6 +675,12 @@ def _rebuild_worker(
             processed=0,
             current="",
         )
+
+        # A raw file can appear next to a photo that is already indexed (for
+        # example an import that only brought the .nef this time). Attaching it
+        # is a single column update, so it is done without re-reading EXIF or
+        # re-running the model.
+        _attach_new_raw_siblings(pairs, db)
 
         # Deleted files: remove their DB row and their proxy cache immediately.
         for processed, path in enumerate(removed, start=1):

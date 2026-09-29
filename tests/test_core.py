@@ -737,6 +737,43 @@ class ScannerTests(unittest.TestCase):
         self.assertGreaterEqual(result.total, 1)
         self.assertGreaterEqual(result.processed, 1)
 
+    def test_rebuild_attaches_a_late_raw_sibling(self) -> None:
+        """A .nef copied in later must light up the badge on an indexed .jpg.
+
+        The jpg is already known, so the scan skips re-indexing it; without an
+        explicit attach step the pair would look identical on disk while the
+        card kept showing no RAW marker.
+        """
+        image_path = os.path.join(self.folder, "late.jpg")
+        Image.new("RGB", (40, 40)).save(image_path)
+        self.db.upsert_photo(
+            {
+                "path": image_path,
+                "folder": self.folder,
+                "filename": "late.jpg",
+                "status": "analyzed",
+                "score": 6.5,
+            }
+        )
+        raw_path = os.path.join(self.folder, "late.NEF")
+        Path(raw_path).write_bytes(b"raw-bytes")
+        from photo_reviewer.scanner import start_rebuild_index
+
+        job = start_rebuild_index(self.folder, self.db, self.cfg)
+        wait_for_job(job.id)
+
+        row = self.db.get_photo_by_path(image_path)
+        self.assertEqual(row["raw_path"], raw_path)
+        self.assertEqual(row["score"], 6.5, "attaching the raw must not touch scores")
+        # The stub that a Mac would leave behind is ignored as well.
+        Path(os.path.join(self.folder, "._late.NEF")).write_bytes(b"stub")
+        job = start_rebuild_index(self.folder, self.db, self.cfg)
+        wait_for_job(job.id)
+        self.assertEqual(self.db.get_photo_by_path(image_path)["raw_path"], raw_path)
+        self.assertIsNone(
+            self.db.get_photo_by_path(os.path.join(self.folder, "._late.NEF"))
+        )
+
     def test_initial_scan_resolves_location_once_during_indexing(self) -> None:
         image_path = os.path.join(self.folder, "gps.jpg")
         Image.new("RGB", (40, 40)).save(image_path)
@@ -1640,6 +1677,36 @@ class DiscoverImagesTests(unittest.TestCase):
             Path(os.path.join(self.folder, name)).write_bytes(b"x")
         found = [os.path.basename(p) for p in discover_images(self.folder)]
         self.assertEqual(found, ["a.png", "b.jpg", "d.webp"])
+
+    def test_macos_resource_forks_are_not_indexed(self) -> None:
+        """``._DSC_0001.NEF`` is AppleDouble metadata, not a photograph.
+
+        A card read on a Mac carries these 4 KB stubs next to the real files.
+        They share the stem and the extension of the photo, so indexing them
+        would shadow the picture or appear as a corrupt raw.
+        """
+        real_raw = os.path.join(self.folder, "DSC_0001.NEF")
+        Path(real_raw).write_bytes(b"raw-bytes")
+        Path(os.path.join(self.folder, "._DSC_0001.NEF")).write_bytes(b"\x00\x05\x16\x07")
+        Path(os.path.join(self.folder, "._DSC_0002.JPG")).write_bytes(b"\x00\x05\x16\x07")
+        Path(os.path.join(self.folder, "DSC_0002.JPG")).write_bytes(b"jpeg")
+
+        pairs = discover_photo_pairs(self.folder)
+        names = sorted(os.path.basename(image) for image, _raw in pairs)
+        self.assertEqual(names, ["DSC_0001.NEF", "DSC_0002.JPG"])
+        # The real file keeps its own pairing and is not shadowed by the stub.
+        by_name = {os.path.basename(image): raw for image, raw in pairs}
+        self.assertIsNone(by_name["DSC_0001.NEF"])
+        self.assertIsNone(by_name["DSC_0002.JPG"])
+
+    def test_metadata_stub_does_not_shadow_a_pair(self) -> None:
+        image = os.path.join(self.folder, "DSC_0003.JPG")
+        raw = os.path.join(self.folder, "DSC_0003.NEF")
+        Path(image).write_bytes(b"jpeg")
+        Path(raw).write_bytes(b"raw")
+        Path(os.path.join(self.folder, "._DSC_0003.NEF")).write_bytes(b"stub")
+        pairs = discover_photo_pairs(self.folder)
+        self.assertEqual(pairs, [(image, raw)])
 
 
 class ImportPlanTests(unittest.TestCase):

@@ -187,6 +187,10 @@ def scan_source(
         if relative_dir == ".":
             relative_dir = ""
         for name in files:
+            if name.startswith("._"):
+                # macOS AppleDouble companion written when a card is read on a
+                # Mac; it shares the real file's extension but is not a photo.
+                continue
             suffix = Path(name).suffix.lower()
             if suffix in images:
                 is_raw = False
@@ -354,6 +358,8 @@ def _count_local_only(
     for root, dirs, files in os.walk(target):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for name in files:
+            if name.startswith("._"):
+                continue
             suffix = Path(name).suffix.lower()
             if suffix not in images and suffix not in raws:
                 continue

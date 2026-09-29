@@ -79,6 +79,8 @@ python app.py
 
 - 匹配同名文件时不区分扩展名大小写（`IMG_1.JPG` 与 `img_1.nef` 同样配对）
 - 配对遵循「JPG 优先」：同名的 `.jpg` 与 `.nef` 只产生一张照片，RAW 作为它的 `raw_path` 记录
+- 先导入 JPG、之后才补进 RAW 也能正确配对：同步相册时会为新出现的 RAW 补上标记，不会重跑模型
+- 以 `._` 开头的文件（macOS 在存储卡上留下的 AppleDouble 元数据，如 `._DSC_0001.NEF`）不是照片，扫描与导入都会跳过
 - 移入回收站时同名 RAW 会一起移动（保留在同一个日期目录下），恢复时一起放回；彻底删除与清空回收站会一并清理 RAW
 - 显示分辨率、宽高和 dHash 均来自实际渲染的那张图
 - 支持的 RAW 扩展名：NEF / ARW / CR2 / CR3 / NRW / DNG / ORF / RW2 / RAF / PEF / SRW / RAW / RWL / 3FR / IIQ / MOS / MRW / K25 / KDC / DCR / X3F / ERF / MEF / SR2 / SRF / CAP / FFF
