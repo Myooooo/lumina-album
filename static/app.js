@@ -209,6 +209,47 @@ function scoreText(score) {
   return score === null || score === undefined ? "-" : Number(score).toFixed(1);
 }
 
+/**
+ * Marker shown when a photo has a camera-raw counterpart on disk.
+ *
+ * The photo itself is still the JPEG (that is what the model analysed and what
+ * every thumbnail/proxy is rendered from); the badge only tells the user that a
+ * raw original exists next to it. When the raw file is the *only* version, the
+ * badge says so and the note explains that rendering comes from the embedded
+ * preview.
+ */
+function rawBadgeHtml(photo, variant = "card") {
+  const rawOnly = !!photo.is_raw;
+  const rawExt = (photo.raw_ext || "").trim();
+  if (!rawOnly && !photo.has_raw) return "";
+  const name = rawOnly
+    ? `RAW · ${escapeHtml(photo.filename || "原始文件")}`
+    : `RAW${rawExt ? " · " + escapeHtml(rawExt) : ""}`;
+  const title = rawOnly
+    ? "此照片只有 RAW 文件，缩略图与代理图由内嵌预览生成"
+    : "同目录存在同名的 RAW 原始文件，当前显示与解读基于图片文件";
+  const icon = rawOnly ? ICONS.raw : ICONS.rawLayers;
+  const classes = ["raw-badge", variant === "detail" ? "raw-badge-detail" : "raw-badge-card"];
+  if (rawOnly) classes.push("raw-only");
+  return `<span class="${classes.join(" ")}" title="${escapeHtml(title)}">${icon}<span>${name}</span></span>`;
+}
+
+/** Extra metadata row listing the raw file that sits next to this photo. */
+function rawDetailRow(photo) {
+  const rawOnly = !!photo.is_raw;
+  if (!rawOnly && !photo.has_raw) return "";
+  const label = rawOnly ? "RAW 原始文件（唯一版本）" : "同名 RAW 原始文件";
+  const note = rawOnly
+    ? "，缩略图与代理图由 RAW 内嵌预览生成"
+    : "，未参与评分";
+  return `
+    <div class="meta-item-row raw-meta-row" title="${escapeHtml(label + note)}">
+      ${ICONS.raw}
+      <div class="meta-content">${escapeHtml(label)}：${escapeHtml(rawOnly ? photo.path || "" : photo.raw_path || "")}</div>
+    </div>
+  `;
+}
+
 function formatFnumber(val) {
   if (val === null || val === undefined || val === "") return "";
   const num = Number(val);
@@ -512,6 +553,7 @@ function renderGallery(options = {}) {
     const isDeleted = photo.status === "deleted";
     const dims = photo.dimensions || {};
     const tagsHtml = (photo.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
+    const rawBadge = rawBadgeHtml(photo, "card");
 
     let deleteActions = "";
     if (isDeleted) {
@@ -530,6 +572,7 @@ function renderGallery(options = {}) {
         <div class="polaroid-front">
           <div class="tape"></div>
           <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
+          ${rawBadge}
           <img class="polaroid-photo" src="/api/thumbnail/${photo.id}" alt="${escapeHtml(photo.filename)}" loading="lazy" />
           <div class="polaroid-body">
             ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
@@ -1162,10 +1205,12 @@ function updatePreview(options = {}) {
   }
 
   const captureTime = formatCaptureTime(exif.datetime_original);
+  const rawBadge = rawBadgeHtml(photo, "detail");
 
   $("previewInfo").innerHTML = `
     <div class="preview-header-block">
       <h3>${escapeHtml(photo.title || photo.filename)}</h3>
+      ${rawBadge}
     </div>
 
     ${photo.reason ? `
@@ -1205,6 +1250,7 @@ function updatePreview(options = {}) {
         ${ICONS.path}
         <div class="meta-content">${escapeHtml(photo.path || "")}</div>
       </div>
+      ${rawDetailRow(photo)}
     </div>
 
     <div class="dimension-section">

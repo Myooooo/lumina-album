@@ -102,19 +102,114 @@ def sort_photos(photos: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]
     return photos
 
 
+# ---------------------------------------------------------------------------
+# Capture-time SQL expressions
+#
+# ``exif`` is stored as JSON text. Reading it through ``json_extract`` in
+# SQLite keeps sorting and filtering inside the database, which avoids pulling
+# every row into Python (the previous implementation was ~10x slower and used
+# memory proportional to the whole library).
+# ---------------------------------------------------------------------------
+
+_RAW_CAPTURE_EXPR = (
+    "COALESCE("
+    "json_extract(exif, '$.datetime_original'),"
+    "json_extract(exif, '$.DateTimeOriginal')"
+    ")"
+)
+
+
+def _capture_time_sql_expr() -> str:
+    """SQL expression yielding a sortable ``YYYY-MM-DD HH:MM:SS`` string.
+
+    EXIF writes ``2023:01:02 03:04:05``; the date part is normalised to ISO so
+    plain string comparison orders correctly. Rows without a usable timestamp
+    yield NULL and are sorted last by the caller.
+    """
+    return (
+        f"CASE WHEN {_RAW_CAPTURE_EXPR} IS NULL OR {_RAW_CAPTURE_EXPR} = '' "
+        f"THEN NULL ELSE replace(substr({_RAW_CAPTURE_EXPR}, 1, 10), ':', '-') "
+        f"|| substr({_RAW_CAPTURE_EXPR}, 11) END"
+    )
+
+
+def _capture_year_sql_expr() -> str:
+    """SQL expression yielding the 4-digit capture year, or NULL."""
+    return (
+        f"CASE WHEN {_RAW_CAPTURE_EXPR} IS NULL "
+        f"OR length({_RAW_CAPTURE_EXPR}) < 4 THEN NULL "
+        f"ELSE substr({_RAW_CAPTURE_EXPR}, 1, 4) END"
+    )
+
+
+class _CachedConnection(sqlite3.Connection):
+    """A ``sqlite3.Connection`` whose ``close()`` returns it to the cache.
+
+    Every database method hands a connection back in a ``finally: conn.close()``
+    block. Neutering ``close`` keeps those call sites correct while the
+    connection stays open for the next call on the same thread; polling a
+    photo folder reuses one connection instead of paying ~0.7 ms per query.
+
+    An uncommitted transaction is rolled back, which is what the old
+    short-lived connection did implicitly when it was closed after an error.
+    ``Database.close()`` performs the real teardown.
+    """
+
+    def close(self) -> None:
+        if self.in_transaction:
+            try:
+                self.rollback()
+            except sqlite3.Error:
+                logger.debug("rollback on release failed", exc_info=True)
+
+
 class Database:
+    """Thin SQLite wrapper.
+
+    Connections are cached per thread: opening one costs ~0.7 ms while reusing
+    it costs ~0.006 ms, and a single photo analysis performs several round
+    trips. ``self._lock`` serializes writers, which matters because scan
+    workers and Flask request threads share this instance.
+    """
+
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.RLock()
+        self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._connections_lock = threading.Lock()
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.init()
 
+    def __enter__(self) -> Database:  # noqa: PYI034 - Self needs typing_extensions
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.path, timeout=30, factory=_CachedConnection)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn = conn
+            with self._connections_lock:
+                self._connections.append(conn)
         return conn
+
+    def close(self) -> None:
+        """Close every cached connection (tests and shutdown paths)."""
+        with self._connections_lock:
+            connections, self._connections = self._connections, []
+        for conn in connections:
+            try:
+                sqlite3.Connection.close(conn)
+            except sqlite3.Error:
+                logger.debug("connection already closed", exc_info=True)
+        self._local = threading.local()
 
     def init(self) -> None:
         with self._lock:
@@ -142,10 +237,12 @@ class Database:
                         tags TEXT,
                         reason TEXT,
                         title TEXT,
+                        raw_path TEXT,
                         model TEXT,
                         analyzed_at TEXT,
                         status TEXT NOT NULL DEFAULT 'pending',
                         favorite INTEGER DEFAULT 0,
+                        geocoded INTEGER DEFAULT 0,
                         error TEXT,
                         created_at TEXT NOT NULL
                     );
@@ -180,12 +277,12 @@ class Database:
                     )
                 if "title" not in cols:
                     conn.execute("ALTER TABLE photos ADD COLUMN title TEXT")
-                # New versions use the proxy file directly as the gallery
-                # preview, so existing thumb_path values are migrated to the
-                # proxy path (old _thumb.jpg files become orphan cache).
-                conn.execute(
-                    "UPDATE photos SET thumb_path = proxy_path WHERE proxy_path IS NOT NULL AND (thumb_path IS NULL OR thumb_path != proxy_path)"
-                )
+                if "raw_path" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN raw_path TEXT")
+                if "geocoded" not in cols:
+                    conn.execute(
+                        "ALTER TABLE photos ADD COLUMN geocoded INTEGER DEFAULT 0"
+                    )
                 conn.commit()
             finally:
                 conn.close()
@@ -201,12 +298,12 @@ class Database:
                     """
                     INSERT INTO photos
                         (path, original_path, folder, filename, size, width, height, thumb_path,
-                         proxy_path, dimensions, location, exif, phash, score, recommendation, tags, reason, title, model,
-                         analyzed_at, status, favorite, error, created_at)
+                         proxy_path, dimensions, location, exif, phash, score, recommendation, tags, reason, title, raw_path, model,
+                         analyzed_at, status, favorite, geocoded, error, created_at)
                     VALUES
                         (:path, :original_path, :folder, :filename, :size, :width, :height, :thumb_path,
-                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :recommendation, :tags, :reason, :title, :model,
-                         :analyzed_at, :status, :favorite, :error, :created_at)
+                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :recommendation, :tags, :reason, :title, :raw_path, :model,
+                         :analyzed_at, :status, :favorite, :geocoded, :error, :created_at)
                     ON CONFLICT(path) DO UPDATE SET
                         original_path=excluded.original_path,
                         folder=excluded.folder,
@@ -225,6 +322,7 @@ class Database:
                         tags=excluded.tags,
                         reason=excluded.reason,
                         title=excluded.title,
+                        raw_path=excluded.raw_path,
                         model=excluded.model,
                         analyzed_at=excluded.analyzed_at,
                         status=excluded.status,
@@ -259,10 +357,12 @@ class Database:
                         else record.get("tags"),
                         "reason": record.get("reason"),
                         "title": record.get("title"),
+                        "raw_path": record.get("raw_path"),
                         "model": record.get("model"),
                         "analyzed_at": record.get("analyzed_at"),
                         "status": record.get("status", "pending"),
                         "favorite": record.get("favorite", 0),
+                        "geocoded": 1 if record.get("geocoded") else 0,
                         "error": record.get("error"),
                         "created_at": record.get("created_at", now),
                     },
@@ -347,40 +447,38 @@ class Database:
             clauses.append("favorite = ?")
             params.append(1 if favorite else 0)
         where = "WHERE " + " AND ".join(clauses) if clauses else ""
-        # Year filtering and capture-time sorting need access to the parsed
-        # EXIF JSON, so they are applied in Python on the filtered rows.
-        needs_python_pass = year is not None or sort in ("time_asc", "time_desc")
-        if not needs_python_pass:
-            sort_map = {
-                "score_asc": "(score IS NULL) ASC, score ASC",
-                "score_desc": "(score IS NULL) ASC, score DESC",
-                "filename": "filename COLLATE NOCASE ASC",
-                "recent": "analyzed_at DESC",
-                "size": "size DESC",
-            }
-            order = sort_map.get(sort, sort_map["score_asc"])
+        # Capture time lives inside the ``exif`` JSON text, either as an EXIF
+        # timestamp with a separator (``2023:01:02 03:04:05``) or as an ISO
+        # string. Both sorting and year filtering are pushed into SQLite as
+        # expressions on that column, so LIMIT/OFFSET still apply and the whole
+        # library never has to be materialised in Python.
+        if year is not None:
+            clauses.append(f"{_capture_year_sql_expr()} = ?")
+            params.append(str(year))
+            where = "WHERE " + " AND ".join(clauses)
+        if sort in ("time_asc", "time_desc"):
+            direction = "ASC" if sort == "time_asc" else "DESC"
+            capture_time = _capture_time_sql_expr()
+            order = f"({capture_time}) IS NULL ASC, {capture_time} {direction}"
             sql = f"SELECT * FROM photos {where} ORDER BY {order} LIMIT ? OFFSET ?"
-            query_params = params + [limit, offset]
-            with self._lock:
-                conn = self._connect()
-                try:
-                    rows = conn.execute(sql, query_params).fetchall()
-                    return [self._row_to_dict(r) for r in rows]
-                finally:
-                    conn.close()
+            return self._query_photos(sql, params + [limit, offset])
 
-        sql = f"SELECT * FROM photos {where}"
+        sort_map = {
+            "score_asc": "(score IS NULL) ASC, score ASC",
+            "score_desc": "(score IS NULL) ASC, score DESC",
+            "filename": "filename COLLATE NOCASE ASC",
+            "recent": "analyzed_at DESC",
+            "size": "size DESC",
+        }
+        order = sort_map.get(sort, sort_map["score_asc"])
+        sql = f"SELECT * FROM photos {where} ORDER BY {order} LIMIT ? OFFSET ?"
+        return self._query_photos(sql, params + [limit, offset])
+
+    def _query_photos(self, sql: str, params: Sequence[Any]) -> list[dict[str, Any]]:
         with self._lock:
             conn = self._connect()
-            try:
-                rows = conn.execute(sql, params).fetchall()
-                photos = [self._row_to_dict(r) for r in rows]
-            finally:
-                conn.close()
-        if year is not None:
-            photos = [p for p in photos if photo_capture_year(p) == year]
-        sort_photos(photos, sort)
-        return photos[offset : offset + limit]
+            rows = conn.execute(sql, params).fetchall()
+        return [self._row_to_dict(r) for r in rows]
 
     def count_photos(
         self,
@@ -585,6 +683,12 @@ class Database:
                 conn.close()
 
     def mark_error(self, photo_id: int, error: str) -> None:
+        """Record a processing failure for one photo.
+
+        Superseded by ``scanner._record_photo_error`` (which preserves an
+        existing good analysis); kept because it is the narrow, explicit way to
+        flag a row and is used by tests.
+        """
         with self._lock:
             conn = self._connect()
             try:

@@ -11,13 +11,14 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .api_client import analyze_image, build_analysis_context
 from .cache import ensure_cache_dirs
 from .config import Config
 from .exif import extract_exif
 from .geocode import reverse_geocode
-from .thumbnailer import make_proxy
+from .thumbnailer import RAW_EXTENSIONS, make_proxy
 
 
 class AnalysisGate:
@@ -78,10 +79,21 @@ class PreparedPhoto:
     phash: str
     exif: dict = field(default_factory=dict)
     location: str | None = None
+    #: Same-named camera-raw sibling, kept for the "RAW" badge in the UI.
+    raw_path: str | None = None
+    #: True when ``image_path`` itself is the raw file (no JPEG counterpart).
+    is_raw: bool = False
 
 
-def prepare_proxy(image_path: str, folder: str, config: Config) -> PreparedPhoto:
-    """Generate (or reuse) the proxy file for a photo."""
+def prepare_proxy(
+    image_path: str, folder: str, config: Config, raw_path: str | None = None
+) -> PreparedPhoto:
+    """Generate (or reuse) the proxy file for a photo.
+
+    ``raw_path`` records a same-named camera-raw sibling (``DSC_0001.NEF`` next
+    to ``DSC_0001.JPG``). The JPEG stays the analysed image; the raw file is
+    only remembered so the UI can flag the card.
+    """
     image_path = os.path.abspath(image_path)
     folder = os.path.abspath(folder)
     cache_dir = ensure_cache_dirs(folder, config.cache_dir_name)
@@ -103,6 +115,8 @@ def prepare_proxy(image_path: str, folder: str, config: Config) -> PreparedPhoto
         proxy_path=proxy_path,
         thumb_path=thumb_path,
         phash=phash,
+        raw_path=os.path.abspath(raw_path) if raw_path else None,
+        is_raw=Path(image_path).suffix.lower() in RAW_EXTENSIONS,
     )
 
 
@@ -125,16 +139,29 @@ def enrich_metadata(
     prepared: PreparedPhoto,
     config: Config,
     existing_location: str | None = None,
+    already_geocoded: bool = False,
 ) -> PreparedPhoto:
     """Extract EXIF and resolve a place name when GPS is present.
+
+    The ``geocoded`` flag lives in the ``photos`` table rather than in the file
+    (EXIF is re-read from disk on every pass, so a flag written into the parsed
+    dict never survives). ``already_geocoded`` carries that persisted state in,
+    which is what stops the index and analysis phases from reverse geocoding
+    the same photo twice.
 
     If reverse geocoding fails, a previously resolved human-readable address
     is kept instead of being overwritten by raw coordinates.
     """
     location, exif = extract_exif(prepared.image_path)
-    if exif.get("geocoded"):
+    if already_geocoded:
         # Indexing already resolved this location; avoid a duplicate request.
-        location = exif.get("location") or location
+        # ``extract_exif`` only ever returns raw coordinates, so the resolved
+        # address from the database wins when the two disagree.
+        if location and is_coordinate_location(location):
+            location = existing_location or exif.get("location") or location
+        else:
+            location = location or existing_location or exif.get("location")
+        prepared.exif = exif or {}
     elif exif.get("latitude") is not None and exif.get("longitude") is not None:
         place = reverse_geocode(
             exif["latitude"],
@@ -150,10 +177,12 @@ def enrich_metadata(
             exif["geocoded"] = True
         elif existing_location and not is_coordinate_location(existing_location):
             location = existing_location
-    elif location is None and existing_location:
-        location = existing_location
+        prepared.exif = exif or {}
+    else:
+        if location is None and existing_location:
+            location = existing_location
+        prepared.exif = exif or {}
     prepared.location = location
-    prepared.exif = exif or {}
     return prepared
 
 
@@ -162,10 +191,15 @@ def prepare_for_analysis(
     folder: str,
     config: Config,
     existing_location: str | None = None,
+    raw_path: str | None = None,
+    already_geocoded: bool = False,
 ) -> PreparedPhoto:
     """Prepare proxy + metadata, then return an analysis-ready object."""
     return enrich_metadata(
-        prepare_proxy(image_path, folder, config), config, existing_location
+        prepare_proxy(image_path, folder, config, raw_path=raw_path),
+        config,
+        existing_location,
+        already_geocoded=already_geocoded,
     )
 
 
@@ -185,6 +219,7 @@ def base_record(
         "thumb_path": prepared.thumb_path,
         "proxy_path": prepared.proxy_path,
         "phash": prepared.phash,
+        "raw_path": prepared.raw_path,
         "status": status,
     }
     if existing:

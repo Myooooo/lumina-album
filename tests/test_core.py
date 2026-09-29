@@ -21,10 +21,25 @@ from photo_reviewer.api_client import (
     _parse_model_json,
     analyze_image,
 )
-from photo_reviewer.config import Config
-from photo_reviewer.db import Database, parse_capture_datetime
-from photo_reviewer.scanner import JOBS, start_scan
+from photo_reviewer.cache import (
+    cleanup_folder_cache,
+    load_scan_results_from_cache,
+)
+from photo_reviewer.config import PERSISTED_FIELDS, Config
+from photo_reviewer.db import Database, parse_capture_datetime, sort_photos
+from photo_reviewer.paths import canonical_path
+from photo_reviewer.scanner import (
+    JOBS,
+    discover_images,
+    discover_photo_pairs,
+    start_scan,
+)
 from photo_reviewer.server import create_app
+from photo_reviewer.thumbnailer import (
+    cleanup_cache,
+    hamming_distance,
+    make_proxy,
+)
 
 
 def wait_for_job(job_id: str, timeout: float = 6.0) -> dict:
@@ -53,6 +68,7 @@ class DatabaseTests(unittest.TestCase):
         self.db = Database(os.path.join(self.tmp.name, "library.db"))
 
     def tearDown(self) -> None:
+        self.db.close()
         self.db = None
         self.tmp.cleanup()
 
@@ -87,6 +103,19 @@ class DatabaseTests(unittest.TestCase):
             p["filename"] for p in self.db.list_photos(folder=folder, sort="time_desc")
         ]
         self.assertEqual(descending, ["d.jpg", "b.jpg", "c.jpg", "a.jpg"])
+        # Capture-time sorting and year filtering are pushed into SQL, so a
+        # paginated page must be correct without loading the whole table.
+        page = self.db.list_photos(folder=folder, sort="time_asc", limit=2, offset=0)
+        self.assertEqual([p["filename"] for p in page], ["c.jpg", "b.jpg"])
+        next_page = self.db.list_photos(
+            folder=folder, sort="time_asc", limit=2, offset=2
+        )
+        self.assertEqual([p["filename"] for p in next_page], ["d.jpg", "a.jpg"])
+        year_page = self.db.list_photos(folder=folder, year=2024, limit=10)
+        self.assertEqual([p["filename"] for p in year_page], ["d.jpg"])
+        year_missing = self.db.list_photos(folder=folder, year=1999, limit=10)
+        self.assertEqual(year_missing, [])
+
         self.assertEqual(self.db.capture_years(folder), [2024, 2023, 2021])
         self.assertEqual(
             [p["filename"] for p in self.db.list_photos(folder=folder, year=2021)],
@@ -538,6 +567,7 @@ class ScannerTests(unittest.TestCase):
         os.makedirs(self.folder)
 
     def tearDown(self) -> None:
+        self.db.close()
         self.tmp.cleanup()
 
     def test_index_phase_uses_configured_concurrency(self) -> None:
@@ -551,12 +581,12 @@ class ScannerTests(unittest.TestCase):
 
         original_prepare_proxy = scanner_module.prepare_proxy
 
-        def slow_prepare(image_path, folder, config):
+        def slow_prepare(image_path, folder, config, raw_path=None):
             active[0] += 1
             peak[0] = max(peak[0], active[0])
             time.sleep(0.08)
             try:
-                return original_prepare_proxy(image_path, folder, config)
+                return original_prepare_proxy(image_path, folder, config, raw_path)
             finally:
                 active[0] -= 1
 
@@ -724,6 +754,47 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(calls[0][2], self.cfg.geocoding_interval)
         self.assertEqual(calls[0][3], self.cfg.geocoding_retries)
 
+    def test_geocoding_runs_once_and_survives_later_passes(self) -> None:
+        """The analysed pass must not repeat the index pass's network call.
+
+        EXIF is re-read from the file on every pass, so the "already resolved"
+        flag has to live in the database; otherwise every photo with GPS is
+        geocoded twice per scan (and again on every re-analysis).
+        """
+        image_path = os.path.join(self.folder, "gps.jpg")
+        img = Image.new("RGB", (40, 40))
+        exif = Image.Exif()
+        exif[0x8825] = {1: "N", 2: (30.0, 15.0, 0.0), 3: "E", 4: (120.0, 10.0, 0.0)}
+        img.save(image_path, exif=exif)
+        calls = []
+
+        def fake_geocode(lat, lon, provider, api_key, interval=1.0, retries=3):
+            calls.append((lat, lon))
+            return "杭州西湖"
+
+        with (
+            patch("photo_reviewer.scanner.reverse_geocode", side_effect=fake_geocode),
+            patch("photo_reviewer.pipeline.reverse_geocode", side_effect=fake_geocode),
+            patch("photo_reviewer.scanner.analyze_prepared", side_effect=fake_analysis),
+        ):
+            wait_for_job(start_scan(self.folder, self.db, self.cfg).id)
+            self.assertEqual(len(calls), 1, "index + analyse must share one lookup")
+            photo_id = self.db.get_photo_by_path(image_path)["id"]
+            row = self.db.get_photo(photo_id)
+            self.assertEqual(row["location"], "杭州西湖")
+            self.assertTrue(row["geocoded"])
+
+            # A forced re-scan refreshes EXIF but keeps the resolved address.
+            wait_for_job(start_scan(self.folder, self.db, self.cfg, force=True).id)
+            self.assertEqual(len(calls), 1, "a re-scan must not re-geocode")
+
+            from photo_reviewer.scanner import reanalyze_photo
+
+            updated = reanalyze_photo(photo_id, self.db, self.cfg)
+            self.assertEqual(len(calls), 1, "re-analysis must not re-geocode")
+            self.assertEqual(updated["location"], "杭州西湖")
+            self.assertTrue(updated["geocoded"])
+
     def test_reanalyze_syncs_exif_before_model_call(self) -> None:
         image_path = os.path.join(self.folder, "camera.jpg")
         img = Image.new("RGB", (40, 40))
@@ -788,6 +859,7 @@ class ServerApiTests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self) -> None:
+        self.db.close()
         self.tmp.cleanup()
 
     def test_smart_search_falls_back_with_warning(self) -> None:
@@ -957,6 +1029,470 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.post("/api/reanalyze", json={"id": "x"}).status_code, 400
         )
+
+    def test_bad_pagination_returns_json_400(self) -> None:
+        """Numeric query parameters are validated instead of raising a 500."""
+        for query in ("limit=abc", "offset=abc", "limit=", "limit=1e3"):
+            resp = self.client.get(f"/api/photos?{query}")
+            self.assertEqual(resp.status_code, 400, query)
+            self.assertEqual(resp.get_json()["error"], "limit/offset 参数不合法")
+
+    def test_negative_limit_is_clamped(self) -> None:
+        resp = self.client.get("/api/photos?limit=-5")
+        self.assertEqual(resp.status_code, 200)
+        self.assertLessEqual(len(resp.get_json()["photos"]), 1)
+
+    def test_cross_origin_write_is_rejected(self) -> None:
+        with self.assertLogs("photo_reviewer.server", level="WARNING"):
+            resp = self.client.post(
+                "/api/favorite",
+                json={"id": 1, "favorite": True},
+                headers={"Origin": "http://evil.example"},
+            )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_same_origin_write_is_allowed(self) -> None:
+        resp = self.client.post(
+            "/api/favorite",
+            json={"id": 1, "favorite": True},
+            headers={"Origin": "http://localhost"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["favorite"])
+
+    def test_csrf_style_content_type_is_still_origin_checked(self) -> None:
+        """A text/plain body is parsed by Flask, so the Origin guard must hold."""
+        with self.assertLogs("photo_reviewer.server", level="WARNING"):
+            resp = self.client.post(
+                "/api/delete",
+                data=json.dumps({"ids": [1]}),
+                content_type="text/plain",
+                headers={"Origin": "http://evil.example"},
+            )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_invalid_config_payload_changes_nothing(self) -> None:
+        """A rejected field must not leave the running config half-updated."""
+        before = self.cfg.model_retries
+        resp = self.client.post(
+            "/api/config", json={"model_retries": 7, "request_timeout": "nope"}
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.cfg.model_retries, before)
+
+    def test_non_editable_settings_keys_are_ignored(self) -> None:
+        resp = self.client.post(
+            "/api/config", json={"cache_dir_name": "..", "host": "0.0.0.0"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.cfg.cache_dir_name, ".photo-review-cache")
+        self.assertNotEqual(self.cfg.host, "0.0.0.0")
+
+    def test_host_port_debug_are_not_persisted(self) -> None:
+        self.client.post("/api/config", json={"model": "next-model"})
+        stored = self.db.get_settings()
+        for key in ("host", "port", "debug"):
+            self.assertNotIn(key, stored)
+        self.assertNotIn("host", PERSISTED_FIELDS)
+        self.assertIn("model", stored)
+
+    def test_photo_payload_is_trimmed_for_the_gallery(self) -> None:
+        resp = self.client.get("/api/photos")
+        photo = resp.get_json()["photos"][0]
+        self.assertIn("path", photo)
+        self.assertIn("raw_path", photo)
+        self.assertIn("is_raw", photo)
+        self.assertNotIn("phash", photo)
+        self.assertNotIn("proxy_path", photo)
+
+    def test_delete_restore_roundtrip_moves_the_file(self) -> None:
+        source = os.path.join(self.folder, "a.jpg")
+        Image.new("RGB", (16, 16)).save(source)
+        photo_id = self.db.get_photo_by_path(source)["id"]
+
+        resp = self.client.post("/api/delete", json={"ids": [photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        moved = resp.get_json()["moved"]
+        self.assertEqual(len(moved), 1)
+        self.assertFalse(os.path.exists(source))
+        self.assertTrue(os.path.exists(moved[0]["path"]))
+
+        resp = self.client.post("/api/restore", json={"ids": [photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        restored = resp.get_json()["restored"]
+        self.assertEqual(len(restored), 1)
+        self.assertTrue(os.path.exists(restored[0]["path"]))
+        self.assertEqual(
+            self.db.get_photo(photo_id)["status"], "pending"
+        )
+
+    def test_permanent_delete_removes_file_and_row(self) -> None:
+        source = os.path.join(self.folder, "a.jpg")
+        Image.new("RGB", (16, 16)).save(source)
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        trashed = self.db.get_photo(photo_id)["path"]
+
+        resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["purged"][0]["id"], photo_id)
+        self.assertFalse(os.path.exists(trashed))
+        self.assertIsNone(self.db.get_photo(photo_id))
+
+    def test_thumbnail_prefers_the_sibling_thumb_file(self) -> None:
+        """A row pointing at the proxy still serves the small thumbnail."""
+        source = os.path.join(self.folder, "a.jpg")
+        Image.new("RGB", (64, 48), (200, 120, 60)).save(source)
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        resp = self.client.get(f"/api/thumbnail/{photo_id}")
+        resp.close()
+        photo = self.db.get_photo(photo_id)
+        thumb = photo["thumb_path"]
+        self.assertTrue(thumb.endswith("_thumb.jpg"))
+        self.assertTrue(os.path.exists(thumb))
+
+        # Simulate a database written by an older version.
+        self.db.update_proxy_path(photo_id, photo["proxy_path"])
+        import sqlite3
+
+        conn = sqlite3.connect(self.cfg.db_path)
+        conn.execute(
+            "UPDATE photos SET thumb_path=? WHERE id=?",
+            (photo["proxy_path"], photo_id),
+        )
+        conn.commit()
+        conn.close()
+
+        resp = self.client.get(f"/api/thumbnail/{photo_id}")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_data()[:2], b"\xff\xd8")
+        resp.close()
+
+
+class RawSupportTests(unittest.TestCase):
+    """Raw files are second-class citizens: the JPEG is the analysed photo."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _write(self, name: str, size=(32, 24)) -> str:
+        path = os.path.join(self.folder, name)
+        Image.new("RGB", size, (120, 160, 200)).save(path)
+        return path
+
+    def test_pairs_prefer_the_image_and_remember_the_raw(self) -> None:
+        jpg = self._write("DSC_0001.JPG")
+        raw = os.path.join(self.folder, "DSC_0001.NEF")
+        Path(raw).write_bytes(b"raw-payload")
+        self._write("lonely.jpg")
+
+        pairs = dict(discover_photo_pairs(self.folder))
+        self.assertIn(jpg, pairs)
+        self.assertEqual(pairs[jpg], raw)
+        self.assertEqual(len(pairs), 2)
+        self.assertNotIn(raw, pairs)
+
+    def test_raw_only_files_are_indexed_on_their_own(self) -> None:
+        raw = os.path.join(self.folder, "lonely.ARW")
+        Path(raw).write_bytes(b"raw-payload")
+        pairs = discover_photo_pairs(self.folder)
+        self.assertEqual(pairs, [(raw, None)])
+        self.assertEqual(discover_images(self.folder), [raw])
+
+    def test_raw_matching_is_case_insensitive_on_the_extension(self) -> None:
+        jpg = self._write("IMG_1.jpg")
+        raw = os.path.join(self.folder, "IMG_1.nef")
+        Path(raw).write_bytes(b"raw")
+        pairs = dict(discover_photo_pairs(self.folder))
+        self.assertEqual(pairs[jpg], raw)
+        self.assertEqual(len(pairs), 1)
+
+    def test_scan_records_raw_path_and_marks_the_photo(self) -> None:
+        self._write("DSC_0002.JPG")
+        raw = os.path.join(self.folder, "DSC_0002.NEF")
+        Path(raw).write_bytes(b"raw")
+        raw_only = os.path.join(self.folder, "SOLO.ARW")
+        Path(raw_only).write_bytes(b"raw")
+
+        with patch(
+            "photo_reviewer.scanner.analyze_prepared", side_effect=fake_analysis
+        ):
+            job = start_scan(self.folder, self.db, self.cfg)
+            result = wait_for_job(job.id)
+
+        self.assertEqual(result.status, "completed")
+        rows = {p["filename"]: p for p in self.db.list_photos(folder=self.folder)}
+        self.assertEqual(set(rows), {"DSC_0002.JPG", "SOLO.ARW"})
+        self.assertEqual(rows["DSC_0002.JPG"]["raw_path"], raw)
+        self.assertIsNone(rows["SOLO.ARW"]["raw_path"])
+
+    def test_gallery_payload_flags_raw_siblings(self) -> None:
+        jpg = self._write("DSC_0003.JPG")
+        raw = os.path.join(self.folder, "DSC_0003.NEF")
+        Path(raw).write_bytes(b"raw")
+        self.db.upsert_photo(
+            {
+                "path": jpg,
+                "folder": self.folder,
+                "filename": "DSC_0003.JPG",
+                "status": "analyzed",
+                "score": 8.0,
+                "raw_path": raw,
+            }
+        )
+        app = create_app(self.cfg, self.db)
+        client = app.test_client()
+        photo = client.get("/api/photos").get_json()["photos"][0]
+        self.assertTrue(photo["has_raw"])
+        self.assertFalse(photo["is_raw"])
+        self.assertEqual(photo["raw_ext"], "NEF")
+
+    def test_raw_only_photo_is_flagged_as_raw(self) -> None:
+        raw = os.path.join(self.folder, "SOLO.ARW")
+        Path(raw).write_bytes(b"raw")
+        self.db.upsert_photo(
+            {
+                "path": raw,
+                "folder": self.folder,
+                "filename": "SOLO.ARW",
+                "status": "analyzed",
+                "score": 6.0,
+            }
+        )
+        app = create_app(self.cfg, self.db)
+        client = app.test_client()
+        photo = client.get("/api/photos").get_json()["photos"][0]
+        self.assertTrue(photo["is_raw"])
+        self.assertFalse(photo["has_raw"])
+
+    def test_embedded_preview_is_extracted_from_a_fake_raw(self) -> None:
+        """A TIFF container holding a JPEG preview is rendered from the preview."""
+        import io
+        import random
+
+        rng = random.Random(7)
+        noisy = Image.new("RGB", (400, 300))
+        noisy.putdata(
+            [(rng.randrange(256), rng.randrange(256), rng.randrange(256)) for _ in range(400 * 300)]
+        )
+        buffer = io.BytesIO()
+        noisy.save(buffer, "JPEG", quality=95)
+        preview = buffer.getvalue()
+        self.assertGreater(len(preview), 5000)
+
+        raw_path = os.path.join(self.folder, "embedded.nef")
+        with open(raw_path, "wb") as fh:
+            fh.write(b"II*\x00\x08\x00\x00\x00")  # TIFF header
+            fh.write(b"\x00" * 64)
+            fh.write(preview)
+            fh.write(b"\x00" * 32)
+
+        proxy, width, height, image_hash, thumb = make_proxy(
+            raw_path, cache_dir=os.path.join(self.tmp.name, "cache")
+        )
+        self.assertEqual((width, height), (400, 300))
+        self.assertTrue(proxy.endswith("_proxy.jpg"))
+        self.assertTrue(thumb.endswith("_thumb.jpg"))
+        self.assertEqual(len(image_hash), 16)
+        with Image.open(thumb) as img:
+            self.assertEqual(img.size, (400, 300))
+
+    def test_thumbnailer_falls_back_when_no_preview_exists(self) -> None:
+        """A raw file with no embedded JPEG still goes through Pillow."""
+        staged = os.path.join(self.folder, "plain.jpg")
+        Image.new("RGB", (48, 36), (30, 90, 150)).save(staged, "TIFF")
+        raw_path = os.path.join(self.folder, "plain.dng")
+        os.replace(staged, raw_path)
+        proxy, width, height, _hash, thumb = make_proxy(
+            raw_path, cache_dir=os.path.join(self.tmp.name, "cache")
+        )
+        self.assertEqual((width, height), (48, 36))
+        self.assertTrue(os.path.exists(proxy))
+        self.assertTrue(os.path.exists(thumb))
+
+
+class CacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp.name, "library.db"))
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_cleanup_removes_only_unreferenced_files(self) -> None:
+        cache = os.path.join(self.folder, ".cache")
+        os.makedirs(cache)
+        keep = os.path.join(cache, "keep_proxy.jpg")
+        drop = os.path.join(cache, "drop_proxy.jpg")
+        for path in (keep, drop):
+            Path(path).write_bytes(b"x" * 10)
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.folder, "a.jpg"),
+                "folder": self.folder,
+                "filename": "a.jpg",
+                "proxy_path": keep,
+                "thumb_path": keep,
+                "status": "analyzed",
+            }
+        )
+        result = cleanup_folder_cache(self.folder, self.db, ".cache")
+        self.assertEqual(result["freed"], 1)
+        self.assertTrue(os.path.exists(keep))
+        self.assertFalse(os.path.exists(drop))
+
+    def test_cleanup_sweeps_temporary_files(self) -> None:
+        cache = os.path.join(self.folder, ".cache")
+        os.makedirs(cache)
+        leftover = os.path.join(cache, "half_proxy.jpg.1234.5678.tmp")
+        Path(leftover).write_bytes(b"partial")
+        cleanup_folder_cache(self.folder, self.db, ".cache")
+        self.assertFalse(os.path.exists(leftover))
+
+    def test_cleanup_cache_reports_affected_photos(self) -> None:
+        cache = os.path.join(self.tmp.name, "cache")
+        os.makedirs(cache)
+        Path(os.path.join(cache, "abc_proxy.jpg")).write_bytes(b"x")
+        Path(os.path.join(cache, "abc_thumb.jpg")).write_bytes(b"x")
+        Path(os.path.join(cache, "notes.txt")).write_bytes(b"keep me")
+        result = cleanup_cache([], cache)
+        self.assertEqual(result["freed"], 2)
+        self.assertEqual(result["photos_affected"], 1)
+        self.assertTrue(os.path.exists(os.path.join(cache, "notes.txt")))
+
+    def test_legacy_cache_import_skips_deleted_and_analyzed(self) -> None:
+        cache = os.path.join(self.folder, ".cache")
+        os.makedirs(cache)
+        payload = {
+            "photos": [
+                {"path": os.path.join(self.folder, "new.jpg"), "status": "analyzed"},
+                {"path": os.path.join(self.folder, "gone.jpg"), "status": "deleted"},
+                {"path": os.path.join(self.folder, "done.jpg"), "status": "analyzed"},
+            ]
+        }
+        cache_file = os.path.join(cache, "scan_results.json")
+        Path(cache_file).write_text(json.dumps(payload), encoding="utf-8")
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.folder, "gone.jpg"),
+                "folder": self.folder,
+                "filename": "gone.jpg",
+                "status": "deleted",
+            }
+        )
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.folder, "done.jpg"),
+                "folder": self.folder,
+                "filename": "done.jpg",
+                "status": "analyzed",
+                "score": 9.0,
+            }
+        )
+
+        imported = load_scan_results_from_cache(self.folder, self.db, ".cache")
+        self.assertEqual(imported, 1)
+        self.assertIsNotNone(
+            self.db.get_photo_by_path(os.path.join(self.folder, "new.jpg"))
+        )
+        self.assertEqual(
+            self.db.get_photo_by_path(os.path.join(self.folder, "done.jpg"))["score"],
+            9.0,
+        )
+        self.assertFalse(os.path.exists(cache_file))
+
+
+class PathAndSortTests(unittest.TestCase):
+    def test_canonical_path_normalises_case(self) -> None:
+        here = os.path.abspath(".")
+        self.assertEqual(canonical_path(here.lower()), canonical_path(here.upper()))
+
+    def test_sort_photos_supports_every_ui_sort_key(self) -> None:
+        photos = [
+            {"filename": "b.jpg", "score": 5.0, "size": 10, "exif": {}, "analyzed_at": "2024-01-01"},
+            {"filename": "a.jpg", "score": 9.0, "size": 30, "exif": {}, "analyzed_at": "2023-01-01"},
+            {"filename": "c.jpg", "score": None, "size": 20, "exif": {}, "analyzed_at": None},
+        ]
+        self.assertEqual(
+            [p["filename"] for p in sort_photos(list(photos), "score_desc")],
+            ["a.jpg", "b.jpg", "c.jpg"],
+        )
+        self.assertEqual(
+            [p["filename"] for p in sort_photos(list(photos), "score_asc")],
+            ["b.jpg", "a.jpg", "c.jpg"],
+        )
+        self.assertEqual(
+            [p["filename"] for p in sort_photos(list(photos), "filename")],
+            ["a.jpg", "b.jpg", "c.jpg"],
+        )
+        self.assertEqual(
+            [p["filename"] for p in sort_photos(list(photos), "size")],
+            ["a.jpg", "c.jpg", "b.jpg"],
+        )
+        self.assertEqual(
+            [p["filename"] for p in sort_photos(list(photos), "recent")],
+            ["b.jpg", "a.jpg", "c.jpg"],
+        )
+
+    def test_sort_photos_orders_capture_time_with_missing_last(self) -> None:
+        photos = [
+            {"filename": "old.jpg", "exif": {"datetime_original": "2019:01:01 00:00:00"}},
+            {"filename": "none.jpg", "exif": {}},
+            {"filename": "new.jpg", "exif": {"datetime_original": "2024:01:01 00:00:00"}},
+        ]
+        asc = [p["filename"] for p in sort_photos(list(photos), "time_asc")]
+        desc = [p["filename"] for p in sort_photos(list(photos), "time_desc")]
+        self.assertEqual(asc, ["old.jpg", "new.jpg", "none.jpg"])
+        self.assertEqual(desc, ["new.jpg", "old.jpg", "none.jpg"])
+
+    def test_hamming_distance_rejects_mixed_width_hashes(self) -> None:
+        self.assertEqual(hamming_distance("00", "0f"), 4)
+        self.assertEqual(hamming_distance("00", "000f"), 999)
+        self.assertEqual(hamming_distance("", "0f"), 999)
+        self.assertEqual(hamming_distance("zz", "0f"), 999)
+        self.assertEqual(hamming_distance("f" * 16, "0" * 16), 64)
+
+
+class DiscoverImagesTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_missing_folder_raises(self) -> None:
+        with self.assertRaises(NotADirectoryError):
+            discover_images(os.path.join(self.tmp.name, "nope"))
+
+    def test_skips_trash_and_git_directories(self) -> None:
+        Path(os.path.join(self.folder, "keep.jpg")).write_bytes(b"x")
+        for name in (".photo-trash", ".git", "__pycache__"):
+            nested = os.path.join(self.folder, name)
+            os.makedirs(nested)
+            Path(os.path.join(nested, "hidden.jpg")).write_bytes(b"x")
+        found = discover_images(self.folder, skip_dirs=[".photo-trash"])
+        self.assertEqual([os.path.basename(p) for p in found], ["keep.jpg"])
+
+    def test_results_are_sorted_and_filtered_by_extension(self) -> None:
+        for name in ("b.jpg", "a.png", "c.txt", "d.webp"):
+            Path(os.path.join(self.folder, name)).write_bytes(b"x")
+        found = [os.path.basename(p) for p in discover_images(self.folder)]
+        self.assertEqual(found, ["a.png", "b.jpg", "d.webp"])
 
 
 if __name__ == "__main__":

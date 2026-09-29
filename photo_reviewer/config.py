@@ -1,9 +1,12 @@
 """Configuration for the local photo review system.
 
-Settings can be provided through environment variables, and are persisted to
-the SQLite database under ``<data_dir>/library.db`` when changed from the web
-UI. On the next start the saved settings are loaded automatically, so no
-configuration is lost.
+Settings can be provided through environment variables, and the ones the user
+can change in the web UI are persisted to the SQLite database (``settings``
+table inside ``<data_dir>/library.db``). On the next start those values are
+loaded automatically, so no configuration is lost.
+
+``host``/``port``/``debug`` are deliberately excluded from that round trip:
+they govern how the process boots and stay under the operator's control.
 """
 
 from __future__ import annotations
@@ -22,6 +25,13 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# Fields written to and restored from the SQLite ``settings`` table.
+#
+# ``host``/``port``/``debug`` are intentionally NOT listed: they decide how the
+# process binds and boots, so they must stay under the operator's control
+# through the environment instead of being pinned by a row written during an
+# earlier run (a persisted ``debug=true`` would re-enable the Werkzeug
+# interactive debugger on an unrelated later start).
 PERSISTED_FIELDS = (
     "api_base_url",
     "api_key",
@@ -41,9 +51,26 @@ PERSISTED_FIELDS = (
     "geocoding_api_key",
     "geocoding_interval",
     "geocoding_retries",
-    "host",
-    "port",
-    "debug",
+)
+
+# Fields the web UI is allowed to change through ``POST /api/config``. The UI
+# must never be able to move the cache/trash directories or rebind the server.
+EDITABLE_FIELDS = frozenset(PERSISTED_FIELDS) - {"trash_dir_name", "cache_dir_name"}
+
+# Persisted fields stored as integers (everything else except
+# ``geocoding_interval`` is a string or a float).
+_INT_FIELDS = frozenset(
+    {
+        "proxy_max_edge",
+        "gallery_thumb_size",
+        "proxy_quality",
+        "thumb_quality",
+        "scan_concurrency",
+        "index_concurrency",
+        "request_timeout",
+        "model_retries",
+        "geocoding_retries",
+    }
 )
 
 
@@ -65,17 +92,36 @@ class Config:
         default_factory=lambda: os.getenv("PHOTO_SYSTEM_PROMPT", "")
     )
 
-    # Image proxy generation.
-    proxy_max_edge: int = int(os.getenv("PHOTO_PROXY_MAX_EDGE", "1280"))
-    gallery_thumb_size: int = int(os.getenv("PHOTO_GALLERY_THUMB_SIZE", "640"))
-    proxy_quality: int = int(os.getenv("PHOTO_PROXY_QUALITY", "80"))
-    thumb_quality: int = int(os.getenv("PHOTO_THUMB_QUALITY", "50"))
+    # Image proxy generation. Every numeric field below uses ``default_factory``
+    # so the environment is read once per instance instead of once at import
+    # time; a plain ``int(os.getenv(...))`` default is frozen when the module is
+    # first imported and silently ignores later environment changes.
+    proxy_max_edge: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_PROXY_MAX_EDGE", "1280"))
+    )
+    gallery_thumb_size: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_GALLERY_THUMB_SIZE", "640"))
+    )
+    proxy_quality: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_PROXY_QUALITY", "80"))
+    )
+    thumb_quality: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_THUMB_QUALITY", "50"))
+    )
 
     # Scanning.
-    scan_concurrency: int = int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
-    index_concurrency: int = int(os.getenv("PHOTO_INDEX_CONCURRENCY", "4"))
-    request_timeout: int = int(os.getenv("PHOTO_REQUEST_TIMEOUT", "120"))
-    model_retries: int = int(os.getenv("PHOTO_MODEL_RETRIES", "3"))
+    scan_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
+    )
+    index_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_INDEX_CONCURRENCY", "4"))
+    )
+    request_timeout: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_REQUEST_TIMEOUT", "120"))
+    )
+    model_retries: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_MODEL_RETRIES", "3"))
+    )
     # Storage.
     data_dir: str = field(
         default_factory=lambda: os.getenv(
@@ -95,13 +141,27 @@ class Config:
     geocoding_api_key: str = field(
         default_factory=lambda: os.getenv("PHOTO_GEOCODING_API_KEY", "")
     )
-    geocoding_interval: float = float(os.getenv("PHOTO_GEOCODING_INTERVAL", "1.0"))
-    geocoding_retries: int = int(os.getenv("PHOTO_GEOCODING_RETRIES", "3"))
+    geocoding_interval: float = field(
+        default_factory=lambda: float(os.getenv("PHOTO_GEOCODING_INTERVAL", "1.0"))
+    )
+    geocoding_retries: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_GEOCODING_RETRIES", "3"))
+    )
     host: str = field(default_factory=lambda: os.getenv("PHOTO_HOST", "127.0.0.1"))
-    port: int = int(os.getenv("PHOTO_PORT", "5000"))
-    debug: bool = _env_bool("PHOTO_DEBUG", False)
+    port: int = field(default_factory=lambda: int(os.getenv("PHOTO_PORT", "5000")))
+    debug: bool = field(default_factory=lambda: _env_bool("PHOTO_DEBUG", False))
 
-    # Allowed image extensions.
+    # Extra origins allowed to call mutating endpoints, for reverse proxies or
+    # a second hostname. Comma separated; the app's own host is always allowed.
+    allowed_origins: tuple = field(
+        default_factory=lambda: tuple(
+            item.strip()
+            for item in os.getenv("PHOTO_ALLOWED_ORIGINS", "").split(",")
+            if item.strip()
+        )
+    )
+
+    # Allowed image extensions (processed directly).
     image_extensions: tuple = (
         ".jpg",
         ".jpeg",
@@ -113,7 +173,40 @@ class Config:
         ".tiff",
     )
 
-    # Runtime-computed settings path.
+    # Camera raw formats. These are only indexed when no same-named
+    # ``image_extensions`` file sits next to them, and they are rendered from
+    # their embedded JPEG preview instead of the sensor data.
+    raw_extensions: tuple = (
+        ".nef",
+        ".arw",
+        ".cr2",
+        ".cr3",
+        ".nrw",
+        ".dng",
+        ".orf",
+        ".rw2",
+        ".raf",
+        ".pef",
+        ".srw",
+        ".raw",
+        ".rwl",
+        ".3fr",
+        ".iiq",
+        ".mos",
+        ".mrw",
+        ".k25",
+        ".kdc",
+        ".dcr",
+        ".x3f",
+        ".erf",
+        ".mef",
+        ".sr2",
+        ".srf",
+        ".cap",
+        ".fff",
+    )
+
+    # Runtime-computed settings path (legacy JSON import only, see ``_load``).
     settings_path: str = ""
 
     def __post_init__(self) -> None:
@@ -125,6 +218,17 @@ class Config:
         self._load()
 
     def _load(self) -> None:
+        """Import a legacy ``settings.json`` once, for backwards compatibility.
+
+        Settings have been stored in the SQLite ``settings`` table since the
+        web UI gained its settings panel; ``Config.save`` is no longer called
+        anywhere. This reader is kept so that a hand-written or very old
+        ``settings.json`` still gets picked up on the first start.
+
+        Import-time defaults are frozen into the class, so ``host``/``port``/
+        ``debug`` are deliberately not importable from here: they must stay
+        under the operator's control via the environment.
+        """
         if not self.settings_path or not os.path.exists(self.settings_path):
             return
         try:
@@ -137,18 +241,7 @@ class Config:
         for key in PERSISTED_FIELDS:
             if key in saved and hasattr(self, key):
                 value = saved[key]
-                if key in {
-                    "proxy_max_edge",
-                    "gallery_thumb_size",
-                    "proxy_quality",
-                    "thumb_quality",
-                    "scan_concurrency",
-                    "index_concurrency",
-                    "request_timeout",
-                    "model_retries",
-                    "geocoding_retries",
-                    "port",
-                }:
+                if key in _INT_FIELDS:
                     try:
                         value = int(value)
                     except (TypeError, ValueError):
@@ -158,15 +251,7 @@ class Config:
                         value = float(value)
                     except (TypeError, ValueError):
                         continue
-                elif key == "debug":
-                    value = bool(value)
                 setattr(self, key, value)
-
-    def save(self) -> None:
-        data = {key: getattr(self, key) for key in PERSISTED_FIELDS}
-        Path(self.settings_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(self.settings_path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -190,6 +275,7 @@ class Config:
             "geocoding_interval": self.geocoding_interval,
             "geocoding_retries": self.geocoding_retries,
             "image_extensions": list(self.image_extensions),
+            "raw_extensions": list(self.raw_extensions),
         }
 
 

@@ -1,10 +1,11 @@
 # 拾光相册 / Lumina
 
-本地照片回忆整理应用。选择照片文件夹后，调用本地 OpenAI 兼容视觉模型自动分析照片，生成评分、标签和简评，并以"独立摄影杂志"风格的拍立得画廊浏览、筛选、珍藏和搜索。所有数据仅保存在本机。
+本地照片回忆整理应用。选择照片文件夹后，调用本地 OpenAI 兼容视觉模型自动分析照片，生成评分、标签和简评，并以"独立摄影杂志"风格的拍立得画廊浏览、筛选、珍藏和搜索。照片与评分只保存在本机（唯一的联网行为是逆地理编码，见「数据与隐私」）。
 
 ## 功能
 
-- 扫描常见图片格式，跳过 RAW；首次扫描建立索引并生成代理图，后续扫描只分析未评分的照片
+- 扫描常见图片格式；首次扫描建立索引并生成代理图，后续扫描只分析未评分的照片
+- **RAW 支持**：同目录若存在同名 RAW 原始文件（如 `DSC_0001.NEF` 与 `DSC_0001.JPG`），以 JPG 等图片为准生成缩略图、代理图并送模型评分，RAW 只在卡片和详情页显示醒目标记；只有 RAW 而没有同名图片时，才由 RAW 内嵌的 JPEG 预览生成缩略图与代理图并展示
 - 本地视觉模型分析：标题、总分、技术 / 构图 / 回忆 / 独特四维评分、中文标签和简评
 - 收藏、暂时收起（移入 `.photo-trash/`）、恢复、彻底移除；回收站可一键清空
 - 筛选与排序：最低分、标签、年份、搜索方式；总分、拍摄时间、文件名、分析时间、文件大小
@@ -38,13 +39,29 @@ python app.py
 3. 顶部统计卡可切换"全部 / 已收录 / 已珍藏 / 待整理 / 已收起"，配合筛选与排序浏览。
 4. 点击卡片查看详情；红心收藏，垃圾桶暂时收起，刷新图标重新解读。
 5. 文件夹有新增或删除时，点击"同步相册"增量更新，不会重复调用模型。
+6. 带同名 RAW 的照片会在卡片和详情页显示标记；点击标记以外的区域仍是正常浏览与编辑。
 
 ## 数据与隐私
 
 - 数据库与配置：`data/library.db`（设置保存在 SQLite 的 settings 表）
 - 代理图缓存：每个照片文件夹下的 `.photo-review-cache/`
 - 收起区：每个照片文件夹下的 `.photo-trash/日期/`
-- 照片、评分与分析结果只保存在本机；数据库和设置文件已被 `.gitignore` 忽略
+- 照片、评分与分析结果只保存在本机
+- **唯一的联网行为**：当照片带 GPS 且开启逆地理编码时，坐标会被发送到 Nominatim 或高德地图换取地名；把 `PHOTO_GEOCODING_PROVIDER` 设为空字符串（或在设置中留空）即可完全离线
+- `data/`、`.photo-review-cache/`、`.photo-trash/` 已被 `.gitignore` 忽略
+- 修改类接口会校验请求来源（`Origin`/`Referer` 必须与本机地址一致），避免浏览器里的其他页面代替你执行删除等操作
+
+## RAW 文件处理规则
+
+| 目录内容 | 索引结果 | 缩略图 / 代理图来源 | 前端表现 |
+| --- | --- | --- | --- |
+| `DSC_0001.JPG` + `DSC_0001.NEF` | 一条记录（JPG） | JPG 本身 | 卡片左上角与详情页标题旁显示 `RAW · NEF` 标记，说明存在同名原始文件 |
+| 只有 `DSC_0001.NEF` | 一条记录（NEF） | NEF 内嵌的 JPEG 预览 | 标记为 `RAW · DSC_0001.NEF`，提示当前显示由内嵌预览生成 |
+
+- 匹配同名文件时不区分扩展名大小写（`IMG_1.JPG` 与 `img_1.nef` 同样配对）
+- 显示分辨率、宽高和 dHash 均来自实际渲染的那张图
+- 支持的 RAW 扩展名：NEF / ARW / CR2 / CR3 / NRW / DNG / ORF / RW2 / RAF / PEF / SRW / RAW / RWL / 3FR / IIQ / MOS / MRW / K25 / KDC / DCR / X3F / ERF / MEF / SR2 / SRF / CAP / FFF
+- 不引入 rawpy/libraw 等额外依赖：优先读取相机写入的嵌入式预览，这样既不需要解码传感器数据，也与相机自身的成像风格一致
 
 ## 项目结构
 
@@ -53,11 +70,12 @@ app.py                          # 启动入口
 photo_reviewer/
   api_client.py                 # 本地模型调用、重试与结构化解析
   pipeline.py                   # 单张照片处理管道（代理图/EXIF/分析/入库）
-  scanner.py                    # 目录扫描、任务队列与并发控制
+  scanner.py                    # 目录扫描、RAW 配对、任务队列与并发控制
   server.py                     # Flask API
-  cache.py / thumbnailer.py     # 代理图缓存与图片处理
+  cache.py / thumbnailer.py     # 代理图缓存、RAW 内嵌预览提取与图片处理
   db.py                         # SQLite 存储、排序与筛选
   exif.py / geocode.py          # EXIF 提取与逆地理编码（WGS-84 ⇄ GCJ-02）
+  config.py / paths.py          # 配置与跨平台路径规范化
 static/
   index.html / style.css        # 页面结构与文艺杂志风格样式
   app.js                        # 页面状态、业务流程与快捷键
@@ -73,7 +91,7 @@ python -m unittest discover -s tests
 ruff check app.py photo_reviewer tests
 ```
 
-测试只使用临时目录和假模型响应，不会读取或修改真实相册数据。
+测试只使用临时目录和假模型响应，不会读取或修改真实相册数据，也不需要联网。
 
 ## 常用环境变量
 
@@ -82,6 +100,7 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_API_BASE_URL` | `http://localhost:1234/v1` | 模型 API 地址 |
 | `PHOTO_API_KEY` | `not-needed` | API Key |
 | `PHOTO_MODEL` | `local-model` | 模型名称 |
+| `PHOTO_SYSTEM_PROMPT` | 空 | 自定义系统提示词（留空使用内置默认） |
 | `PHOTO_PROXY_MAX_EDGE` | `1280` | 发送给模型的代理图最大边长 |
 | `PHOTO_GALLERY_THUMB_SIZE` | `640` | 画廊缩略图最大边长 |
 | `PHOTO_PROXY_QUALITY` | `80` | JPEG 代理图质量 |
@@ -90,7 +109,8 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_INDEX_CONCURRENCY` | `4` | 建立索引 / 生成代理图的最大线程数 |
 | `PHOTO_REQUEST_TIMEOUT` | `120` | 模型请求超时（秒） |
 | `PHOTO_MODEL_RETRIES` | `3` | 单个模型请求失败后的重试次数（1 秒起翻倍） |
-| `PHOTO_DATA_DIR` | `./data` | 数据库目录 |
+| `PHOTO_DATA_DIR` | 仓库根目录下的 `data` | 数据库目录 |
+| `PHOTO_DB_PATH` | 空 | 直接指定数据库文件路径（覆盖 `PHOTO_DATA_DIR`） |
 | `PHOTO_CACHE_DIR_NAME` | `.photo-review-cache` | 代理图缓存目录名 |
 | `PHOTO_TRASH_DIR_NAME` | `.photo-trash` | 收起区目录名 |
 | `PHOTO_GEOCODING_PROVIDER` | `nominatim` | 逆地理编码服务：`nominatim` 或 `amap` |
@@ -99,5 +119,7 @@ ruff check app.py photo_reviewer tests
 | `PHOTO_GEOCODING_RETRIES` | `3` | 地理编码请求失败后的重试次数（1 秒起翻倍） |
 | `PHOTO_HOST` | `127.0.0.1` | Web 监听地址 |
 | `PHOTO_PORT` | `5000` | Web 监听端口 |
+| `PHOTO_DEBUG` | `false` | Flask 调试模式（会打开交互式调试器，请勿在可被访问的地址上启用） |
+| `PHOTO_ALLOWED_ORIGINS` | 空 | 额外允许调用写接口的来源，逗号分隔，例如 `http://192.168.1.9:5000` |
 
-更多设置（代理质量、自定义系统提示词等）可在页面右上角"设置"中修改，保存后重启依然生效。
+设置项（API 地址、Key、模型、代理图/缩略图尺寸与质量、并发与重试、地理编码参数、系统提示词）可在页面右上角"设置"中修改，保存到数据库后重启依然生效。`PHOTO_HOST` / `PHOTO_PORT` / `PHOTO_DEBUG` 只从环境变量读取，不会被数据库里的旧值覆盖。

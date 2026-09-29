@@ -726,6 +726,75 @@ select {
   fill: var(--heart);
 }
 
+/* ---------- RAW markers ---------- */
+.raw-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 4px 7px 4px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(179, 125, 86, 0.4);
+  background: rgba(255, 250, 243, 0.94);
+  color: var(--primary-dark);
+  box-shadow: 0 2px 8px rgba(60, 40, 20, 0.12);
+  backdrop-filter: blur(6px);
+  max-width: calc(100% - 60px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.raw-badge svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.raw-badge span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A raw-only photo is rendered from its embedded preview: mark it warm. */
+.raw-badge.raw-only {
+  border-color: rgba(199, 141, 70, 0.55);
+  background: rgba(199, 141, 70, 0.16);
+  color: #8a5a15;
+}
+
+.raw-badge-card {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 6;
+}
+
+.raw-badge-detail {
+  display: inline-flex;
+  margin-top: 8px;
+  font-size: 11px;
+  padding: 5px 10px 5px 8px;
+}
+
+.raw-badge-detail svg {
+  width: 14px;
+  height: 14px;
+}
+
+.raw-meta-row {
+  color: var(--primary-dark);
+}
+
+.raw-meta-row .meta-content {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 .polaroid-body {
   padding-top: 10px;
   display: flex;
@@ -1200,6 +1269,13 @@ select {
 }
 
 /* Exhibition Label Header */
+.preview-header-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
 .preview-header-block h3 {
   margin: 0 0 6px;
   font-family: var(--font-serif);

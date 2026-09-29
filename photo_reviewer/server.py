@@ -28,50 +28,110 @@ from .cache import (
     ensure_cache_dirs,
     load_scan_results_from_cache,
 )
-from .config import PERSISTED_FIELDS, Config
+from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, Config
 from .db import Database, sort_photos
 from .exif import extract_exif
 from .geocode import reverse_geocode
-from .scanner import JOBS, reanalyze_photo, start_rebuild_index, start_scan
+from .paths import canonical_folder, canonical_path
+from .scanner import (
+    JOBS,
+    RAW_EXTENSIONS,
+    reanalyze_photo,
+    start_rebuild_index,
+    start_scan,
+)
 from .thumbnailer import make_proxy
 
 logger = logging.getLogger(__name__)
 
+#: Methods that mutate state and therefore require a same-origin request.
+_UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
-def _photo_payload(photo: dict[str, Any]) -> dict[str, Any]:
-    return {
+
+def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any]:
+    """Shape one photo row for the API.
+
+    The gallery only needs what it renders; paths, hashes and the model name
+    are dropped from list responses (they were ~25% of a 200-photo page and the
+    frontend never read them). ``detail=True`` keeps them for single-photo
+    endpoints.
+
+    ``raw_path`` is set when a same-named camera-raw file sits next to the
+    image; ``is_raw`` is set when the photo itself is the raw file because no
+    JPEG counterpart exists.
+    """
+    raw_path = photo.get("raw_path")
+    payload = {
         "id": photo["id"],
         "path": photo["path"],
-        "original_path": photo.get("original_path"),
-        "folder": photo["folder"],
         "filename": photo["filename"],
         "size": photo["size"],
         "width": photo["width"],
         "height": photo["height"],
-        "thumb_path": photo.get("thumb_path"),
-        "proxy_path": photo.get("proxy_path"),
-        "dimensions": photo.get("dimensions") or {},
         "location": photo.get("location"),
         "exif": photo.get("exif") or {},
-        "phash": photo.get("phash"),
         "score": photo.get("score"),
-        "recommendation": photo.get("recommendation"),
         "tags": photo.get("tags") or [],
         "reason": photo.get("reason"),
         "title": photo.get("title") or "",
-        "model": photo.get("model"),
         "analyzed_at": photo.get("analyzed_at"),
         "status": photo.get("status"),
         "favorite": bool(photo.get("favorite")),
         "error": photo.get("error"),
+        "raw_path": raw_path,
+        "has_raw": bool(raw_path),
+        "is_raw": _is_raw_file(photo.get("path") or photo.get("original_path")),
+        "raw_ext": Path(raw_path).suffix.lstrip(".").upper() if raw_path else "",
     }
+    if detail:
+        payload.update(
+            {
+                "original_path": photo.get("original_path"),
+                "folder": photo["folder"],
+                "thumb_path": photo.get("thumb_path"),
+                "proxy_path": photo.get("proxy_path"),
+                "dimensions": photo.get("dimensions") or {},
+                "phash": photo.get("phash"),
+                "recommendation": photo.get("recommendation"),
+                "model": photo.get("model"),
+                "geocoded": bool(photo.get("geocoded")),
+            }
+        )
+    return payload
 
 
 def _normalize_folder(path: str) -> str:
-    path = os.path.abspath(os.path.expanduser(path.strip()))
-    if not os.path.isdir(path):
-        raise NotADirectoryError(f"文件夹不存在: {path}")
-    return path
+    """Resolve a user-supplied folder to its on-disk spelling."""
+    return canonical_folder(path)
+
+
+def _is_raw_file(path: str | None) -> bool:
+    return bool(path) and Path(path).suffix.lower() in RAW_EXTENSIONS
+
+
+def _thumbnail_path(photo: dict[str, Any]) -> str | None:
+    """Return an existing gallery thumbnail for ``photo``, if there is one.
+
+    Older databases stored the proxy path in ``thumb_path``. Rather than
+    trusting the column blindly, the sibling ``*_thumb.jpg`` next to the proxy
+    is checked as well, which is what the thumbnailer actually writes.
+    """
+    thumb = photo.get("thumb_path")
+    candidates = []
+    if thumb:
+        candidates.append(thumb)
+        if thumb.endswith("_proxy.jpg"):
+            candidates.append(f"{thumb[: -len('_proxy.jpg')]}_thumb.jpg")
+        elif not thumb.endswith("_thumb.jpg"):
+            stem, _, _ = thumb.rpartition(".")
+            candidates.append(f"{stem}_thumb.jpg" if stem else f"{thumb}_thumb.jpg")
+    proxy = photo.get("proxy_path")
+    if proxy and proxy.endswith("_proxy.jpg"):
+        candidates.append(f"{proxy[: -len('_proxy.jpg')]}_thumb.jpg")
+    for candidate in candidates:
+        if candidate.endswith("_thumb.jpg") and os.path.exists(candidate):
+            return candidate
+    return None
 
 
 def _move_to_trash(photo: dict[str, Any], config: Config) -> str:
@@ -131,9 +191,10 @@ def _ensure_exif(
 ) -> dict[str, Any]:
     """Backfill missing EXIF/location data for photos indexed by older versions.
 
-    Location resolution is an online operation and is disabled by default in
-    list endpoints; scans and single-photo re-analysis resolve it in the
-    background pipeline instead.
+    Only used by single-photo endpoints: the gallery list never inspects the
+    filesystem, because a sleeping external drive would add seconds of latency
+    to every page. Location resolution is an online operation and stays off
+    unless the caller explicitly asks for it.
     """
     if not photo.get("exif"):
         path = photo.get("path") or photo.get("original_path")
@@ -239,6 +300,34 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     app = Flask(__name__, static_folder=static_dir, static_url_path="/static")
     app.config["JSON_AS_ASCII"] = False
 
+    @app.before_request
+    def _reject_cross_origin_writes():
+        """Block CSRF on every mutating route.
+
+        Flask parses a JSON body even when the browser sends it as
+        ``text/plain``, which makes ordinary form posts and ``fetch`` calls from
+        any other page able to drive ``/api/delete`` and friends. Requiring the
+        browser-declared origin to match this host closes that hole without
+        tokens or sessions; requests without an ``Origin``/``Referer`` header
+        (curl, the test client) are still allowed.
+        """
+        if request.method not in _UNSAFE_METHODS:
+            return None
+        source = request.headers.get("Origin") or request.headers.get("Referer")
+        if not source:
+            return None
+        host = request.host
+        if source in (f"http://{host}", f"https://{host}"):
+            return None
+        allowed = cfg.allowed_origins
+        base = source.split("/", 3)
+        if allowed and len(base) >= 3 and f"{base[0]}//{base[2]}" in allowed:
+            return None
+        logger.warning(
+            "rejected cross-origin %s %s from %s", request.method, request.path, source
+        )
+        return jsonify({"error": "跨站请求已被拒绝"}), 403
+
     @app.get("/")
     def index():
         return send_file(os.path.join(static_dir, "index.html"))
@@ -249,60 +338,75 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
     @app.post("/api/config")
     def api_update_config():
+        """Apply settings from the UI.
+
+        Every value is validated into a staging dict first; nothing touches
+        ``cfg`` until the whole payload is known to be valid, so a rejected
+        field can no longer leave the running process half-updated while the
+        database keeps the old value.
+        """
         data = request.get_json(force=True, silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "请求体必须是 JSON 对象"}), 400
+        ignored = sorted(set(data) - EDITABLE_FIELDS)
+        if ignored:
+            logger.info("ignoring non-editable settings keys: %s", ", ".join(ignored))
+
+        staged: dict[str, Any] = {}
+
+        def as_int(key: str, minimum: int, maximum: int) -> str | None:
+            if key not in data:
+                return None
+            try:
+                staged[key] = max(minimum, min(maximum, int(data[key])))
+            except (TypeError, ValueError):
+                return f"{key} 参数不合法"
+            return None
+
+        def as_float(key: str, minimum: float, maximum: float) -> str | None:
+            if key not in data:
+                return None
+            try:
+                staged[key] = max(minimum, min(maximum, float(data[key])))
+            except (TypeError, ValueError):
+                return f"{key} 参数不合法"
+            return None
+
+        checks = (
+            as_int("proxy_max_edge", 64, 8192),
+            as_int("gallery_thumb_size", 96, 4096),
+            as_int("proxy_quality", 1, 100),
+            as_int("thumb_quality", 1, 100),
+            as_int("request_timeout", 5, 3600),
+            as_int("model_retries", 0, 10),
+            as_int("scan_concurrency", 1, 16),
+            as_int("index_concurrency", 1, 32),
+            as_int("geocoding_retries", 0, 10),
+            as_float("geocoding_interval", 0.1, 10.0),
+        )
+        for error in checks:
+            if error:
+                return jsonify({"error": error}), 400
+
         if "api_base_url" in data:
-            cfg.api_base_url = str(data["api_base_url"]).strip() or cfg.api_base_url
+            staged["api_base_url"] = (
+                str(data["api_base_url"]).strip() or cfg.api_base_url
+            )
         if "api_key" in data:
-            cfg.api_key = str(data["api_key"])
+            staged["api_key"] = str(data["api_key"])
         if "model" in data:
-            cfg.model = str(data["model"]).strip() or cfg.model
+            staged["model"] = str(data["model"]).strip() or cfg.model
         if "system_prompt" in data:
-            cfg.system_prompt = strip_json_format(str(data["system_prompt"]))
-        for key, minimum in (
-            ("proxy_max_edge", 64),
-            ("gallery_thumb_size", 96),
-            ("request_timeout", 5),
-            ("model_retries", 0),
-        ):
-            if key in data:
-                try:
-                    setattr(cfg, key, max(minimum, int(data[key])))
-                except (TypeError, ValueError):
-                    return jsonify({"error": f"{key} 参数不合法"}), 400
-        for key in ("proxy_quality", "thumb_quality"):
-            if key in data:
-                try:
-                    setattr(cfg, key, max(1, min(100, int(data[key]))))
-                except (TypeError, ValueError):
-                    return jsonify({"error": f"{key} 参数不合法"}), 400
-        if "scan_concurrency" in data:
-            try:
-                cfg.scan_concurrency = max(1, min(16, int(data["scan_concurrency"])))
-            except (TypeError, ValueError):
-                return jsonify({"error": "scan_concurrency 参数不合法"}), 400
-        if "index_concurrency" in data:
-            try:
-                cfg.index_concurrency = max(1, min(32, int(data["index_concurrency"])))
-            except (TypeError, ValueError):
-                return jsonify({"error": "index_concurrency 参数不合法"}), 400
+            staged["system_prompt"] = strip_json_format(str(data["system_prompt"]))
         if "geocoding_provider" in data:
-            cfg.geocoding_provider = (
+            staged["geocoding_provider"] = (
                 str(data["geocoding_provider"]).strip() or "nominatim"
             )
         if "geocoding_api_key" in data:
-            cfg.geocoding_api_key = str(data["geocoding_api_key"])
-        if "geocoding_interval" in data:
-            try:
-                cfg.geocoding_interval = max(
-                    0.1, min(10.0, float(data["geocoding_interval"]))
-                )
-            except (TypeError, ValueError):
-                return jsonify({"error": "geocoding_interval 参数不合法"}), 400
-        if "geocoding_retries" in data:
-            try:
-                cfg.geocoding_retries = max(0, min(10, int(data["geocoding_retries"])))
-            except (TypeError, ValueError):
-                return jsonify({"error": "geocoding_retries 参数不合法"}), 400
+            staged["geocoding_api_key"] = str(data["geocoding_api_key"])
+
+        for key, value in staged.items():
+            setattr(cfg, key, value)
         _save_settings_to_db(database, cfg)
         return jsonify(cfg.to_dict())
 
@@ -319,7 +423,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         path = request.args.get("path", "").strip()
         if not path:
             path = str(Path.home())
-        path = os.path.abspath(os.path.expanduser(path))
+        path = canonical_path(path)
         if not os.path.isdir(path):
             return jsonify({"error": "目录不存在"}), 404
         try:
@@ -340,7 +444,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         path = data.get("path", "").strip()
         if not path:
             return jsonify({"error": "请提供文件夹路径"}), 400
-        path = os.path.abspath(os.path.expanduser(path))
+        path = canonical_path(path)
         if not os.path.isdir(path):
             return jsonify({"error": "文件夹不存在"}), 404
         try:
@@ -510,8 +614,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             )
         except (TypeError, ValueError):
             return jsonify({"error": "score 参数不合法"}), 400
-        requested_limit = min(int(request.args.get("limit", 200)), 500)
-        offset = max(int(request.args.get("offset", 0)), 0)
+        try:
+            requested_limit = min(int(request.args.get("limit", 200)), 500)
+            offset = max(int(request.args.get("offset", 0)), 0)
+        except (TypeError, ValueError):
+            return jsonify({"error": "limit/offset 参数不合法"}), 400
+        requested_limit = max(1, requested_limit)
         fetch_limit = requested_limit + 1
         if folder:
             _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
@@ -532,7 +640,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         )
         has_more = len(photos) > requested_limit
         photos = photos[:requested_limit]
-        photos = [_ensure_exif(p, database, cfg) for p in photos]
+        # No filesystem access here: EXIF was already backfilled by the index
+        # phase, and a sleeping external drive must not stall every page.
         return jsonify(
             {
                 "photos": [_photo_payload(p) for p in photos],
@@ -631,7 +740,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     return jsonify({"error": semantic_warning}), 502
 
         photos = sort_photos(list(result_map.values()), sort)
-        photos = [_ensure_exif(p, database, cfg) for p in photos]
         return jsonify(
             {
                 "photos": [_photo_payload(p) for p in photos],
@@ -652,15 +760,21 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if not photo:
             return jsonify({"error": "照片不存在"}), 404
         photo = _ensure_exif(photo, database, cfg)
-        return jsonify(_photo_payload(photo))
+        return jsonify(_photo_payload(photo, detail=True))
 
     @app.get("/api/thumbnail/<int:photo_id>")
     def api_thumbnail(photo_id: int):
+        """Serve the small gallery thumbnail.
+
+        Lookup order is ``thumb_path`` → sibling of ``proxy_path`` → generate.
+        Only the last branch decodes the picture, so a cached thumbnail is
+        served straight from disk and a raw file never needs the sensor data.
+        """
         photo = database.get_photo(photo_id)
         if not photo:
             return jsonify({"error": "照片不存在"}), 404
-        thumb = photo.get("thumb_path")
-        if thumb and os.path.exists(thumb) and thumb.endswith("_thumb.jpg"):
+        thumb = _thumbnail_path(photo)
+        if thumb:
             return send_file(thumb, mimetype="image/jpeg", conditional=True)
         path = photo.get("path") or photo.get("original_path")
         if path and os.path.exists(path):
@@ -678,6 +792,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 database.update_cache_paths(photo_id, thumb_path, proxy_path)
                 return send_file(thumb_path, mimetype="image/jpeg", conditional=True)
             except (OSError, ValueError):
+                logger.warning(
+                    "thumbnail generation failed for photo %s", photo_id, exc_info=True
+                )
                 return jsonify({"error": "无法生成缩略图"}), 500
         return jsonify({"error": "缩略图不存在"}), 404
 
@@ -704,6 +821,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 )
                 database.update_proxy_path(photo_id, proxy)
             except (OSError, ValueError):
+                logger.warning(
+                    "proxy generation failed for photo %s", photo_id, exc_info=True
+                )
                 return jsonify({"error": "无法生成代理图"}), 500
         return send_file(proxy, mimetype="image/jpeg", conditional=True)
 
@@ -845,7 +965,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         folder = data.get("folder", "").strip()
         if not folder:
             return jsonify({"error": "请提供文件夹路径"}), 400
-        folder = os.path.abspath(os.path.expanduser(folder))
+        folder = canonical_path(folder)
         for existing in JOBS.list():
             if existing.folder == folder and existing.status == "running":
                 return jsonify({"error": "该文件夹正在整理中，请稍后再试"}), 409
@@ -900,7 +1020,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip() or None
         if folder:
-            folder = os.path.abspath(os.path.expanduser(folder))
+            folder = canonical_path(folder)
         photos = database.list_photos(
             folder=folder,
             status="deleted",
@@ -946,7 +1066,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         data = request.get_json(force=True, silent=True) or {}
         folder = request.args.get("folder", "").strip() or data.get("folder", "")
         if folder:
-            folder = os.path.abspath(os.path.expanduser(folder))
+            folder = canonical_path(folder)
             result = cleanup_folder_cache(folder, database, cfg.cache_dir_name)
         else:
             result = _cleanup_cache(database, cfg.cache_dir_name)

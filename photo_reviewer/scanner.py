@@ -36,17 +36,38 @@ IMAGE_EXTENSIONS = (
     ".tiff",
 )
 
+# Camera raw formats. A raw file that sits next to a same-named image file is
+# recorded as that photo's ``raw_path`` instead of becoming its own entry; a
+# raw file with no counterpart is indexed on its own and rendered from the
+# embedded JPEG preview.
 RAW_EXTENSIONS = {
-    ".raw",
-    ".cr2",
-    ".cr3",
     ".nef",
     ".arw",
+    ".cr2",
+    ".cr3",
+    ".nrw",
     ".dng",
     ".orf",
     ".rw2",
+    ".raf",
     ".pef",
     ".srw",
+    ".raw",
+    ".rwl",
+    ".3fr",
+    ".iiq",
+    ".mos",
+    ".mrw",
+    ".k25",
+    ".kdc",
+    ".dcr",
+    ".x3f",
+    ".erf",
+    ".mef",
+    ".sr2",
+    ".srf",
+    ".cap",
+    ".fff",
 }
 
 
@@ -117,13 +138,26 @@ def _friendly_error(exc: Exception) -> str:
     return raw[:1000]
 
 
-def discover_images(
-    folder: str, extensions=IMAGE_EXTENSIONS, skip_dirs=None
-) -> list[str]:
+def discover_photo_pairs(
+    folder: str,
+    extensions=IMAGE_EXTENSIONS,
+    raw_extensions: set | None = None,
+    skip_dirs=None,
+) -> list[tuple[str, str | None]]:
+    """Return ``(image_path, raw_sibling_or_None)`` for every photo to index.
+
+    A camera raw file next to a same-named ``jpg``/``png``/... is *not* a
+    separate photo: the image file is what gets rendered and analysed, and the
+    raw path is only remembered so the UI can show a "RAW" badge.
+
+    A raw file without a same-named counterpart is indexed on its own; it is
+    rendered from its embedded JPEG preview.
+    """
     folder_path = Path(folder)
     if not folder_path.exists() or not folder_path.is_dir():
         raise NotADirectoryError(f"文件夹不存在或不是目录: {folder}")
     exts = {e.lower() for e in extensions}
+    raws = {e.lower() for e in (raw_extensions if raw_extensions is not None else RAW_EXTENSIONS)}
     skip = {".photo-trash", ".git", "__pycache__"}
     if skip_dirs:
         for d in skip_dirs:
@@ -133,7 +167,8 @@ def discover_images(
             name = os.path.basename(os.path.normpath(d))
             if name.startswith("."):
                 skip.add(name)
-    found = []
+
+    by_stem: dict[tuple[str, str], dict[str, str]] = {}
     for root, dirs, files in os.walk(folder_path):
         dirs[:] = [
             d
@@ -145,10 +180,41 @@ def discover_images(
             continue
         for name in files:
             suffix = Path(name).suffix.lower()
-            if suffix in exts and suffix not in RAW_EXTENSIONS:
-                found.append(os.path.join(root, name))
-    found.sort()
-    return found
+            if suffix in exts:
+                kind = "image"
+            elif suffix in raws:
+                kind = "raw"
+            else:
+                continue
+            key = (root, Path(name).stem.lower())
+            by_stem.setdefault(key, {})[kind] = os.path.join(root, name)
+
+    pairs: list[tuple[str, str | None]] = []
+    for entry in by_stem.values():
+        image = entry.get("image")
+        raw = entry.get("raw")
+        if image:
+            pairs.append((image, raw))
+        elif raw:
+            # Raw file with no same-named image: it becomes the photo itself.
+            pairs.append((raw, None))
+    pairs.sort(key=lambda item: item[0])
+    return pairs
+
+
+def discover_images(
+    folder: str,
+    extensions=IMAGE_EXTENSIONS,
+    raw_extensions: set | None = None,
+    skip_dirs=None,
+) -> list[str]:
+    """Return the primary file path of every photo in ``folder``."""
+    return [
+        image_path
+        for image_path, _raw in discover_photo_pairs(
+            folder, extensions, raw_extensions, skip_dirs
+        )
+    ]
 
 
 def start_scan(
@@ -243,6 +309,8 @@ def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> 
             folder,
             config,
             existing.get("location") if existing else None,
+            raw_path=existing.get("raw_path") if existing else None,
+            already_geocoded=bool(existing and existing.get("geocoded")),
         )
         if existing:
             db.update_exif(existing["id"], prepared.location, prepared.exif)
@@ -261,25 +329,30 @@ def _index_one(
     config: Config,
     refresh_exif: bool = False,
     resolve_location: bool = False,
+    raw_path: str | None = None,
 ) -> bool:
     """Generate one proxy and upsert its index row."""
     try:
-        prepared = prepare_proxy(image_path, folder, config)
+        prepared = prepare_proxy(image_path, folder, config, raw_path=raw_path)
         existing = db.get_photo_by_path(prepared.image_path)
+        geocoded = False
         if refresh_exif:
             location, exif = extract_exif(image_path)
             if resolve_location:
                 location = _resolve_location(location, exif, existing, config)
+                geocoded = bool(location) and not is_coordinate_location(location)
             else:
                 location = _preserve_resolved_location(location, existing)
+                geocoded = bool(existing and existing.get("geocoded"))
             if location:
                 exif["location"] = location
-            if location and not is_coordinate_location(location):
+            if geocoded:
                 exif["geocoded"] = True
             prepared.location = location
             prepared.exif = exif or {}
         status = existing.get("status") if existing else "pending"
         record = base_record(prepared, existing=existing, status=status)
+        record["geocoded"] = 1 if geocoded else 0
         if refresh_exif:
             record["location"] = prepared.location
             record["exif"] = prepared.exif
@@ -292,7 +365,7 @@ def _index_one(
 
 def _run_index_phase(
     job_id: str,
-    images: list[str],
+    images: list[tuple[str, str | None]],
     folder: str,
     db: Database,
     config: Config,
@@ -300,7 +373,7 @@ def _run_index_phase(
     resolve_location: bool = False,
     processed_offset: int = 0,
 ) -> bool:
-    """Build proxies for a list of images with bounded concurrency."""
+    """Build proxies for a list of ``(image, raw_sibling)`` pairs."""
     JOBS.update(
         job_id,
         phase="index",
@@ -321,8 +394,9 @@ def _run_index_phase(
                 config,
                 refresh_exif,
                 resolve_location,
+                raw_path,
             ): image_path
-            for image_path in images
+            for image_path, raw_path in images
         }
         for processed, future in enumerate(as_completed(futures), start=1):
             image_path = futures[future]
@@ -354,15 +428,21 @@ def _scan_worker(
             error=None,
         )
         skip_dirs = [config.data_dir, config.trash_dir_name, config.cache_dir_name]
-        images = discover_images(folder, config.image_extensions, skip_dirs=skip_dirs)
+        pairs = discover_photo_pairs(
+            folder,
+            config.image_extensions,
+            config.raw_extensions,
+            skip_dirs=skip_dirs,
+        )
+        images = [image_path for image_path, _raw in pairs]
 
         # Index every photo we have not seen yet. This also covers files added
         # after a previous scan, including a forced re-scan.
         if not active_paths:
-            to_index = list(images)
+            to_index = list(pairs)
         else:
             to_index = [
-                image_path for image_path in images if image_path not in active_paths
+                pair for pair in pairs if pair[0] not in active_paths
             ]
 
         if to_index and not _run_index_phase(
@@ -448,14 +528,20 @@ def _rebuild_worker(
     JOBS.update(job_id, status="running", phase="index", error=None)
     try:
         skip_dirs = [config.data_dir, config.trash_dir_name, config.cache_dir_name]
-        images = discover_images(folder, config.image_extensions, skip_dirs=skip_dirs)
+        pairs = discover_photo_pairs(
+            folder,
+            config.image_extensions,
+            config.raw_extensions,
+            skip_dirs=skip_dirs,
+        )
+        images = [image_path for image_path, _raw in pairs]
         current_set = set(images)
         active_paths = set(db.paths_for_folder(folder))
         removed = active_paths - current_set
-        added = [image_path for image_path in images if image_path not in active_paths]
+        added = [pair for pair in pairs if pair[0] not in active_paths]
         # With the "重新整理全部" checkbox enabled, every current photo is
         # refreshed (EXIF/GPS/location) while analysis results are preserved.
-        to_index = list(images) if force else added
+        to_index = list(pairs) if force else added
         total_work = len(removed) + len(to_index)
         JOBS.update(
             job_id,
@@ -532,6 +618,8 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
             folder,
             config,
             photo.get("location"),
+            raw_path=photo.get("raw_path"),
+            already_geocoded=bool(photo.get("geocoded")),
         )
         # Sync metadata first so camera/EXIF/location are refreshed even if
         # the model call fails afterwards.
