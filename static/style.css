@@ -1196,8 +1196,9 @@ select {
 }
 
 .preview-media-col {
-  flex: 1 1 540px;
-  max-width: 620px;
+  /* The picture and the label share the dialog 3:2. */
+  flex: 3 1 0;
+  min-width: 0;
   position: relative;
   display: flex;
   justify-content: center;
@@ -1335,8 +1336,9 @@ select {
 }
 
 .preview-info {
-  flex: 1 1 340px;
-  min-width: 300px;
+  /* Two parts against the picture's three. */
+  flex: 2 1 0;
+  min-width: 280px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2174,8 +2176,10 @@ select {
 
 @media (max-width: 1024px) {
   .gallery { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 18px 20px; padding: 20px; }
+  /* Stacked: the flex basis would otherwise force an odd width. */
   .preview-body { flex-direction: column; }
-  .preview-media-col { max-width: 100%; }
+  .preview-media-col { flex: 0 0 auto; width: 100%; }
+  .preview-info { min-width: 0; }
 }
 
 @media (max-width: 640px) {
