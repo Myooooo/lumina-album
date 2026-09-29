@@ -383,6 +383,40 @@ def _save_settings_to_db(database: Database, cfg: Config) -> None:
     database.save_settings(data)
 
 
+#: Settings rows written by older versions that the app no longer reads.
+#: ``host``/``port``/``debug`` are environment-only now (a persisted
+#: ``debug=true`` used to survive into a later start and open the Werkzeug
+#: debugger); ``thumb_size`` was renamed to ``gallery_thumb_size``. Rows like
+#: these are invisible in the UI but would silently win over the environment,
+#: so they are dropped on start.
+_LEGACY_SETTINGS_KEYS = frozenset(
+    {
+        "host",
+        "port",
+        "debug",
+        "thumb_size",
+        "settings_path",
+        "image_extensions",
+        "db_path",
+    }
+)
+
+
+def _prune_legacy_settings(database: Database) -> int:
+    """Delete settings rows that no longer map to a configuration field."""
+    stored = database.get_settings()
+    stale = sorted(
+        key
+        for key in stored
+        if key not in PERSISTED_FIELDS and key in _LEGACY_SETTINGS_KEYS
+    )
+    if not stale:
+        return 0
+    database.delete_settings(stale)
+    logger.info("removed %d stale settings rows: %s", len(stale), ", ".join(stale))
+    return len(stale)
+
+
 def _load_legacy_cache_safely(
     folder: str, database: Database, cache_dir_name: str
 ) -> None:
@@ -398,6 +432,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
     cfg = config or CONFIG
     database = db or get_db(cfg.db_path)
+    _prune_legacy_settings(database)
     _load_settings_from_db(database, cfg)
     static_dir = str(Path(__file__).resolve().parent.parent / "static")
     app = Flask(__name__, static_folder=static_dir, static_url_path="/static")
@@ -1085,12 +1120,22 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
     @app.post("/api/delete/permanent")
     def api_delete_permanent():
+        """Permanently remove photos that are already in the trash.
+
+        ``delete_raw`` (default on) also removes the raw sibling that was moved
+        to the trash with the photo.
+        """
         data = request.get_json(force=True, silent=True) or {}
         ids = data.get("ids", [])
         if not isinstance(ids, list) or not ids:
             return jsonify({"error": "请选择要永久删除的照片"}), 400
+        delete_raw = data.get("delete_raw", True)
+        if isinstance(delete_raw, str):
+            delete_raw = delete_raw.strip().lower() in ("1", "true", "yes", "on")
+        delete_raw = bool(delete_raw)
         purged = []
         errors = []
+        raw_removed = 0
         touched_folders = set()
         for pid in ids:
             try:
@@ -1116,12 +1161,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     continue
             # The raw sibling sits in the same trash day folder; purging the
             # photo must not leave it behind.
-            sibling = _trashed_raw_candidate(photo)
-            if sibling:
-                try:
-                    os.remove(sibling)
-                except OSError:
-                    logger.debug("raw sibling already gone: %s", sibling)
+            if delete_raw:
+                sibling = _trashed_raw_candidate(photo)
+                if sibling:
+                    try:
+                        os.remove(sibling)
+                        raw_removed += 1
+                    except OSError:
+                        logger.debug("raw sibling already gone: %s", sibling)
             touched_folders.add(
                 photo.get("folder")
                 or os.path.dirname(photo.get("original_path") or photo["path"])
@@ -1134,7 +1181,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 cleanup_folder_cache(folder, database, cfg.cache_dir_name)
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", folder, exc_info=True)
-        return jsonify({"purged": purged, "errors": errors})
+        return jsonify(
+            {"purged": purged, "raw_removed": raw_removed, "errors": errors}
+        )
 
     @app.post("/api/folder/remove")
     def api_folder_remove():

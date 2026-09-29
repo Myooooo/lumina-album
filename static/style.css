@@ -1184,8 +1184,9 @@ select {
 
 /* ---------- Immersive Lightbox Preview Modal ---------- */
 .preview-content {
-  max-width: 1140px;
-  padding: 26px 30px;
+  max-width: 1360px;
+  width: 96vw;
+  padding: 30px 34px;
 }
 
 .preview-body {
@@ -1221,7 +1222,7 @@ select {
 
 .preview-body img {
   max-width: 100%;
-  max-height: 70vh;
+  max-height: 78vh;
   border-radius: var(--radius-md);
   object-fit: contain;
   background: #1e1914;
@@ -1892,7 +1893,22 @@ select {
   width: 100%;
 }
 .remove-folder-btn { margin-right: auto; }
-.edit-grid { width: 100%; }
+
+/* The edit dialog holds a handful of short fields, so it stays compact. */
+#editModal .modal-content {
+  max-width: 560px;
+  padding: 26px 28px 24px;
+}
+.edit-grid {
+  width: 100%;
+  gap: 10px;
+  margin: 14px 0;
+}
+#editModal .modal-content h2 {
+  font-size: 19px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
 
 /* ---------- SD Card Import ---------- */
 #importModal .modal-content { max-width: 720px; }
@@ -2065,17 +2081,14 @@ select {
   margin: 16px 0 24px;
   white-space: pre-line;
 }
-.confirm-content p:has(+ .confirm-check:not(.hidden)) {
-  margin-bottom: 14px;
-}
 
-/* Optional opt-in row (e.g. "also delete the RAW file") */
+/* The optional opt-in row sits between the message and the buttons. */
 .confirm-check {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin: 0 0 22px;
+  margin: -8px 0 22px;
   padding: 9px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

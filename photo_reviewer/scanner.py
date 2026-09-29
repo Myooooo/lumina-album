@@ -410,42 +410,85 @@ def _index_one(
         return False
 
 
+def _raw_owner_map(
+    pairs: list[tuple[str, str | None]], current_set: set[str]
+) -> dict[str, str]:
+    """Map ``raw path -> image path`` for raw files that are not on their own.
+
+    A raw file that now has a same-named image is not a photo any more, so a
+    stale raw-only row for it must be folded into the image row instead of
+    being reported as a deleted file.
+    """
+    owners: dict[str, str] = {}
+    for image_path, raw_path in pairs:
+        if not raw_path or raw_path in current_set:
+            continue
+        owners[os.path.normcase(canonical_path(raw_path))] = image_path
+    return owners
+
+
 def _attach_new_raw_siblings(
     pairs: list[tuple[str, str | None]],
     db: Database,
     only_paths: list[str] | None = None,
+    extra_raw_paths: list[str] | None = None,
 ) -> int:
-    """Record raw files that appeared next to already-indexed photos.
+    """Reconcile raw/image pairings with what is on disk now.
 
-    Importing only the ``.nef`` half of a pair must still light up the RAW badge
-    on a card whose ``.jpg`` was indexed earlier. This touches one column and
-    leaves the score, tags and comment alone.
+    Two cases matter, and both are about half a pair arriving late:
+
+    * a ``.nef`` copied in next to an already-indexed ``.jpg`` — the badge has
+      to light up, without re-reading EXIF or re-running the model;
+    * a ``.jpg`` copied in next to an already-indexed ``.nef`` — the raw row
+      was its own photo until now, and must be folded into the image row
+      instead of leaving two cards for one picture.
+
+    Only the pairing columns are touched; score, tags and comment survive.
 
     ``only_paths`` restricts the work to the files a scoped scan was asked
     about, so an import does not rewrite rows elsewhere in the album.
+    ``extra_raw_paths`` names rows that must be folded even when the pairing
+    itself is unchanged, which is how the rebuild path hands over the raw-only
+    rows it deliberately left in place during its delete sweep.
     """
     wanted = None
     if only_paths is not None:
         wanted = {os.path.normcase(canonical_path(p)) for p in only_paths}
+    forced = {os.path.normcase(canonical_path(p)) for p in (extra_raw_paths or [])}
     updated = 0
+    absorbed = 0
     for image_path, raw_path in pairs:
         if not raw_path:
             continue
-        if wanted is not None and not (
+        pair_relevant = wanted is None or (
             os.path.normcase(canonical_path(image_path)) in wanted
             or os.path.normcase(canonical_path(raw_path)) in wanted
-        ):
+        )
+        if not pair_relevant and os.path.normcase(canonical_path(raw_path)) not in forced:
             continue
         existing = db.get_photo_by_path(image_path)
-        if not existing:
+        if existing is None:
             continue
-        if existing.get("raw_path") == raw_path:
-            continue
-        db.update_raw_path(existing["id"], raw_path)
-        updated += 1
-    if updated:
-        logger.info("attached %d raw files to existing photos", updated)
-    return updated
+
+        # Fold away a leftover raw-only row for the same picture.
+        orphan = db.get_photo_by_path(raw_path)
+        if orphan and orphan["id"] != existing["id"] and orphan.get("status") != "deleted":
+            if not existing.get("score") and orphan.get("score"):
+                # The raw row was the one that got analysed; keep its result on
+                # the image row rather than discarding a paid-for model call.
+                db.adopt_analysis(orphan["id"], existing["id"])
+            db.delete_rows([orphan["id"]])
+            logger.info("merged raw-only row %s into %s", orphan["path"], image_path)
+            absorbed += 1
+
+        if existing.get("raw_path") != raw_path:
+            db.update_raw_path(existing["id"], raw_path)
+            updated += 1
+    if updated or absorbed:
+        logger.info(
+            "raw pairing reconciled: %d updated, %d merged", updated, absorbed
+        )
+    return updated + absorbed
 
 
 def _run_index_phase(
@@ -554,12 +597,6 @@ def _scan_worker(
                 pair for pair in pairs if pair[0] not in active_paths
             ]
 
-        # A raw file can appear next to a photo that is already indexed (for
-        # example an import that only brought the .nef this time). Attaching it
-        # is a single column update, so it is done without re-reading EXIF or
-        # re-running the model.
-        _attach_new_raw_siblings(pairs, db, only_paths=only_paths)
-
         if to_index and not _run_index_phase(
             job_id,
             to_index,
@@ -570,6 +607,11 @@ def _scan_worker(
             resolve_location=True,
         ):
             return
+
+        # Reconcile pairings once both halves have rows. Doing this after the
+        # index phase is what lets a freshly copied .jpg absorb a raw-only row
+        # that was indexed earlier, instead of leaving two cards for one photo.
+        _attach_new_raw_siblings(pairs, db, only_paths=only_paths)
 
         if not analyze:
             if not JOBS.get(job_id).cancelled:
@@ -676,17 +718,22 @@ def _rebuild_worker(
             current="",
         )
 
-        # A raw file can appear next to a photo that is already indexed (for
-        # example an import that only brought the .nef this time). Attaching it
-        # is a single column update, so it is done without re-reading EXIF or
-        # re-running the model.
-        _attach_new_raw_siblings(pairs, db)
-
         # Deleted files: remove their DB row and their proxy cache immediately.
+        # A raw-only row is special: when its same-named image has just shown
+        # up, the row is not "deleted", it is absorbed by the image row. The
+        # image row does not exist yet at this point, so those rows are left
+        # alone here and merged after the index phase, which is what lets a
+        # model result the raw row carries move across instead of being lost.
+        raw_owner = _raw_owner_map(pairs, current_set)
+        deferred_merges: list[str] = []
         for processed, path in enumerate(removed, start=1):
             try:
                 row = db.get_photo_by_path(path)
                 if row:
+                    if raw_owner.get(os.path.normcase(canonical_path(path))):
+                        deferred_merges.append(path)
+                        JOBS.update(job_id, processed=processed, current=path)
+                        continue
                     for key in ("thumb_path", "proxy_path"):
                         cached = row.get(key)
                         if cached and os.path.exists(cached):
@@ -721,6 +768,12 @@ def _rebuild_worker(
                 processed=max(1, total_work),
                 current="没有需要更新的照片",
             )
+
+        # Reconcile pairings once both halves have rows: a .nef that just
+        # appeared lights up the badge, and a .jpg that just appeared absorbs
+        # the raw-only row that used to represent it.
+        _attach_new_raw_siblings(pairs, db, extra_raw_paths=deferred_merges)
+
         if not JOBS.get(job_id).cancelled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)

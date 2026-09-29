@@ -897,14 +897,34 @@ async function permanentDeletePhotos(ids) {
     return p && p.status === "deleted";
   });
   if (!ids.length) return;
-  if (!await confirmDialog(`确定彻底移除 ${ids.length} 张照片？\n文件将从磁盘移除，且不可恢复。`, { title: "彻底移除", confirmText: "彻底移除", danger: true })) return;
+  const hasRaw = ids.some((id) => {
+    const p = state.photos.find((x) => x.id === id);
+    return p && (p.has_raw || p.is_raw);
+  });
+  const answer = await confirmDialog(
+    `确定彻底移除 ${ids.length} 张照片？\n文件将从磁盘移除，且不可恢复。`,
+    {
+      title: "彻底移除",
+      confirmText: "彻底移除",
+      danger: true,
+      // A raw file trashed alongside the photo is deleted with it by default,
+      // exactly like emptying the bin does.
+      checkbox: hasRaw ? { label: "同时删除 RAW", checked: true } : null,
+    }
+  );
+  const confirmed = typeof answer === "object" ? answer.confirmed : answer;
+  if (!confirmed) return;
+  const deleteRaw = typeof answer === "object" ? answer.checked : true;
   try {
     const data = await api("/api/delete/permanent", {
       method: "POST",
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, delete_raw: deleteRaw }),
     });
     if (data.errors && data.errors.length) {
       showToast("部分照片彻底移除失败：" + data.errors.map((e) => e.error).join("; "), "error");
+    }
+    if (data.raw_removed) {
+      showToast(`已彻底移除，含 ${data.raw_removed} 个 RAW 文件。`, "success");
     }
     state.photos = state.photos.filter((p) => !ids.includes(p.id));
     state.selected.clear();

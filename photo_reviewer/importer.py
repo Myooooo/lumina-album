@@ -227,7 +227,14 @@ def scan_source(
 
 
 def _selected_files(group: SourceGroup, raw_policy: str) -> list[SourceFile]:
-    """Pick the members of a group that the policy wants to copy."""
+    """Pick the members of a group that the policy wants to copy.
+
+    ``JPG+RAW`` copies both halves, ``仅JPG`` the image and ``仅RAW`` the raw
+    file. Each policy falls back to whichever half the card actually has, so a
+    lone ``.nef`` is never silently dropped when the user asked for images (its
+    embedded preview is a perfectly good picture), and a card that only carries
+    JPEGs still imports under ``仅RAW``.
+    """
     if raw_policy == RAW_POLICY_RAW_ONLY:
         chosen = [group.raw] if group.raw else [group.image]
     elif raw_policy == RAW_POLICY_BOTH:

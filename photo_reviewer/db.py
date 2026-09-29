@@ -743,6 +743,38 @@ class Database:
                 conn.close()
         return cleared
 
+    def adopt_analysis(self, source_id: int, target_id: int) -> None:
+        """Move a model result from one row to another.
+
+        Used when a raw-only row (which the model did analyse) is folded into
+        the image row that just appeared next to it: the score was paid for, so
+        it moves across instead of being thrown away.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    UPDATE photos SET
+                        score=(SELECT score FROM photos WHERE id=?),
+                        dimensions=(SELECT dimensions FROM photos WHERE id=?),
+                        tags=(SELECT tags FROM photos WHERE id=?),
+                        reason=(SELECT reason FROM photos WHERE id=?),
+                        title=COALESCE(NULLIF((SELECT title FROM photos WHERE id=?), ''), title),
+                        recommendation=(SELECT recommendation FROM photos WHERE id=?),
+                        model=(SELECT model FROM photos WHERE id=?),
+                        analyzed_at=(SELECT analyzed_at FROM photos WHERE id=?),
+                        status=CASE
+                            WHEN (SELECT score FROM photos WHERE id=?) IS NOT NULL
+                            THEN 'analyzed' ELSE status END
+                    WHERE id=?
+                    """,
+                    (source_id,) * 9 + (target_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
     def mark_deleted(
         self, ids: Sequence[int], new_paths: dict[int, str] | None = None
     ) -> None:
@@ -891,6 +923,21 @@ class Database:
                     ],
                 )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def delete_settings(self, keys: Sequence[str]) -> int:
+        """Drop settings rows that no longer map to a configuration field."""
+        if not keys:
+            return 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.executemany(
+                    "DELETE FROM settings WHERE key=?", [(str(k),) for k in keys]
+                )
+                conn.commit()
+                return max(0, cursor.rowcount)
             finally:
                 conn.close()
 

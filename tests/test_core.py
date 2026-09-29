@@ -774,6 +774,43 @@ class ScannerTests(unittest.TestCase):
             self.db.get_photo_by_path(os.path.join(self.folder, "._late.NEF"))
         )
 
+    def test_late_image_absorbs_a_raw_only_row(self) -> None:
+        """The mirror case: the jpg arrives after the raw was its own photo.
+
+        Both halves now exist, so the album must show one card. The score the
+        raw-only row had already earned moves to the image row instead of being
+        thrown away, and the path must not leave a duplicate behind.
+        """
+        raw_path = os.path.join(self.folder, "pair.NEF")
+        Path(raw_path).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": raw_path,
+                "folder": self.folder,
+                "filename": "pair.NEF",
+                "status": "analyzed",
+                "score": 7.7,
+                "tags": ["来自RAW"],
+                "title": "只有RAW时的标题",
+            }
+        )
+        image_path = os.path.join(self.folder, "pair.JPG")
+        Image.new("RGB", (40, 40)).save(image_path)
+
+        from photo_reviewer.scanner import start_rebuild_index
+
+        job = start_rebuild_index(self.folder, self.db, self.cfg)
+        wait_for_job(job.id)
+
+        rows = self.db.list_photos(folder=self.folder, exclude_deleted=False)
+        self.assertEqual(len(rows), 1, [r["filename"] for r in rows])
+        row = rows[0]
+        self.assertEqual(row["filename"], "pair.JPG")
+        self.assertEqual(row["raw_path"], raw_path)
+        self.assertEqual(row["score"], 7.7)
+        self.assertEqual(row["tags"], ["来自RAW"])
+        self.assertEqual(row["title"], "只有RAW时的标题")
+
     def test_initial_scan_resolves_location_once_during_indexing(self) -> None:
         image_path = os.path.join(self.folder, "gps.jpg")
         Image.new("RGB", (40, 40)).save(image_path)
@@ -1142,6 +1179,33 @@ class ServerApiTests(unittest.TestCase):
         self.assertNotIn("host", PERSISTED_FIELDS)
         self.assertIn("model", stored)
 
+    def test_stale_settings_rows_are_pruned_on_start(self) -> None:
+        """Rows written by older versions must not survive into a new run.
+
+        ``host``/``port``/``debug`` are environment-only now, and a persisted
+        ``debug=true`` used to quietly re-enable the Werkzeug debugger on a
+        later start. ``thumb_size`` was renamed to ``gallery_thumb_size``.
+        """
+        self.db.save_settings(
+            {
+                "host": "0.0.0.0",
+                "port": "9999",
+                "debug": "true",
+                "thumb_size": "320",
+                "model": "keep-me",
+            }
+        )
+        before = self.db.get_settings()
+        self.assertIn("host", before)
+
+        # Opening the app is what prunes them.
+        create_app(self.cfg, self.db)
+        after = self.db.get_settings()
+        for key in ("host", "port", "debug", "thumb_size"):
+            self.assertNotIn(key, after)
+        self.assertEqual(after["model"], "keep-me")
+        self.assertEqual(self.cfg.host, "127.0.0.1")
+
     def test_photo_payload_is_trimmed_for_the_gallery(self) -> None:
         resp = self.client.get("/api/photos")
         photo = resp.get_json()["photos"][0]
@@ -1263,6 +1327,37 @@ class ServerApiTests(unittest.TestCase):
         self.assertFalse(os.path.exists(trashed_image))
         self.assertTrue(os.path.exists(trashed_raw), "raw should have been kept")
 
+    def test_permanent_delete_can_keep_the_raw(self) -> None:
+        """The raw checkbox on the permanent-delete dialog is honoured."""
+        source = os.path.join(self.folder, "keep.jpg")
+        raw = os.path.join(self.folder, "keep.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "keep.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        trashed_image = self.db.get_photo(photo_id)["path"]
+        trashed_raw = os.path.join(os.path.dirname(trashed_image), "keep.NEF")
+
+        resp = self.client.post(
+            "/api/delete/permanent", json={"ids": [photo_id], "delete_raw": False}
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["raw_removed"], 0)
+        self.assertEqual(len(body["purged"]), 1)
+        self.assertFalse(os.path.exists(trashed_image))
+        self.assertTrue(os.path.exists(trashed_raw), "raw should have been kept")
+        self.assertIsNone(self.db.get_photo(photo_id))
+
     def test_delete_restore_roundtrip_moves_the_file(self) -> None:
         source = os.path.join(self.folder, "a.jpg")
         Image.new("RGB", (16, 16)).save(source)
@@ -1319,6 +1414,9 @@ class ServerApiTests(unittest.TestCase):
 
         resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
         self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["purged"][0]["id"], photo_id)
+        self.assertEqual(body["raw_removed"], 1)
         self.assertFalse(os.path.exists(trashed_image))
         self.assertFalse(os.path.exists(trashed_raw), "orphan raw left in the trash")
         self.assertIsNone(self.db.get_photo(photo_id))
@@ -1814,6 +1912,42 @@ class ImportPlanTests(unittest.TestCase):
         self.assertIn("DSC_0001.NEF", names)
         # The jpg is byte-different but incremental mode leaves it alone.
         self.assertNotIn("DSC_0001.JPG", names)
+
+    def test_jpg_is_imported_when_only_the_raw_exists_locally(self) -> None:
+        """The mirror case: the local folder has the raw half only.
+
+        Selecting 仅JPG or JPG+RAW must still bring the image over, otherwise
+        the album keeps showing the raw-only card the user asked to complete.
+        """
+        self._seed_card()
+        self._raw(self.local, "DCIM", "100D3500", "DSC_0001.NEF")
+        for policy in (RAW_POLICY_IMAGE_FIRST, RAW_POLICY_BOTH):
+            plan = plan_import(self.card, self.local, self.cfg, raw_policy=policy)
+            names = sorted(os.path.basename(c.relative_path) for c in plan.copies)
+            self.assertIn("DSC_0001.JPG", names, policy)
+        # 仅RAW has no reason to pull the image in.
+        plan = plan_import(
+            self.card, self.local, self.cfg, raw_policy=RAW_POLICY_RAW_ONLY
+        )
+        names = sorted(os.path.basename(c.relative_path) for c in plan.copies)
+        self.assertNotIn("DSC_0001.JPG", names)
+
+    def test_both_policies_are_stable_when_only_one_half_differs(self) -> None:
+        """An identical half is left alone in incremental mode."""
+        self._seed_card()
+        self._image(self.local, "DCIM", "100D3500", "DSC_0001.JPG", color=(1, 1, 1))
+        self._raw(self.local, "DCIM", "100D3500", "DSC_0001.NEF", payload=b"raw-payload")
+        # Only the raw matches the card byte for byte.
+        stat = os.stat(os.path.join(self.card, "DCIM", "100D3500", "DSC_0001.NEF"))
+        os.utime(
+            os.path.join(self.local, "DCIM", "100D3500", "DSC_0001.NEF"),
+            (stat.st_atime, stat.st_mtime),
+        )
+        plan = plan_import(
+            self.card, self.local, self.cfg, raw_policy=RAW_POLICY_BOTH
+        )
+        names = sorted(os.path.basename(c.relative_path) for c in plan.copies)
+        self.assertEqual(names, ["DSC_0002.JPG", "DSC_0003.NEF"])
 
     def test_full_mode_overwrites_only_changed_files(self) -> None:
         self._seed_card()
