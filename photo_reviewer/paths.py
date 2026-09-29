@@ -43,3 +43,21 @@ def same_path(left: str | None, right: str | None) -> bool:
     return os.path.normcase(canonical_path(left)) == os.path.normcase(
         canonical_path(right)
     )
+
+
+def is_within(child: str | None, parent: str | None) -> bool:
+    """Return True when ``child`` resolves inside ``parent``.
+
+    Used as a guard before touching the filesystem with a path that ultimately
+    came from the browser.
+    """
+    child_path = canonical_path(child)
+    parent_path = canonical_path(parent)
+    if not child_path or not parent_path:
+        return False
+    try:
+        return os.path.commonpath(
+            [os.path.normcase(child_path), os.path.normcase(parent_path)]
+        ) == os.path.normcase(parent_path)
+    except ValueError:  # different drives
+        return False

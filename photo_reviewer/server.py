@@ -32,7 +32,8 @@ from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, Config
 from .db import Database, sort_photos
 from .exif import extract_exif
 from .geocode import reverse_geocode
-from .paths import canonical_folder, canonical_path
+from .importer import ImportError_
+from .paths import canonical_folder, canonical_path, same_path
 from .scanner import (
     JOBS,
     RAW_EXTENSIONS,
@@ -40,6 +41,7 @@ from .scanner import (
     start_rebuild_index,
     start_scan,
 )
+from .sync import build_plan, start_import
 from .thumbnailer import make_proxy
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,7 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         "height": photo["height"],
         "location": photo.get("location"),
         "exif": photo.get("exif") or {},
+        "dimensions": photo.get("dimensions") or {},
         "score": photo.get("score"),
         "tags": photo.get("tags") or [],
         "reason": photo.get("reason"),
@@ -90,7 +93,6 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
                 "folder": photo["folder"],
                 "thumb_path": photo.get("thumb_path"),
                 "proxy_path": photo.get("proxy_path"),
-                "dimensions": photo.get("dimensions") or {},
                 "phash": photo.get("phash"),
                 "recommendation": photo.get("recommendation"),
                 "model": photo.get("model"),
@@ -107,6 +109,16 @@ def _normalize_folder(path: str) -> str:
 
 def _is_raw_file(path: str | None) -> bool:
     return bool(path) and Path(path).suffix.lower() in RAW_EXTENSIONS
+
+
+def _open_with_system(path: str) -> None:
+    """Hand a path to the operating system's default handler."""
+    if sys.platform.startswith("win"):
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
 
 
 def _thumbnail_path(photo: dict[str, Any]) -> str | None:
@@ -134,8 +146,26 @@ def _thumbnail_path(photo: dict[str, Any]) -> str | None:
     return None
 
 
-def _move_to_trash(photo: dict[str, Any], config: Config) -> str:
-    """Move a photo into a trash directory under its folder."""
+def _trash_destination(day_dir: Path, source: str) -> Path:
+    """Pick a free name inside the day folder, avoiding collisions."""
+    dest = day_dir / Path(source).name
+    if dest.exists():
+        dest = (
+            day_dir
+            / f"{Path(source).stem}_{uuid.uuid4().hex[:8]}{Path(source).suffix.lower()}"
+        )
+    return dest
+
+
+def _move_to_trash(
+    photo: dict[str, Any], config: Config, move_raw: bool = True
+) -> str:
+    """Move a photo into a trash directory under its folder.
+
+    When the photo has a same-named raw sibling, the raw file is moved with it
+    so the pair never gets split across the album and the trash. Returns the
+    trashed path of the primary file.
+    """
     src = photo["path"]
     if not os.path.exists(src):
         raise FileNotFoundError(f"文件不存在: {src}")
@@ -145,18 +175,29 @@ def _move_to_trash(photo: dict[str, Any], config: Config) -> str:
     day_dir = trash_root / datetime.now().astimezone().strftime("%Y%m%d")
     day_dir.mkdir(parents=True, exist_ok=True)
 
-    dest = day_dir / Path(src).name
-    if dest.exists():
-        dest = (
-            day_dir
-            / f"{Path(src).stem}_{uuid.uuid4().hex[:8]}{Path(src).suffix.lower()}"
-        )
+    if move_raw:
+        raw_path = photo.get("raw_path")
+        if raw_path and os.path.exists(raw_path) and not same_path(raw_path, src):
+            try:
+                shutil.move(raw_path, str(_trash_destination(day_dir, raw_path)))
+            except OSError:
+                logger.warning(
+                    "could not move raw sibling %s to trash", raw_path, exc_info=True
+                )
+
+    dest = _trash_destination(day_dir, src)
     shutil.move(src, str(dest))
     return str(dest)
 
 
-def _restore_from_trash(photo: dict[str, Any]) -> str:
-    """Move a deleted photo from trash back to its original path."""
+def _restore_from_trash(
+    photo: dict[str, Any], restore_raw: bool = True
+) -> tuple[str, str | None]:
+    """Move a deleted photo from trash back to its original path.
+
+    A raw sibling that was trashed alongside the photo is put back as well, so
+    the pair is reunited in the album. Returns ``(image_path, raw_path)``.
+    """
     trash_path = photo["path"]
     original = photo.get("original_path") or trash_path
     if not os.path.exists(trash_path):
@@ -165,11 +206,73 @@ def _restore_from_trash(photo: dict[str, Any]) -> str:
     original = os.path.abspath(original)
     Path(original).parent.mkdir(parents=True, exist_ok=True)
     if os.path.exists(original):
-        stem = Path(original).stem
-        suffix = Path(original).suffix
-        original = str(Path(original).parent / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}")
+        original = _uniquify(original)
+
+    restored_raw: str | None = None
+    if restore_raw:
+        raw_trashed = _trashed_raw_candidate(photo)
+        if raw_trashed:
+            raw_original = _original_path_for_trashed(photo, raw_trashed)
+            try:
+                Path(raw_original).parent.mkdir(parents=True, exist_ok=True)
+                if os.path.exists(raw_original):
+                    raw_original = _uniquify(raw_original)
+                shutil.move(raw_trashed, raw_original)
+                restored_raw = raw_original
+            except OSError:
+                logger.warning(
+                    "could not restore raw sibling %s", raw_trashed, exc_info=True
+                )
+
     shutil.move(trash_path, original)
-    return original
+    return original, restored_raw
+
+
+def _uniquify(path: str) -> str:
+    stem = Path(path).stem
+    suffix = Path(path).suffix
+    return str(Path(path).parent / f"{stem}_{uuid.uuid4().hex[:8]}{suffix}")
+
+
+def _trashed_raw_candidate(photo: dict[str, Any]) -> str | None:
+    """Find the raw file that was moved to trash together with ``photo``.
+
+    ``raw_path`` is cleared when the photo is trashed (the raw no longer sits
+    next to the image), so the file is located by scanning the photo's trash day
+    folder for a raw file sharing the image's file name stem. Files from
+    different source folders land in different day folders, so a stem match is
+    unambiguous in practice.
+    """
+    trashed_image = photo.get("path") or ""
+    if not trashed_image:
+        return None
+    day_dir = os.path.dirname(trashed_image)
+    if not day_dir or not os.path.isdir(day_dir):
+        return None
+    stem = Path(trashed_image).stem
+    image_suffix = Path(trashed_image).suffix.lower()
+    for name in sorted(os.listdir(day_dir)):
+        candidate = os.path.join(day_dir, name)
+        if not os.path.isfile(candidate):
+            continue
+        if Path(name).suffix.lower() == image_suffix:
+            continue
+        if Path(name).stem != stem:
+            continue
+        if _is_raw_file(candidate):
+            return candidate
+    return None
+
+
+def _original_path_for_trashed(photo: dict[str, Any], trashed_raw: str) -> str:
+    """Rebuild where a trashed raw file came from."""
+    raw_path = photo.get("raw_path") or ""
+    original_image = photo.get("original_path") or photo.get("path") or ""
+    if raw_path and original_image:
+        return str(Path(original_image).parent / Path(raw_path).name)
+    if original_image:
+        return str(Path(original_image).parent / Path(trashed_raw).name)
+    return trashed_raw
 
 
 def _remove_photo_cache(photo: dict[str, Any]) -> None:
@@ -448,15 +551,45 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if not os.path.isdir(path):
             return jsonify({"error": "文件夹不存在"}), 404
         try:
-            if sys.platform.startswith("win"):
-                os.startfile(path)  # type: ignore[attr-defined]
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", path])
-            else:
-                subprocess.Popen(["xdg-open", path])
+            _open_with_system(path)
         except Exception as exc:  # noqa: BLE001
             return jsonify({"error": str(exc)}), 500
         return jsonify({"ok": True})
+
+    @app.post("/api/open-file")
+    def api_open_file():
+        """Hand one indexed photo (or its raw sibling) to the OS default app.
+
+        The path is never trusted on its own: it must match either the stored
+        ``path`` or the stored ``raw_path`` of an existing photo row, so this
+        cannot be used to launch arbitrary files through the browser.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            photo_id = int(data.get("photo_id"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "缺少照片 id"}), 400
+        photo = database.get_photo(photo_id)
+        if not photo:
+            return jsonify({"error": "照片不存在"}), 404
+
+        candidates = [photo.get("path"), photo.get("raw_path"), photo.get("original_path")]
+        requested = str(data.get("path") or "").strip()
+        allowed = [c for c in candidates if c]
+        if requested:
+            resolved = canonical_path(requested)
+            if not any(same_path(resolved, c) for c in allowed):
+                return jsonify({"error": "该路径不属于这张照片"}), 403
+        else:
+            resolved = canonical_path(allowed[0]) if allowed else ""
+        if not resolved or not os.path.isfile(resolved):
+            return jsonify({"error": "文件不存在"}), 404
+        try:
+            _open_with_system(resolved)
+        except Exception as exc:
+            logger.warning("could not open %s", resolved, exc_info=True)
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, "path": resolved})
 
     @app.post("/api/rebuild-index")
     def api_rebuild_index():
@@ -504,6 +637,34 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         job = start_scan(folder, database, cfg, force=force)
         return jsonify({"job_id": job.id, "status": job.status, "folder": folder})
 
+    @app.post("/api/import/plan")
+    def api_import_plan():
+        """Preview an SD-card import without copying anything."""
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            plan = build_plan(data, cfg)
+        except ImportError_ as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"plan": plan.summary()})
+
+    @app.post("/api/import/run")
+    def api_import_run():
+        """Copy the new files from a card, then index what arrived."""
+        data = request.get_json(force=True, silent=True) or {}
+        try:
+            job = start_import(data, database, cfg)
+        except ImportError_ as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(
+            {
+                "job_id": job.id,
+                "status": job.status,
+                "phase": job.phase,
+                "folder": job.folder,
+                "total": job.total,
+            }
+        )
+
     @app.get("/api/scan/jobs")
     def api_scan_jobs():
         folder = request.args.get("folder", "").strip() or None
@@ -541,6 +702,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 "processed": job.processed,
                 "current": job.current,
                 "phase": job.phase,
+                "detail": job.detail,
+                "report": job.report,
                 "error": job.error,
                 "cancelled": job.cancelled,
             }
@@ -861,7 +1024,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 continue
             try:
                 new_path = _move_to_trash(photo, cfg)
+                # The raw sibling followed the photo into the trash, so it no
+                # longer sits next to the image and must not be reported as one.
                 database.mark_deleted([photo["id"]], {photo["id"]: new_path})
+                if photo.get("raw_path"):
+                    database.update_raw_path(photo["id"], None)
                 moved.append({"id": photo["id"], "path": new_path})
                 touched_folders.add(
                     photo.get("folder") or os.path.dirname(photo["path"])
@@ -898,8 +1065,10 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 errors.append({"id": pid, "error": "照片不在回收站"})
                 continue
             try:
-                new_original = _restore_from_trash(photo)
+                new_original, restored_raw = _restore_from_trash(photo)
                 database.restore_deleted([photo["id"]], {photo["id"]: new_original})
+                if restored_raw:
+                    database.update_raw_path(photo["id"], restored_raw)
                 restored.append({"id": photo["id"], "path": new_original})
                 touched_folders.add(
                     photo.get("folder")
@@ -945,6 +1114,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 except OSError as exc:
                     errors.append({"id": pid, "error": f"删除文件失败: {exc}"})
                     continue
+            # The raw sibling sits in the same trash day folder; purging the
+            # photo must not leave it behind.
+            sibling = _trashed_raw_candidate(photo)
+            if sibling:
+                try:
+                    os.remove(sibling)
+                except OSError:
+                    logger.debug("raw sibling already gone: %s", sibling)
             touched_folders.add(
                 photo.get("folder")
                 or os.path.dirname(photo.get("original_path") or photo["path"])
@@ -1017,8 +1194,18 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
     @app.post("/api/trash/empty")
     def api_trash_empty():
+        """Permanently delete everything in the trash.
+
+        ``delete_raw`` (default on) also removes the raw sibling that was moved
+        to the trash together with each photo, so emptying the bin does not
+        leave orphaned raw files behind.
+        """
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip() or None
+        delete_raw = data.get("delete_raw", True)
+        if isinstance(delete_raw, str):
+            delete_raw = delete_raw.strip().lower() in ("1", "true", "yes", "on")
+        delete_raw = bool(delete_raw)
         if folder:
             folder = canonical_path(folder)
         photos = database.list_photos(
@@ -1029,6 +1216,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             limit=100000,
         )
         deleted = 0
+        raw_deleted = 0
         errors = []
         touched_folders = set()
         for photo in photos:
@@ -1038,28 +1226,38 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             original = photo.get("original_path")
             if original and original not in candidates:
                 candidates.append(original)
+            if delete_raw:
+                raw_candidate = _trashed_raw_candidate(photo)
+                if raw_candidate:
+                    candidates.append(raw_candidate)
+            failed = False
             for candidate in candidates:
-                if candidate and os.path.exists(candidate):
-                    try:
-                        os.remove(candidate)
-                    except OSError as exc:
-                        errors.append(
-                            {"id": photo["id"], "error": f"删除文件失败: {exc}"}
-                        )
-                        break
-            else:
-                _remove_photo_cache(photo)
-                database.delete_rows([photo["id"]])
-                deleted += 1
-                touched_folders.add(
-                    photo.get("folder") or os.path.dirname(photo.get("path") or "")
-                )
+                if not candidate or not os.path.exists(candidate):
+                    continue
+                try:
+                    os.remove(candidate)
+                    if delete_raw and _is_raw_file(candidate):
+                        raw_deleted += 1
+                except OSError as exc:
+                    errors.append({"id": photo["id"], "error": f"删除文件失败: {exc}"})
+                    failed = True
+                    break
+            if failed:
+                continue
+            _remove_photo_cache(photo)
+            database.delete_rows([photo["id"]])
+            deleted += 1
+            touched_folders.add(
+                photo.get("folder") or os.path.dirname(photo.get("path") or "")
+            )
         for touched in touched_folders:
             try:
                 cleanup_folder_cache(touched, database, cfg.cache_dir_name)
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", touched, exc_info=True)
-        return jsonify({"deleted": deleted, "errors": errors})
+        return jsonify(
+            {"deleted": deleted, "raw_deleted": raw_deleted, "errors": errors}
+        )
 
     @app.post("/api/cache/clean")
     def api_cache_clean():

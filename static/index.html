@@ -21,6 +21,7 @@
       <button id="historyBtn" class="btn icon-only" title="整理过的文件夹"><span class="btn-icon" data-icon="history"></span></button>
       <button id="scanBtn" class="btn primary"><span class="btn-icon" data-icon="sparkles"></span>开始整理</button>
       <button id="rebuildIndexBtn" class="btn" title="同步相册"><span class="btn-icon" data-icon="sync"></span>同步相册</button>
+      <button id="importBtn" class="btn" title="从 SD 卡导入"><span class="btn-icon" data-icon="import"></span>从 SD 卡导入</button>
       <label class="force-label"><input type="checkbox" id="forceScan" /> 重新整理全部</label>
       <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
@@ -185,6 +186,55 @@
     </div>
   </div>
 
+  <!-- SD card import modal -->
+  <div id="importModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" data-close="importModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="import"></span>从 SD 卡导入</h2>
+      <div class="form-grid">
+        <label class="full-row">SD 卡或来源文件夹
+          <div class="dir-row">
+            <input id="importSource" type="text" placeholder="例如 E:\DCIM" />
+            <button id="importPickSourceBtn" class="btn" type="button"><span class="btn-icon" data-icon="sdCard"></span>选择</button>
+          </div>
+        </label>
+        <label class="full-row">导入到（当前的回忆文件夹）
+          <input id="importTarget" type="text" readonly />
+        </label>
+        <label>导入模式
+          <select id="importMode">
+            <option value="incremental" selected>增量导入（只拷贝新增文件）</option>
+            <option value="full">全量导入（覆盖同名文件）</option>
+          </select>
+        </label>
+        <label>RAW 文件
+          <select id="importRawPolicy">
+            <option value="image" selected>JPG 等优先（没有图片时才用 RAW）</option>
+            <option value="both">图片与 RAW 都拷贝</option>
+            <option value="raw">只拷贝 RAW</option>
+          </select>
+        </label>
+        <label>拷贝之后
+          <select id="importAfter">
+            <option value="copy">仅拷贝文件</option>
+            <option value="index" selected>拷贝并建立索引（不调用模型）</option>
+            <option value="organize">拷贝并整理（索引 + 模型分析）</option>
+          </select>
+        </label>
+        <label class="import-check full-row">
+          <input type="checkbox" id="importResetAnalysis" checked />
+          全量导入覆盖文件时，清除该照片的旧评分与标签
+        </label>
+      </div>
+      <p class="import-note">本地已有、SD 卡上没有的照片不会被删除或修改。目录结构按 SD 卡原样保留。</p>
+      <div id="importPreview" class="import-preview hidden"></div>
+      <div class="modal-actions">
+        <button id="importPlanBtn" class="btn"><span class="btn-icon" data-icon="scan"></span>预演</button>
+        <button id="importRunBtn" class="btn primary"><span class="btn-icon" data-icon="import"></span>开始导入</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div id="settingsModal" class="modal hidden">
     <div class="modal-content">
@@ -267,21 +317,37 @@
         <label class="full-row">照片标题
           <input id="editTitle" type="text" maxlength="40" placeholder="为空时显示文件名" />
         </label>
-        <label>总评分 (0-10)
-          <input id="editScore" type="number" min="0" max="10" step="0.1" />
-        </label>
-        <label>技术评分
-          <input id="editTechnical" type="number" min="0" max="10" step="0.1" />
-        </label>
-        <label>构图评分
-          <input id="editComposition" type="number" min="0" max="10" step="0.1" />
-        </label>
-        <label>回忆评分
-          <input id="editMemory" type="number" min="0" max="10" step="0.1" />
-        </label>
-        <label>独特评分
-          <input id="editUniqueness" type="number" min="0" max="10" step="0.1" />
-        </label>
+
+        <div class="score-editor full-row" data-score-key="score">
+          <span class="score-editor-label">总分</span>
+          <input id="editScoreRange" class="score-range" type="range" min="0" max="10" step="0.1" value="0" />
+          <input id="editScore" class="score-number" type="number" min="0" max="10" step="0.1" />
+        </div>
+
+        <div class="score-editor full-row" data-score-key="technical">
+          <span class="score-editor-label">技术</span>
+          <input id="editTechnicalRange" class="score-range" type="range" min="0" max="10" step="0.1" value="0" />
+          <input id="editTechnical" class="score-number" type="number" min="0" max="10" step="0.1" />
+        </div>
+
+        <div class="score-editor full-row" data-score-key="composition">
+          <span class="score-editor-label">构图</span>
+          <input id="editCompositionRange" class="score-range" type="range" min="0" max="10" step="0.1" value="0" />
+          <input id="editComposition" class="score-number" type="number" min="0" max="10" step="0.1" />
+        </div>
+
+        <div class="score-editor full-row" data-score-key="memory">
+          <span class="score-editor-label">回忆</span>
+          <input id="editMemoryRange" class="score-range" type="range" min="0" max="10" step="0.1" value="0" />
+          <input id="editMemory" class="score-number" type="number" min="0" max="10" step="0.1" />
+        </div>
+
+        <div class="score-editor full-row" data-score-key="uniqueness">
+          <span class="score-editor-label">独特</span>
+          <input id="editUniquenessRange" class="score-range" type="range" min="0" max="10" step="0.1" value="0" />
+          <input id="editUniqueness" class="score-number" type="number" min="0" max="10" step="0.1" />
+        </div>
+
         <label>拍摄地点
           <input id="editLocation" type="text" placeholder="例如：杭州，西湖断桥边" />
         </label>
@@ -315,6 +381,10 @@
       <button class="modal-close" data-close="confirmModal"><span class="btn-icon" data-icon="close"></span></button>
       <h2 id="confirmTitle"><span class="modal-title-icon" data-icon="sparkles"></span>确认操作</h2>
       <p id="confirmMessage"></p>
+      <label id="confirmCheckRow" class="confirm-check hidden">
+        <input type="checkbox" id="confirmCheckInput" checked />
+        <span id="confirmCheckLabel"></span>
+      </label>
       <div class="modal-actions">
         <button id="confirmCancelBtn" class="btn"><span class="btn-icon" data-icon="close"></span>取消</button>
         <button id="confirmOkBtn" class="btn primary danger"><span class="btn-icon" data-icon="check"></span>确定</button>

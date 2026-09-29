@@ -141,7 +141,10 @@ window.LuminaUI = (() => {
   }
 
   /**
-   * Aesthetic confirmation modal with async promise
+   * Aesthetic confirmation modal with async promise.
+   *
+   * ``options.checkbox`` adds an opt-in row above the buttons and makes the
+   * promise resolve with ``{ confirmed, checked }`` instead of a bare boolean.
    */
   function confirmDialog(message, options = {}) {
     return new Promise((resolve) => {
@@ -156,6 +159,10 @@ window.LuminaUI = (() => {
       const okBtn = getEl("confirmOkBtn");
       const cancelBtn = getEl("confirmCancelBtn");
       const closeBtn = modal.querySelector(".modal-close");
+      const checkRow = getEl("confirmCheckRow");
+      const checkInput = getEl("confirmCheckInput");
+      const checkLabel = getEl("confirmCheckLabel");
+      const wantsCheckbox = !!options.checkbox;
 
       if (titleEl) {
         titleEl.innerHTML = `<span class="modal-title-icon">${ICONS.sparkles || ""}</span>${options.title || "确认操作"}`;
@@ -165,17 +172,33 @@ window.LuminaUI = (() => {
         okBtn.innerHTML = `<span class="btn-icon">${ICONS.check || ""}</span>${options.confirmText || "确定"}`;
         okBtn.className = "btn primary" + (options.danger ? " danger" : "");
       }
+      if (checkRow && checkInput && checkLabel) {
+        if (wantsCheckbox) {
+          checkLabel.textContent = options.checkbox.label || "";
+          checkInput.checked = options.checkbox.checked !== false;
+          checkRow.classList.remove("hidden");
+        } else {
+          checkRow.classList.add("hidden");
+        }
+      }
+
+      function result(confirmed) {
+        return wantsCheckbox
+          ? { confirmed, checked: checkInput ? checkInput.checked : false }
+          : confirmed;
+      }
 
       function cleanup() {
         modal.classList.add("hidden");
+        if (checkRow) checkRow.classList.add("hidden");
         if (okBtn) okBtn.removeEventListener("click", onOk);
         if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
         if (closeBtn) closeBtn.removeEventListener("click", onCancel);
         modal.removeEventListener("click", onOverlay);
       }
 
-      function onOk() { cleanup(); resolve(true); }
-      function onCancel() { cleanup(); resolve(false); }
+      function onOk() { const value = result(true); cleanup(); resolve(value); }
+      function onCancel() { const value = result(false); cleanup(); resolve(value); }
       function onOverlay(e) { if (e.target === modal) onCancel(); }
 
       if (okBtn) okBtn.addEventListener("click", onOk);

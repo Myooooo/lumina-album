@@ -38,6 +38,8 @@
   --dim-composition: #ba8c4e;
   --dim-memory: #bd6371;
   --dim-uniqueness: #658c6a;
+  /* Total score uses the warm brand accent, matching the gallery pills. */
+  --dim-total: #b37d56;
   
   /* Borders & Shadows */
   --border: rgba(130, 100, 70, 0.13);
@@ -787,12 +789,83 @@ select {
 }
 
 .raw-meta-row {
+  color: var(--text-secondary);
+}
+
+/* ---------- Clickable file paths ---------- */
+.meta-item-row .meta-content .path-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color .2s ease, color .2s ease;
+}
+
+.meta-item-row .meta-content .path-link:hover {
+  background: var(--primary-light);
   color: var(--primary-dark);
 }
 
-.raw-meta-row .meta-content {
-  font-family: var(--font-mono);
-  font-size: 11px;
+.meta-item-row .meta-content .path-link svg {
+  width: 12px;
+  height: 12px;
+  margin-top: 0;
+  opacity: .45;
+  flex-shrink: 0;
+}
+
+.meta-item-row .meta-content .path-link:hover svg {
+  opacity: 1;
+}
+
+.meta-item-row .meta-content .path-link.copied,
+.meta-item-row .meta-content .path-link.copied svg {
+  color: var(--keep);
+  opacity: 1;
+}
+
+.path-text {
+  word-break: break-all;
+}
+
+.path-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  padding: 0;
+  vertical-align: middle;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all .2s cubic-bezier(.2,.8,.2,1);
+}
+
+.path-open-btn svg {
+  width: 12px !important;
+  height: 12px !important;
+  margin-top: 0 !important;
+}
+
+.path-open-btn:hover {
+  color: var(--primary-dark);
+  border-color: var(--primary);
+  background: #fff;
+  transform: scale(1.08);
+}
+
+.path-open-btn.busy {
+  opacity: .5;
+  pointer-events: none;
 }
 
 .polaroid-body {
@@ -1436,6 +1509,150 @@ select {
   color: var(--text);
 }
 
+.dimension-empty {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+/* ---------- Score editors (edit modal) ----------
+   Scoped under .form-grid so these rules win over the generic
+   ".form-grid input" styling that would otherwise repaint the sliders. */
+.form-grid .score-editor {
+  display: grid;
+  grid-template-columns: 68px 1fr 76px;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 0;
+  --score-color: var(--dim-total);
+  --score-glow: rgba(179, 125, 86, 0.28);
+}
+
+.form-grid .score-editor[data-score-key="technical"] {
+  --score-color: var(--dim-technical);
+  --score-glow: rgba(91, 124, 153, 0.28);
+}
+.form-grid .score-editor[data-score-key="composition"] {
+  --score-color: var(--dim-composition);
+  --score-glow: rgba(186, 140, 78, 0.28);
+}
+.form-grid .score-editor[data-score-key="memory"] {
+  --score-color: var(--dim-memory);
+  --score-glow: rgba(189, 99, 113, 0.28);
+}
+.form-grid .score-editor[data-score-key="uniqueness"] {
+  --score-color: var(--dim-uniqueness);
+  --score-glow: rgba(101, 140, 106, 0.28);
+}
+
+.form-grid .score-editor-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--score-color);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-grid .score-editor-label::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--score-color);
+  box-shadow: 0 0 0 3px var(--score-glow);
+  flex-shrink: 0;
+}
+
+.form-grid input.score-number {
+  padding: 7px 6px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--score-color);
+}
+
+.form-grid input.score-number:focus {
+  border-color: var(--score-color);
+  box-shadow: 0 0 0 3px var(--score-glow);
+}
+
+/* Range slider, themed per score and matching the detail-page bars. */
+.form-grid input.score-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  min-height: 6px;
+  padding: 0;
+  border: none;
+  border-radius: 99px;
+  background: linear-gradient(
+    to right,
+    var(--score-color) 0%,
+    var(--score-color) var(--score-pct, 0%),
+    #ebe0d2 var(--score-pct, 0%),
+    #ebe0d2 100%
+  );
+  outline: none;
+  cursor: pointer;
+  transition: box-shadow .25s ease;
+}
+
+.form-grid input.score-range:focus {
+  background: linear-gradient(
+    to right,
+    var(--score-color) 0%,
+    var(--score-color) var(--score-pct, 0%),
+    #ebe0d2 var(--score-pct, 0%),
+    #ebe0d2 100%
+  );
+}
+
+.score-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--score-color);
+  box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
+  cursor: grab;
+  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+}
+
+.score-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--score-color);
+  box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
+  cursor: grab;
+  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+}
+
+.score-range:hover::-webkit-slider-thumb,
+.score-range:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px var(--score-glow);
+}
+
+.score-range:hover::-moz-range-thumb,
+.score-range:focus-visible::-moz-range-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 3px 12px var(--score-glow);
+}
+
+.score-range:active::-webkit-slider-thumb { cursor: grabbing; transform: scale(1.05); }
+.score-range:active::-moz-range-thumb { cursor: grabbing; transform: scale(1.05); }
+
+.form-grid input.score-range:focus-visible {
+  box-shadow: 0 0 0 3px var(--score-glow);
+}
+
 .badge {
   padding: 2px 8px;
   border-radius: 99px;
@@ -1677,6 +1894,112 @@ select {
 .remove-folder-btn { margin-right: auto; }
 .edit-grid { width: 100%; }
 
+/* ---------- SD Card Import ---------- */
+#importModal .modal-content { max-width: 720px; }
+
+.import-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  color: var(--text-secondary) !important;
+}
+
+.import-check input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.import-note {
+  margin: 0 0 14px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.import-preview {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 253, 249, 0.7);
+  padding: 14px 16px;
+  margin-bottom: 4px;
+}
+
+.import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.import-summary strong {
+  color: var(--primary-dark);
+  font-family: var(--font-mono);
+}
+
+.import-warning {
+  font-size: 12px;
+  color: var(--maybe);
+  margin: 0 0 8px;
+  line-height: 1.6;
+}
+
+.import-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px dashed rgba(160, 130, 90, 0.25);
+  padding-top: 8px;
+}
+
+.import-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  padding: 3px 0;
+}
+
+.import-list .import-tag {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+}
+
+.import-list .import-tag.add {
+  color: var(--keep);
+  border-color: rgba(96, 141, 109, 0.4);
+}
+
+.import-list .import-tag.overwrite {
+  color: var(--maybe);
+  border-color: rgba(199, 141, 70, 0.45);
+}
+
+.import-list .import-tag.raw {
+  color: var(--primary-dark);
+  border-color: rgba(179, 125, 86, 0.4);
+}
+
+.import-list .import-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
 /* ---------- Toast Notifications ---------- */
 .toast-container {
   position: fixed;
@@ -1742,6 +2065,41 @@ select {
   margin: 16px 0 24px;
   white-space: pre-line;
 }
+.confirm-content p:has(+ .confirm-check:not(.hidden)) {
+  margin-bottom: 14px;
+}
+
+/* Optional opt-in row (e.g. "also delete the RAW file") */
+.confirm-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 22px;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 253, 249, 0.75);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .2s ease, background-color .2s ease;
+}
+
+.confirm-check:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.confirm-check input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 .confirm-content .modal-actions {
   justify-content: center;
 }

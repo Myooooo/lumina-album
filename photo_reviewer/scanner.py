@@ -16,6 +16,7 @@ from .config import Config
 from .db import Database
 from .exif import extract_exif
 from .geocode import reverse_geocode
+from .paths import canonical_path
 from .pipeline import (
     analyze_prepared,
     base_record,
@@ -83,6 +84,10 @@ class ScanJob:
     phase: str = "index"
     error: str | None = None
     cancelled: bool = False
+    # Extra context for import jobs: how many files were copied and what the
+    # user asked to happen afterwards.
+    detail: str = ""
+    report: dict | None = None
 
 
 class JobManager:
@@ -233,6 +238,30 @@ def start_scan(
     return job
 
 
+def start_scoped_scan(
+    folder: str,
+    db: Database,
+    config: Config,
+    only_paths: list[str],
+    analyze: bool = True,
+) -> ScanJob:
+    """Index (and optionally analyse) an explicit list of files.
+
+    Used by the SD-card import so that bringing in a card never re-queues the
+    thousands of photos that are already sitting in the library, and so the
+    default can be "index only, no model calls".
+    """
+    job = JOBS.create(folder, False)
+    job.phase = "index"
+    thread = threading.Thread(
+        target=_scan_worker,
+        args=(job.id, folder, db, config, False, only_paths, analyze),
+        daemon=True,
+    )
+    thread.start()
+    return job
+
+
 def _record_photo_error(
     image_path: str, folder: str, db: Database, exc: Exception
 ) -> None:
@@ -363,6 +392,31 @@ def _index_one(
         return False
 
 
+def _attach_new_raw_siblings(
+    pairs: list[tuple[str, str | None]], db: Database
+) -> int:
+    """Record raw files that appeared next to already-indexed photos.
+
+    Importing only the ``.nef`` half of a pair must still light up the RAW badge
+    on a card whose ``.jpg`` was indexed earlier. This touches one column and
+    leaves the score, tags and comment alone.
+    """
+    updated = 0
+    for image_path, raw_path in pairs:
+        if not raw_path:
+            continue
+        existing = db.get_photo_by_path(image_path)
+        if not existing:
+            continue
+        if existing.get("raw_path") == raw_path:
+            continue
+        db.update_raw_path(existing["id"], raw_path)
+        updated += 1
+    if updated:
+        logger.info("attached %d raw files to existing photos", updated)
+    return updated
+
+
 def _run_index_phase(
     job_id: str,
     images: list[tuple[str, str | None]],
@@ -413,8 +467,21 @@ def _run_index_phase(
 
 
 def _scan_worker(
-    job_id: str, folder: str, db: Database, config: Config, force: bool
+    job_id: str,
+    folder: str,
+    db: Database,
+    config: Config,
+    force: bool,
+    only_paths: list[str] | None = None,
+    analyze: bool = True,
 ) -> None:
+    """Index (and optionally analyse) a folder.
+
+    ``only_paths`` restricts the work to an explicit set of files, which is what
+    an import uses so that adding a card's worth of photos never re-queues the
+    rest of the library. ``analyze=False`` stops after indexing, so the caller
+    can bring photos in without calling the vision model.
+    """
     job = JOBS.get(job_id)
     if not job:
         return
@@ -434,6 +501,17 @@ def _scan_worker(
             config.raw_extensions,
             skip_dirs=skip_dirs,
         )
+        if only_paths is not None:
+            # Keep the primary file of each group plus its raw sibling, so a
+            # freshly copied .nef still attaches to the .jpg already indexed.
+            wanted = {os.path.normcase(canonical_path(p)) for p in only_paths}
+            pairs = [
+                (image, raw)
+                for image, raw in pairs
+                if os.path.normcase(canonical_path(image)) in wanted
+                or (raw and os.path.normcase(canonical_path(raw)) in wanted)
+            ]
+            active_paths &= {image for image, _raw in pairs}
         images = [image_path for image_path, _raw in pairs]
 
         # Index every photo we have not seen yet. This also covers files added
@@ -445,6 +523,12 @@ def _scan_worker(
                 pair for pair in pairs if pair[0] not in active_paths
             ]
 
+        # A raw file can appear next to a photo that is already indexed (for
+        # example an import that only brought the .nef this time). Attaching it
+        # is a single column update, so it is done without re-reading EXIF or
+        # re-running the model.
+        _attach_new_raw_siblings(pairs, db)
+
         if to_index and not _run_index_phase(
             job_id,
             to_index,
@@ -454,6 +538,16 @@ def _scan_worker(
             refresh_exif=True,
             resolve_location=True,
         ):
+            return
+
+        if not analyze:
+            if not JOBS.get(job_id).cancelled:
+                JOBS.update(
+                    job_id,
+                    phase="index",
+                    current="已完成索引（未调用模型）",
+                    status="completed",
+                )
             return
 
         # Analyze pending photos, or every photo when the user forced a full

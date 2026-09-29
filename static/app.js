@@ -238,16 +238,37 @@ function rawBadgeHtml(photo, variant = "card") {
 function rawDetailRow(photo) {
   const rawOnly = !!photo.is_raw;
   if (!rawOnly && !photo.has_raw) return "";
-  const label = rawOnly ? "RAW 原始文件（唯一版本）" : "同名 RAW 原始文件";
-  const note = rawOnly
-    ? "，缩略图与代理图由 RAW 内嵌预览生成"
-    : "，未参与评分";
+  const rawPath = rawOnly ? photo.path || "" : photo.raw_path || "";
+  const tip = rawOnly
+    ? "此照片只有 RAW 文件，缩略图与代理图由内嵌预览生成"
+    : "同目录存在同名的 RAW 原始文件，当前显示与解读基于图片文件";
   return `
-    <div class="meta-item-row raw-meta-row" title="${escapeHtml(label + note)}">
+    <div class="meta-item-row raw-meta-row" title="${escapeHtml(tip)}">
       ${ICONS.raw}
-      <div class="meta-content">${escapeHtml(label)}：${escapeHtml(rawOnly ? photo.path || "" : photo.raw_path || "")}</div>
+      <div class="meta-content">RAW路径：${pathActionHtml(rawPath, "RAW 文件", photo.id)}</div>
     </div>
   `;
+}
+
+/**
+ * Render a file path as a clickable value.
+ *
+ * Clicking copies the path; the small button on the right asks the server to
+ * hand the file to the OS default application. The path itself is escaped, so
+ * a crafted filename can never inject markup.
+ */
+function pathActionHtml(value, label, photoId) {
+  const text = String(value || "");
+  if (!text) return "";
+  const copyTitle = escapeHtml(`点击复制路径：${text}`);
+  const openTitle = escapeHtml(`用系统默认程序打开${label || "文件"}`);
+  return (
+    `<span class="path-link" data-path="${escapeHtml(text)}" title="${copyTitle}">` +
+    `<span class="path-text">${escapeHtml(text)}</span>${ICONS.copy}` +
+    `</span>` +
+    `<button type="button" class="path-open-btn" data-open-path="${escapeHtml(text)}" ` +
+    `data-photo-id="${photoId}" title="${openTitle}">${ICONS.externalLink}</button>`
+  );
 }
 
 function formatFnumber(val) {
@@ -305,8 +326,30 @@ const DIMENSION_COLORS = {
   memory: "#d96b7b",
   uniqueness: "#6f9e7a",
 };
+/** Total score: the warm brand accent, matching the gallery pills. */
+const TOTAL_SCORE_COLOR = "#b37d56";
 
-function dimensionRows(dims) {
+/**
+ * Score rows that participate in the "the model did not fill this in" check.
+ *
+ * Some providers answer with a score and a title but an empty (or missing)
+ * dimensions object. Treating those zeros as real ratings would show five 0.0
+ * bars under a perfectly good total, so a photo whose four dimension scores are
+ * all zero while its total is not is reported as "尚未评分" instead.
+ */
+function hasDimensionScores(dims, score) {
+  if (score === null || score === undefined) return false;
+  const d = dims || {};
+  const values = Object.keys(DIMENSION_NAMES).map((key) => Number(d[key]));
+  if (values.some((value) => Number.isFinite(value) && value > 0)) return true;
+  // All zero: only believe it when the total is zero as well.
+  return !(Number(score) > 0);
+}
+
+function dimensionRows(dims, score) {
+  if (!hasDimensionScores(dims, score)) {
+    return `<div class="dimension-empty">这张照片还没有分项评分，点击详情页的“编辑回忆”即可补上。</div>`;
+  }
   const d = dims || {};
   return Object.keys(DIMENSION_NAMES).map((key) => {
     const rawVal = d[key];
@@ -325,7 +368,8 @@ function dimensionRows(dims) {
   }).join("");
 }
 
-function dimensionValues(dims) {
+function dimensionValues(dims, score) {
+  if (!hasDimensionScores(dims, score)) return "";
   const d = dims || {};
   return Object.keys(DIMENSION_NAMES).map((key) => {
     const val = d[key] ?? 0;
@@ -580,7 +624,7 @@ function renderGallery(options = {}) {
             <div class="back-tags">${tagsHtml || ""}</div>
             <div class="score-pills">
               <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
-              ${dimensionValues(dims)}
+              ${dimensionValues(dims, photo.score)}
             </div>
             <div class="card-actions">
               <label class="card-check" title="选择">
@@ -759,21 +803,15 @@ function pollScan() {
       if (job.status === "completed" || job.status === "cancelled" || job.status === "error") {
         const pct = job.total ? Math.round((job.processed / job.total) * 100) : 100;
         $("progressFill").style.width = pct + "%";
-        $("progressText").textContent =
-          job.status === "completed"
-            ? `整理完成：${job.processed}/${job.total}`
-            : job.status === "cancelled"
-            ? "整理已取消"
-            : "整理出错：" + (job.error || "");
-        setTimeout(hideProgress, 1500);
+        $("progressText").textContent = jobSummaryText(job);
+        setTimeout(hideProgress, job.report ? 6000 : 1500);
         state.currentJobId = null;
         loadPhotos();
         return;
       }
       const pct = job.total ? Math.round((job.processed / job.total) * 100) : 0;
       $("progressFill").style.width = pct + "%";
-      const phaseText = job.phase === "analyze" ? "正在解读" : "整理照片";
-      $("progressText").textContent = `${phaseText} ${job.processed}/${job.total}：${job.current || ""}`;
+      $("progressText").textContent = `${phaseLabel(job.phase)} ${job.processed}/${job.total}${job.current ? "：" + job.current : ""}`;
       state.pollTick += 1;
       loadStats();
       if (state.pollTick % 4 === 0 && !$("searchInput").value.trim()) {
@@ -785,6 +823,36 @@ function pollScan() {
       $("progressText").textContent = "读取进度失败：" + e.message;
       setTimeout(hideProgress, 2000);
     });
+}
+
+const PHASE_LABELS = {
+  plan: "正在比对",
+  copy: "正在拷贝",
+  index: "正在索引",
+  analyze: "正在解读",
+};
+
+function phaseLabel(phase) {
+  return PHASE_LABELS[phase] || "整理照片";
+}
+
+/** Build the end-of-job message, including the import report when present. */
+function jobSummaryText(job) {
+  if (job.status === "error") return "任务出错：" + (job.error || "");
+  if (job.status === "cancelled") return `${phaseLabel(job.phase)}已取消`;
+  const report = job.report;
+  if (report && typeof report === "object" && "copied" in report) {
+    const failed = (report.failed || []).length;
+    const parts = [
+      `导入完成：新增 ${report.new_count ?? 0}`,
+      `覆盖 ${report.overwrite_count ?? 0}`,
+      `跳过 ${report.skip_count ?? 0}`,
+    ];
+    if (failed) parts.push(`失败 ${failed}`);
+    const tail = job.phase === "copy" ? "" : `，已${phaseLabel(job.phase).replace("正在", "")}`;
+    return parts.join("，") + tail;
+  }
+  return `整理完成：${job.processed}/${job.total}`;
 }
 
 async function deletePhotos(ids) {
@@ -1248,7 +1316,7 @@ function updatePreview(options = {}) {
       </div>
       <div class="meta-item-row" title="物理路径">
         ${ICONS.path}
-        <div class="meta-content">${escapeHtml(photo.path || "")}</div>
+        <div class="meta-content">${pathActionHtml(photo.path, "原图", photo.id)}</div>
       </div>
       ${rawDetailRow(photo)}
     </div>
@@ -1259,7 +1327,7 @@ function updatePreview(options = {}) {
         <span class="badge score">总分 ${scoreText(photo.score)}</span>
       </div>
       <div class="dimension-list">
-        ${dimensionRows(photo.dimensions || {})}
+        ${dimensionRows(photo.dimensions || {}, photo.score)}
       </div>
     </div>
 
@@ -1403,16 +1471,78 @@ async function cleanCache() {
   }
 }
 
+const SCORE_EDITORS = [
+  { key: "score", numberId: "editScore", rangeId: "editScoreRange" },
+  { key: "technical", numberId: "editTechnical", rangeId: "editTechnicalRange" },
+  { key: "composition", numberId: "editComposition", rangeId: "editCompositionRange" },
+  { key: "memory", numberId: "editMemory", rangeId: "editMemoryRange" },
+  { key: "uniqueness", numberId: "editUniqueness", rangeId: "editUniquenessRange" },
+];
+
+function clampScore(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(10, Math.round(num * 10) / 10));
+}
+
+/** Paint the slider's filled portion so it reads like the detail-page bar. */
+function paintScoreRange(rangeEl, value) {
+  if (!rangeEl) return;
+  rangeEl.style.setProperty("--score-pct", `${clampScore(value) * 10}%`);
+}
+
+/** Write one score to both inputs of its row. */
+function setScoreValue(editor, value, source) {
+  const rounded = clampScore(value);
+  const rangeEl = $(editor.rangeId);
+  const numberEl = $(editor.numberId);
+  if (rangeEl && source !== "range") rangeEl.value = String(rounded);
+  if (numberEl && source !== "number") numberEl.value = rounded.toFixed(1);
+  paintScoreRange(rangeEl, rounded);
+}
+
+function initScoreEditors() {
+  for (const editor of SCORE_EDITORS) {
+    const rangeEl = $(editor.rangeId);
+    const numberEl = $(editor.numberId);
+    if (!rangeEl || !numberEl) continue;
+    rangeEl.addEventListener("input", () => {
+      setScoreValue(editor, rangeEl.value, "range");
+    });
+    numberEl.addEventListener("input", () => {
+      // Keep typing usable: only mirror once the value parses.
+      if (numberEl.value === "" || numberEl.value === "-") return;
+      const parsed = parseFloat(numberEl.value);
+      if (!Number.isFinite(parsed)) return;
+      const clamped = clampScore(parsed);
+      const rangeElNow = $(editor.rangeId);
+      if (rangeElNow) rangeElNow.value = String(clamped);
+      paintScoreRange(rangeElNow, clamped);
+    });
+    numberEl.addEventListener("blur", () => {
+      // Normalise on blur: clamp out-of-range input and re-format to one
+      // decimal, writing both the box and the slider.
+      setScoreValue(editor, numberEl.value);
+    });
+    setScoreValue(editor, numberEl.value || 0);
+  }
+}
+
 function openEditPreview() {
   const photo = state.photos.find((p) => p.id === state.currentPreviewId);
   if (!photo) return;
   const dims = photo.dimensions || {};
   $("editTitle").value = photo.title || "";
-  $("editScore").value = scoreText(photo.score);
-  $("editTechnical").value = dims.technical ?? 0;
-  $("editComposition").value = dims.composition ?? 0;
-  $("editMemory").value = dims.memory ?? 0;
-  $("editUniqueness").value = dims.uniqueness ?? 0;
+  const values = {
+    score: photo.score ?? 0,
+    technical: dims.technical ?? 0,
+    composition: dims.composition ?? 0,
+    memory: dims.memory ?? 0,
+    uniqueness: dims.uniqueness ?? 0,
+  };
+  for (const editor of SCORE_EDITORS) {
+    setScoreValue(editor, values[editor.key]);
+  }
   $("editLocation").value = photo.location || "";
   $("editTags").value = (photo.tags || []).join("，");
   $("editReason").value = photo.reason || "";
@@ -1505,15 +1635,25 @@ async function removeCurrentFolder() {
 
 async function emptyTrash() {
   const scope = state.folder ? "当前目录" : "全部目录";
-  const ok = await confirmDialog(
+  const answer = await confirmDialog(
     `确定清空${scope}的回收站吗？\n回收站中的照片原文件将被彻底删除，此操作无法恢复。`,
-    { title: "清空回收站", confirmText: "彻底清空", danger: true }
+    {
+      title: "清空回收站",
+      confirmText: "彻底清空",
+      danger: true,
+      checkbox: { label: "同时删除 RAW", checked: true },
+    }
   );
-  if (!ok) return;
+  const confirmed = typeof answer === "object" ? answer.confirmed : answer;
+  if (!confirmed) return;
+  const deleteRaw = typeof answer === "object" ? answer.checked : true;
   try {
     const data = await api("/api/trash/empty", {
       method: "POST",
-      body: JSON.stringify({ folder: state.folder || undefined }),
+      body: JSON.stringify({
+        folder: state.folder || undefined,
+        delete_raw: deleteRaw,
+      }),
     });
     state.selected.clear();
     await loadPhotos();
@@ -1522,7 +1662,11 @@ async function emptyTrash() {
       if (!still) closeModal("previewModal");
       else updatePreview({ skipImage: true });
     }
-    showToast(`回收站已清空，共移除 ${data.deleted || 0} 张照片。`, "success");
+    const rawNote = data.raw_deleted ? `，含 ${data.raw_deleted} 个 RAW 文件` : "";
+    showToast(
+      `回收站已清空，共移除 ${data.deleted || 0} 张照片${rawNote}。`,
+      "success"
+    );
   } catch (e) {
     showToast("清空回收站失败：" + e.message, "error");
   }
@@ -1605,6 +1749,231 @@ async function toggleCurrentPreviewFavorite() {
   }
 }
 
+/* ==========================================================================
+   SD card import
+   ========================================================================== */
+
+function importOptions() {
+  return {
+    source: $("importSource").value.trim(),
+    target: state.folder || "",
+    mode: $("importMode").value,
+    raw_policy: $("importRawPolicy").value,
+    after: $("importAfter").value,
+    reset_analysis: $("importResetAnalysis").checked,
+  };
+}
+
+function setImportPreview(html) {
+  const box = $("importPreview");
+  if (!html) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = html;
+  box.classList.remove("hidden");
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function renderImportPlan(plan) {
+  const warnings = (plan.warnings || [])
+    .map((text) => `<p class="import-warning">${escapeHtml(text)}</p>`)
+    .join("");
+  const items = (plan.items || [])
+    .map((item) => {
+      const tags = [
+        `<span class="import-tag ${item.action}">${item.action === "add" ? "新增" : "覆盖"}</span>`,
+      ];
+      if (item.is_raw) tags.push(`<span class="import-tag raw">RAW</span>`);
+      return `<li>${tags.join("")}<span class="import-path" title="${escapeHtml(item.relative_path)}">${escapeHtml(item.relative_path)}</span><span>${formatBytes(item.size)}</span></li>`;
+    })
+    .join("");
+  const truncated = plan.items_truncated
+    ? `<li><span class="import-path">…… 另有 ${plan.items_truncated} 个文件未列出</span></li>`
+    : "";
+  const list = items ? `<ul class="import-list">${items}${truncated}</ul>` : "";
+  return `
+    <div class="import-summary">
+      <span>新增 <strong>${plan.new_count}</strong></span>
+      <span>覆盖 <strong>${plan.overwrite_count}</strong></span>
+      <span>已存在跳过 <strong>${plan.skip_count}</strong></span>
+      <span>本地独有（不动） <strong>${plan.local_only_count}</strong></span>
+      <span>待拷贝 <strong>${formatBytes(plan.total_bytes)}</strong></span>
+    </div>
+    ${warnings}
+    ${list}
+    ${plan.new_count + plan.overwrite_count === 0 ? `<p class="import-note">本地已经是最新的，没有需要拷贝的文件。</p>` : ""}
+  `;
+}
+
+async function planImport(options = {}) {
+  const payload = importOptions();
+  if (!payload.source) {
+    showToast("请先选择 SD 卡或来源文件夹", "error");
+    return null;
+  }
+  if (!payload.target) {
+    showToast("请先在上方选择一个本地回忆文件夹", "error");
+    return null;
+  }
+  if (!options.silent) showLoading("正在比对 SD 卡与本地文件夹…");
+  try {
+    const data = await api("/api/import/plan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    setImportPreview(renderImportPlan(data.plan));
+    return data.plan;
+  } catch (e) {
+    setImportPreview("");
+    showToast("预演失败：" + e.message, "error");
+    return null;
+  } finally {
+    if (!options.silent) hideLoading();
+  }
+}
+
+async function runImport() {
+  const payload = importOptions();
+  if (!payload.source) {
+    showToast("请先选择 SD 卡或来源文件夹", "error");
+    return;
+  }
+  if (!payload.target) {
+    showToast("请先在上方选择一个本地回忆文件夹", "error");
+    return;
+  }
+  const plan = await planImport({ silent: true });
+  if (!plan) return;
+  const changes = plan.new_count + plan.overwrite_count;
+  if (!changes) {
+    showToast("没有需要拷贝的文件。", "info");
+    return;
+  }
+  const modeText = payload.mode === "full" ? "全量导入" : "增量导入";
+  const confirmed = await confirmDialog(
+    `${modeText}：将新增 ${plan.new_count} 个、覆盖 ${plan.overwrite_count} 个文件，共 ${formatBytes(plan.total_bytes)}。\n本地独有、SD 卡上没有的 ${plan.local_only_count} 个文件不会被改动。`,
+    { title: "开始导入", confirmText: "开始导入" }
+  );
+  if (!confirmed) return;
+
+  try {
+    const data = await api("/api/import/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    closeModal("importModal");
+    state.currentJobId = data.job_id;
+    showProgress("正在从 SD 卡导入…");
+    pollScan();
+  } catch (e) {
+    showToast("导入失败：" + e.message, "error");
+  }
+}
+
+async function openImportDialog() {
+  if (!state.folder) {
+    showToast("请先在上方选择一个本地回忆文件夹", "error");
+    return;
+  }
+  $("importTarget").value = state.folder;
+  const remembered = localStorage.getItem("photoImportSource");
+  if (remembered && !$("importSource").value) $("importSource").value = remembered;
+  setImportPreview("");
+  $("importModal").classList.remove("hidden");
+}
+
+async function pickImportSource() {
+  // Reuse the folder browser. The pending flag makes the browser hand its
+  // selection back to the import dialog instead of switching the album folder.
+  state.importPickPending = true;
+  $("importModal").classList.add("hidden");
+  await openDirBrowser();
+}
+
+function rememberImportSource(path) {
+  try {
+    localStorage.setItem("photoImportSource", path);
+  } catch (e) {
+    // localStorage may be unavailable
+  }
+}
+
+/** Copy text, preferring the async clipboard API with a legacy fallback. */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext !== false) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {
+    // fall through to the textarea fallback
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Handle clicks inside the detail panel's metadata block.
+ *
+ * A path copies itself; the button beside it asks the server to open the file
+ * with the OS default application (which is how a RAW can be handed to the
+ * camera vendor's editor).
+ */
+async function handlePreviewInfoClick(event) {
+  const openBtn = event.target.closest(".path-open-btn");
+  if (openBtn) {
+    event.stopPropagation();
+    const path = openBtn.dataset.openPath || "";
+    const photoId = Number(openBtn.dataset.photoId);
+    if (!path) return;
+    openBtn.classList.add("busy");
+    try {
+      await api("/api/open-file", {
+        method: "POST",
+        body: JSON.stringify({ path, photo_id: Number.isFinite(photoId) ? photoId : undefined }),
+      });
+      showToast("已交给系统默认程序打开。", "success");
+    } catch (e) {
+      showToast("无法打开文件：" + e.message, "error");
+    } finally {
+      openBtn.classList.remove("busy");
+    }
+    return;
+  }
+
+  const link = event.target.closest(".path-link");
+  if (!link) return;
+  event.stopPropagation();
+  const path = link.dataset.path || "";
+  if (!path) return;
+  const copied = await copyText(path);
+  link.classList.toggle("copied", copied);
+  setTimeout(() => link.classList.remove("copied"), 1200);
+  if (copied) showToast("路径已复制到剪贴板。", "success");
+  else showToast("复制失败，请手动选择路径文本。", "error");
+}
+
 function init() {
   // Render embedded icons
   renderAllIcons();
@@ -1623,6 +1992,12 @@ function init() {
 
   $("scanBtn").addEventListener("click", startScan);
   $("rebuildIndexBtn").addEventListener("click", startRebuildIndex);
+  $("importBtn").addEventListener("click", openImportDialog);
+  $("importPickSourceBtn").addEventListener("click", pickImportSource);
+  $("importPlanBtn").addEventListener("click", () => planImport());
+  $("importRunBtn").addEventListener("click", runImport);
+  $("importMode").addEventListener("change", () => planImport({ silent: true }));
+  $("importRawPolicy").addEventListener("change", () => planImport({ silent: true }));
   $("browseBtn").addEventListener("click", openDirBrowser);
   $("openFolderBtn").addEventListener("click", openFolder);
   $("historyBtn").addEventListener("click", toggleFolderHistory);
@@ -1665,6 +2040,7 @@ function init() {
   $("previewReanalyzeBtn").addEventListener("click", () => reanalyze(state.currentPreviewId));
   $("previewFavoriteBtn").addEventListener("click", toggleCurrentPreviewFavorite);
   $("previewImage").addEventListener("click", openFullscreenViewer);
+  $("previewInfo").addEventListener("click", handlePreviewInfoClick);
 
   // Fullscreen Viewer Controls
   const fsCloseBtn = $("fsCloseBtn");
@@ -1717,14 +2093,22 @@ function init() {
 
   $("dirGoBtn").addEventListener("click", () => loadDirList($("dirPathInput").value.trim()));
   $("dirChooseBtn").addEventListener("click", () => {
-    if (state.currentDirPath) {
-      state.folder = state.currentDirPath;
-      rememberFolder(state.folder);
-      localStorage.setItem("photoFolder", state.folder);
-      $("folderInput").value = state.folder;
+    if (!state.currentDirPath) return;
+    if (state.importPickPending) {
+      state.importPickPending = false;
+      $("importSource").value = state.currentDirPath;
+      rememberImportSource(state.currentDirPath);
       closeModal("dirModal");
-      loadPhotos();
+      $("importModal").classList.remove("hidden");
+      planImport({ silent: true });
+      return;
     }
+    state.folder = state.currentDirPath;
+    rememberFolder(state.folder);
+    localStorage.setItem("photoFolder", state.folder);
+    $("folderInput").value = state.folder;
+    closeModal("dirModal");
+    loadPhotos();
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
@@ -1732,17 +2116,34 @@ function init() {
   $("removeFolderBtn").addEventListener("click", removeCurrentFolder);
   $("editSaveBtn").addEventListener("click", saveEditedPhoto);
   $("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
+  initScoreEditors();
   $("emptyTrashBtn").addEventListener("click", emptyTrash);
   document.querySelectorAll(".preset-btn").forEach((btn) => {
     btn.addEventListener("click", () => handlePromptPresetClick(btn.dataset.preset));
   });
 
   document.querySelectorAll("[data-close]").forEach((btn) => {
-    btn.addEventListener("click", () => closeModal(btn.dataset.close));
+    btn.addEventListener("click", () => {
+      if (state.importPickPending && btn.dataset.close === "dirModal") {
+        // Cancelling the folder browser returns to the import dialog.
+        state.importPickPending = false;
+        closeModal("dirModal");
+        $("importModal").classList.remove("hidden");
+        return;
+      }
+      closeModal(btn.dataset.close);
+    });
   });
   document.querySelectorAll(".modal").forEach((modal) => {
     modal.addEventListener("click", (e) => {
-      if (e.target === modal) closeModal(modal.id);
+      if (e.target !== modal) return;
+      if (state.importPickPending && modal.id === "dirModal") {
+        state.importPickPending = false;
+        closeModal("dirModal");
+        $("importModal").classList.remove("hidden");
+        return;
+      }
+      closeModal(modal.id);
     });
   });
   document.addEventListener("click", (e) => {

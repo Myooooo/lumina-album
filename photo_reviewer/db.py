@@ -700,6 +700,49 @@ class Database:
             finally:
                 conn.close()
 
+    def update_raw_path(self, photo_id: int, raw_path: str | None) -> None:
+        """Attach (or clear) the same-named raw sibling of one photo."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE photos SET raw_path=? WHERE id=?", (raw_path, photo_id)
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def reset_analysis_for_paths(self, paths: Sequence[str]) -> int:
+        """Clear model results for files whose contents were replaced.
+
+        A re-imported photo is a different picture, so keeping its old score,
+        tags and comment would be wrong. The row itself (and any favourite
+        mark) is kept and pushed back to ``pending`` so the next organise run
+        picks it up again.
+        """
+        if not paths:
+            return 0
+        cleared = 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                for path in paths:
+                    cursor = conn.execute(
+                        """
+                        UPDATE photos SET
+                            status='pending', score=NULL, dimensions=NULL, tags=NULL,
+                            reason=NULL, title=NULL, recommendation=NULL,
+                            analyzed_at=NULL, error=NULL
+                        WHERE path=? AND status != 'deleted'
+                        """,
+                        (path,),
+                    )
+                    cleared += max(0, cursor.rowcount)
+                conn.commit()
+            finally:
+                conn.close()
+        return cleared
+
     def mark_deleted(
         self, ids: Sequence[int], new_paths: dict[int, str] | None = None
     ) -> None:

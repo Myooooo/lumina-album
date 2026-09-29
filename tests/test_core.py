@@ -27,6 +27,15 @@ from photo_reviewer.cache import (
 )
 from photo_reviewer.config import PERSISTED_FIELDS, Config
 from photo_reviewer.db import Database, parse_capture_datetime, sort_photos
+from photo_reviewer.importer import (
+    FULL,
+    RAW_POLICY_BOTH,
+    RAW_POLICY_IMAGE_FIRST,
+    RAW_POLICY_RAW_ONLY,
+    ImportError_,
+    plan_import,
+    run_import,
+)
 from photo_reviewer.paths import canonical_path
 from photo_reviewer.scanner import (
     JOBS,
@@ -1105,6 +1114,118 @@ class ServerApiTests(unittest.TestCase):
         self.assertNotIn("phash", photo)
         self.assertNotIn("proxy_path", photo)
 
+    def test_list_payload_carries_the_dimension_scores(self) -> None:
+        """The detail panel and the cards read dimensions from the list call.
+
+        Dropping the field made every sub-score render as 0.0 even though the
+        total was correct, because the gallery never re-fetches the photo.
+        """
+        photo_id = self.db.get_photo_by_path(
+            os.path.join(self.folder, "a.jpg")
+        )["id"]
+        self.db.update_metadata(
+            photo_id,
+            8.2,
+            {"technical": 7.5, "composition": 8.5, "memory": 9.0, "uniqueness": 7.8},
+            ["夏日"],
+            "很好",
+            "标题",
+            "杭州",
+        )
+        listing = self.client.get("/api/photos").get_json()["photos"][0]
+        self.assertEqual(listing["dimensions"]["technical"], 7.5)
+        self.assertEqual(listing["dimensions"]["memory"], 9.0)
+        detail = self.client.get(f"/api/photo/{photo_id}").get_json()
+        self.assertEqual(detail["dimensions"], listing["dimensions"])
+
+    def test_trash_roundtrip_carries_the_raw_sibling(self) -> None:
+        """A raw file must follow its photo into and out of the trash."""
+        source = os.path.join(self.folder, "a.jpg")
+        raw = os.path.join(self.folder, "a.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "a.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+
+        resp = self.client.post("/api/delete", json={"ids": [photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(os.path.exists(source))
+        self.assertFalse(os.path.exists(raw), "raw sibling stayed in the album")
+        trashed = self.db.get_photo(photo_id)
+        day_dir = os.path.dirname(trashed["path"])
+        self.assertTrue(os.path.exists(os.path.join(day_dir, "a.NEF")))
+        self.assertIsNone(trashed["raw_path"])
+
+        resp = self.client.post("/api/restore", json={"ids": [photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(os.path.exists(source))
+        self.assertTrue(os.path.exists(raw), "raw sibling was not restored")
+        self.assertEqual(self.db.get_photo(photo_id)["raw_path"], raw)
+
+    def test_trash_empty_can_delete_raw_files(self) -> None:
+        source = os.path.join(self.folder, "b.jpg")
+        raw = os.path.join(self.folder, "b.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "b.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        trashed_image = self.db.get_photo(photo_id)["path"]
+        trashed_raw = os.path.join(os.path.dirname(trashed_image), "b.NEF")
+        self.assertTrue(os.path.exists(trashed_raw))
+
+        resp = self.client.post("/api/trash/empty", json={"delete_raw": True})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["deleted"], 1)
+        self.assertEqual(body["raw_deleted"], 1)
+        self.assertFalse(os.path.exists(trashed_image))
+        self.assertFalse(os.path.exists(trashed_raw))
+        self.assertIsNone(self.db.get_photo(photo_id))
+
+    def test_trash_empty_can_keep_raw_files(self) -> None:
+        source = os.path.join(self.folder, "c.jpg")
+        raw = os.path.join(self.folder, "c.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "c.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        trashed_image = self.db.get_photo(photo_id)["path"]
+        trashed_raw = os.path.join(os.path.dirname(trashed_image), "c.NEF")
+
+        resp = self.client.post("/api/trash/empty", json={"delete_raw": False})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["deleted"], 1)
+        self.assertEqual(body["raw_deleted"], 0)
+        self.assertFalse(os.path.exists(trashed_image))
+        self.assertTrue(os.path.exists(trashed_raw), "raw should have been kept")
+
     def test_delete_restore_roundtrip_moves_the_file(self) -> None:
         source = os.path.join(self.folder, "a.jpg")
         Image.new("RGB", (16, 16)).save(source)
@@ -1137,6 +1258,32 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.get_json()["purged"][0]["id"], photo_id)
         self.assertFalse(os.path.exists(trashed))
+        self.assertIsNone(self.db.get_photo(photo_id))
+
+    def test_permanent_delete_removes_the_trashed_raw_too(self) -> None:
+        source = os.path.join(self.folder, "d.jpg")
+        raw = os.path.join(self.folder, "d.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "d.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        trashed_image = self.db.get_photo(photo_id)["path"]
+        trashed_raw = os.path.join(os.path.dirname(trashed_image), "d.NEF")
+        self.assertTrue(os.path.exists(trashed_raw))
+
+        resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(os.path.exists(trashed_image))
+        self.assertFalse(os.path.exists(trashed_raw), "orphan raw left in the trash")
         self.assertIsNone(self.db.get_photo(photo_id))
 
     def test_thumbnail_prefers_the_sibling_thumb_file(self) -> None:
@@ -1493,6 +1640,289 @@ class DiscoverImagesTests(unittest.TestCase):
             Path(os.path.join(self.folder, name)).write_bytes(b"x")
         found = [os.path.basename(p) for p in discover_images(self.folder)]
         self.assertEqual(found, ["a.png", "b.jpg", "d.webp"])
+
+
+class ImportPlanTests(unittest.TestCase):
+    """The SD-card import: it must never touch what the card does not have."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.card = os.path.join(self.tmp.name, "card")
+        self.local = os.path.join(self.tmp.name, "local")
+        os.makedirs(os.path.join(self.card, "DCIM", "100D3500"))
+        os.makedirs(os.path.join(self.card, "DCIM", "101D3500"))
+        os.makedirs(self.local)
+        self.cfg = Config(data_dir=os.path.join(self.tmp.name, "data"))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _image(self, root, *parts, color=(120, 90, 60), size=(24, 18)) -> str:
+        path = os.path.join(root, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Image.new("RGB", size, color).save(path, "JPEG")
+        return path
+
+    def _raw(self, root, *parts, payload=b"raw-payload") -> str:
+        path = os.path.join(root, *parts)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).write_bytes(payload)
+        return path
+
+    def _seed_card(self) -> None:
+        self._image(self.card, "DCIM", "100D3500", "DSC_0001.JPG")
+        self._raw(self.card, "DCIM", "100D3500", "DSC_0001.NEF")
+        self._image(self.card, "DCIM", "100D3500", "DSC_0002.JPG")
+        self._raw(self.card, "DCIM", "101D3500", "DSC_0003.NEF")
+
+    def test_incremental_copies_only_what_is_missing(self) -> None:
+        self._seed_card()
+        # The local folder already has DSC_0001 and one photo the card lacks.
+        self._image(self.local, "DCIM", "100D3500", "DSC_0001.JPG", color=(1, 1, 1))
+        keep = self._image(self.local, "DCIM", "100D3500", "KEEP.JPG", color=(2, 2, 2))
+
+        plan = plan_import(self.card, self.local, self.cfg)
+        relative = sorted(c.relative_path for c in plan.copies)
+        self.assertEqual(
+            relative,
+            [
+                os.path.join("DCIM", "100D3500", "DSC_0002.JPG"),
+                os.path.join("DCIM", "101D3500", "DSC_0003.NEF"),
+            ],
+        )
+        self.assertEqual(plan.skipped, 1)
+        # Only KEEP.JPG is local-only: DSC_0001.JPG exists on both sides, it
+        # simply differs, so it is counted as "already present" not "local only".
+        self.assertEqual(plan.local_only, 1)
+        self.assertEqual(plan.unpaired_raw, 1)
+
+        report = run_import(plan)
+        self.assertEqual(report["copied"], 2)
+        self.assertTrue(os.path.exists(keep))
+        self.assertTrue(
+            os.path.exists(os.path.join(self.local, "DCIM", "101D3500", "DSC_0003.NEF"))
+        )
+
+    def test_repeat_import_is_a_no_op(self) -> None:
+        self._seed_card()
+        run_import(plan_import(self.card, self.local, self.cfg))
+        again = plan_import(self.card, self.local, self.cfg)
+        self.assertEqual(again.copies, [])
+        self.assertGreater(again.skipped, 0)
+
+    def test_raw_policy_controls_the_group(self) -> None:
+        self._seed_card()
+        self._image(self.local, "DCIM", "100D3500", "DSC_0001.JPG", color=(1, 1, 1))
+        # image-first: the pair's jpg already exists, so its 22 MB raw is not
+        # dragged along; the lone raw (no jpg on the card) still comes over.
+        image_first = plan_import(
+            self.card, self.local, self.cfg, raw_policy=RAW_POLICY_IMAGE_FIRST
+        )
+        copied = sorted(os.path.basename(c.relative_path) for c in image_first.copies)
+        self.assertEqual(copied, ["DSC_0002.JPG", "DSC_0003.NEF"])
+
+        both = plan_import(self.card, self.local, self.cfg, raw_policy=RAW_POLICY_BOTH)
+        both_names = sorted(os.path.basename(c.relative_path) for c in both.copies)
+        self.assertEqual(
+            both_names, ["DSC_0001.NEF", "DSC_0002.JPG", "DSC_0003.NEF"]
+        )
+
+        raw_only = plan_import(
+            self.card, self.local, self.cfg, raw_policy=RAW_POLICY_RAW_ONLY
+        )
+        raw_names = sorted(os.path.basename(c.relative_path) for c in raw_only.copies)
+        # DSC_0002 has no raw on the card, so its jpg is the only version and
+        # is still taken rather than silently dropping the photo.
+        self.assertEqual(
+            raw_names, ["DSC_0001.NEF", "DSC_0002.JPG", "DSC_0003.NEF"]
+        )
+
+    def test_raw_sibling_is_imported_even_when_the_jpg_exists(self) -> None:
+        """A .nef that joins an already-imported .jpg must still be copied."""
+        self._seed_card()
+        self._image(self.local, "DCIM", "100D3500", "DSC_0001.JPG", color=(1, 1, 1))
+        self._image(self.local, "DCIM", "100D3500", "DSC_0002.JPG")
+        both = plan_import(self.card, self.local, self.cfg, raw_policy=RAW_POLICY_BOTH)
+        names = sorted(os.path.basename(c.relative_path) for c in both.copies)
+        self.assertIn("DSC_0001.NEF", names)
+        # The jpg is byte-different but incremental mode leaves it alone.
+        self.assertNotIn("DSC_0001.JPG", names)
+
+    def test_full_mode_overwrites_only_changed_files(self) -> None:
+        self._seed_card()
+        # Same size and mtime as the card => considered identical.
+        self._image(self.local, "DCIM", "100D3500", "DSC_0002.JPG")
+        card_img = os.path.join(self.card, "DCIM", "100D3500", "DSC_0002.JPG")
+        local_img = os.path.join(self.local, "DCIM", "100D3500", "DSC_0002.JPG")
+        stat = os.stat(card_img)
+        os.utime(local_img, (stat.st_atime, stat.st_mtime))
+
+        # A different file under the same name => must be refreshed.
+        stale = self._image(
+            self.local, "DCIM", "100D3500", "DSC_0001.JPG", color=(9, 9, 9), size=(40, 30)
+        )
+        card_img_1 = os.path.join(self.card, "DCIM", "100D3500", "DSC_0001.JPG")
+        self.assertNotEqual(os.path.getsize(stale), os.path.getsize(card_img_1))
+
+        plan = plan_import(self.card, self.local, self.cfg, mode=FULL)
+        overwritten = sorted(os.path.basename(c.relative_path) for c in plan.overwritten)
+        self.assertEqual(overwritten, ["DSC_0001.JPG"])
+        self.assertTrue(plan.overwritten[0].content_changed)
+        run_import(plan)
+        # The stale local copy is replaced by the card's version.
+        self.assertEqual(os.path.getsize(stale), os.path.getsize(card_img_1))
+
+    def test_local_only_files_survive_a_full_import(self) -> None:
+        self._seed_card()
+        keep = self._image(self.local, "DCIM", "100D3500", "ONLY_LOCAL.JPG")
+        before = os.stat(keep)
+        run_import(plan_import(self.card, self.local, self.cfg, mode=FULL))
+        self.assertTrue(os.path.exists(keep))
+        self.assertEqual(os.stat(keep).st_mtime, before.st_mtime)
+
+    def test_rejects_target_inside_source(self) -> None:
+        self._seed_card()
+        nested = os.path.join(self.card, "DCIM", "100D3500")
+        with self.assertRaises(ImportError_):
+            plan_import(self.card, nested, self.cfg)
+
+    def test_rejects_same_folder_and_missing_source(self) -> None:
+        with self.assertRaises(ImportError_):
+            plan_import(self.local, self.local, self.cfg)
+        with self.assertRaises(ImportError_):
+            plan_import(os.path.join(self.tmp.name, "nope"), self.local, self.cfg)
+
+    def test_cancel_stops_at_a_file_boundary(self) -> None:
+        self._seed_card()
+        plan = plan_import(self.card, self.local, self.cfg)
+        seen = {"count": 0}
+
+        def should_cancel() -> bool:
+            seen["count"] += 1
+            return seen["count"] > 1
+
+        report = run_import(plan, should_cancel=should_cancel)
+        self.assertTrue(report["cancelled"])
+        self.assertEqual(report["copied"], 1)
+
+
+class ImportApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.card = os.path.join(self.tmp.name, "card")
+        self.local = os.path.join(self.tmp.name, "local")
+        os.makedirs(os.path.join(self.card, "DCIM"))
+        os.makedirs(self.local)
+        Image.new("RGB", (24, 18), (120, 90, 60)).save(
+            os.path.join(self.card, "DCIM", "DSC_0001.JPG"), "JPEG"
+        )
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_plan_endpoint_reports_counts(self) -> None:
+        resp = self.client.post(
+            "/api/import/plan",
+            json={"source": self.card, "target": self.local, "mode": "incremental"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        plan = resp.get_json()["plan"]
+        self.assertEqual(plan["new_count"], 1)
+        self.assertEqual(plan["overwrite_count"], 0)
+        self.assertEqual(plan["local_only_count"], 0)
+
+    def test_plan_endpoint_validates_input(self) -> None:
+        resp = self.client.post("/api/import/plan", json={"target": self.local})
+        self.assertEqual(resp.status_code, 400)
+        resp = self.client.post(
+            "/api/import/plan",
+            json={"source": self.card, "target": self.local, "mode": "nope"},
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    def test_run_endpoint_copies_then_indexes(self) -> None:
+        resp = self.client.post(
+            "/api/import/run",
+            json={
+                "source": self.card,
+                "target": self.local,
+                "mode": "incremental",
+                "after": "index",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        job_id = resp.get_json()["job_id"]
+        deadline = time.time() + 15
+        job = None
+        while time.time() < deadline:
+            job = JOBS.get(job_id)
+            if job and job.status in ("completed", "cancelled", "error"):
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(job)
+        self.assertEqual(job.status, "completed", job.error)
+        copied = os.path.join(self.local, "DCIM", "DSC_0001.JPG")
+        self.assertTrue(os.path.exists(copied))
+        row = self.db.get_photo_by_path(copied)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["status"], "pending")  # indexed, not analysed
+
+    def test_copy_only_mode_skips_indexing(self) -> None:
+        resp = self.client.post(
+            "/api/import/run",
+            json={
+                "source": self.card,
+                "target": self.local,
+                "after": "copy",
+            },
+        )
+        job_id = resp.get_json()["job_id"]
+        deadline = time.time() + 15
+        job = None
+        while time.time() < deadline:
+            job = JOBS.get(job_id)
+            if job and job.status in ("completed", "cancelled", "error"):
+                break
+            time.sleep(0.05)
+        self.assertEqual(job.status, "completed")
+        copied = os.path.join(self.local, "DCIM", "DSC_0001.JPG")
+        self.assertTrue(os.path.exists(copied))
+        self.assertIsNone(self.db.get_photo_by_path(copied))
+
+    def test_open_file_rejects_a_foreign_path(self) -> None:
+        photo = os.path.join(self.local, "DCIM", "DSC_0001.JPG")
+        os.makedirs(os.path.dirname(photo), exist_ok=True)
+        Image.new("RGB", (8, 8)).save(photo, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": photo,
+                "folder": os.path.dirname(photo),
+                "filename": "DSC_0001.JPG",
+                "status": "analyzed",
+            }
+        )
+        photo_id = self.db.get_photo_by_path(photo)["id"]
+        other = os.path.join(self.tmp.name, "secret.txt")
+        Path(other).write_text("nope", encoding="utf-8")
+        resp = self.client.post(
+            "/api/open-file", json={"photo_id": photo_id, "path": other}
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    def test_open_file_requires_a_valid_photo(self) -> None:
+        self.assertEqual(
+            self.client.post("/api/open-file", json={"photo_id": "x"}).status_code, 400
+        )
+        self.assertEqual(
+            self.client.post("/api/open-file", json={"photo_id": 999}).status_code, 404
+        )
 
 
 if __name__ == "__main__":
