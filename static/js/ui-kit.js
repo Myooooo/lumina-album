@@ -7,6 +7,55 @@ window.LuminaUI = (() => {
   const getEl = (id) => document.getElementById(id);
   const ICONS = window.LuminaIcons || {};
 
+  //: Must match the ``modalPopOut`` / ``dropdownOut`` durations in style.css.
+  const EXIT_MS = 190;
+
+  const prefersReducedMotion = () =>
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /**
+   * Show a modal with its entrance animation.
+   *
+   * Cancels a pending exit as well: re-opening a dialog within the closing
+   * window must not let the earlier timer hide it again a moment later.
+   */
+  function showModal(el) {
+    if (!el) return;
+    if (el._luminaExitTimer) {
+      clearTimeout(el._luminaExitTimer);
+      el._luminaExitTimer = null;
+    }
+    el.classList.remove("closing");
+    el.classList.remove("hidden");
+  }
+
+  /**
+   * Hide a modal, playing the reverse of its entrance animation first.
+   *
+   * ``onHidden`` runs once the dialog is really gone, so callers can chain
+   * whatever follows without racing the animation.
+   */
+  function hideModal(el, onHidden) {
+    if (!el || el.classList.contains("hidden")) {
+      if (typeof onHidden === "function") onHidden();
+      return;
+    }
+    if (el._luminaExitTimer) clearTimeout(el._luminaExitTimer);
+    const finish = () => {
+      el._luminaExitTimer = null;
+      el.classList.remove("closing");
+      el.classList.add("hidden");
+      if (typeof onHidden === "function") onHidden();
+    };
+    if (prefersReducedMotion()) {
+      finish();
+      return;
+    }
+    el.classList.add("closing");
+    el._luminaExitTimer = setTimeout(finish, EXIT_MS);
+  }
+
   /**
    * Render icons in data-icon containers automatically
    */
@@ -21,7 +70,7 @@ window.LuminaUI = (() => {
     if (folderInputIcon && ICONS.folder) folderInputIcon.innerHTML = ICONS.folder;
   }
 
-  /**
+ /**
    * Custom stylized dropdown wrapper with fluid transitions
    */
   function enhanceSelect(select) {
@@ -36,12 +85,17 @@ window.LuminaUI = (() => {
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.className = "custom-select-trigger";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
     trigger.innerHTML = '<span class="custom-select-label"></span><span class="custom-select-arrow"></span>';
     wrapper.appendChild(trigger);
 
     const menu = document.createElement("div");
     menu.className = "custom-select-menu";
+    menu.setAttribute("role", "listbox");
     wrapper.appendChild(menu);
+
+    let exitTimer = null;
 
     function updateLabel() {
       const opt = select.options[select.selectedIndex];
@@ -54,6 +108,8 @@ window.LuminaUI = (() => {
       [...select.options].forEach((opt) => {
         const item = document.createElement("div");
         item.className = "custom-select-option" + (opt.selected ? " selected" : "");
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", opt.selected ? "true" : "false");
         item.textContent = opt.text;
         item.addEventListener("click", () => {
           select.value = opt.value;
@@ -66,14 +122,26 @@ window.LuminaUI = (() => {
     }
 
     function open() {
+      if (exitTimer) {
+        clearTimeout(exitTimer);
+        exitTimer = null;
+      }
       buildMenu();
+      menu.classList.remove("closing");
       menu.classList.add("open");
       trigger.classList.add("open");
+      trigger.setAttribute("aria-expanded", "true");
     }
 
     function close() {
-      menu.classList.remove("open");
+      if (!menu.classList.contains("open")) return;
       trigger.classList.remove("open");
+      trigger.setAttribute("aria-expanded", "false");
+      menu.classList.add("closing");
+      exitTimer = setTimeout(() => {
+        exitTimer = null;
+        menu.classList.remove("open", "closing");
+      }, prefersReducedMotion() ? 0 : EXIT_MS);
     }
 
     trigger.addEventListener("click", (e) => {
@@ -132,12 +200,11 @@ window.LuminaUI = (() => {
     const textEl = getEl("loadingText");
     const modalEl = getEl("loadingModal");
     if (textEl) textEl.textContent = text || "正在处理…";
-    if (modalEl) modalEl.classList.remove("hidden");
+    showModal(modalEl);
   }
 
   function hideLoading() {
-    const modalEl = getEl("loadingModal");
-    if (modalEl) modalEl.classList.add("hidden");
+    hideModal(getEl("loadingModal"));
   }
 
   /**
@@ -189,7 +256,7 @@ window.LuminaUI = (() => {
       }
 
       function cleanup() {
-        modal.classList.add("hidden");
+        hideModal(modal);
         if (checkRow) checkRow.classList.add("hidden");
         if (okBtn) okBtn.removeEventListener("click", onOk);
         if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
@@ -205,7 +272,7 @@ window.LuminaUI = (() => {
       if (cancelBtn) cancelBtn.addEventListener("click", onCancel);
       if (closeBtn) closeBtn.addEventListener("click", onCancel);
       modal.addEventListener("click", onOverlay);
-      modal.classList.remove("hidden");
+      showModal(modal);
     });
   }
 
@@ -214,6 +281,8 @@ window.LuminaUI = (() => {
     enhanceSelect,
     setSelectValue,
     showToast,
+    showModal,
+    hideModal,
     showLoading,
     hideLoading,
     confirmDialog,

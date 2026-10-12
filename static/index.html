@@ -26,7 +26,7 @@
       <button id="rebuildIndexBtn" class="btn" title="同步相册"><span class="btn-icon" data-icon="sync"></span>同步相册</button>
       <label class="force-label"><input type="checkbox" id="forceScan" /> 重新整理全部</label>
       <button id="importBtn" class="btn" title="从 SD 卡导入"><span class="btn-icon" data-icon="import"></span>从 SD 卡导入</button>
-      <button id="cardStatusBtn" class="card-status hidden" title="相机相册 / SD 卡状态">
+      <button id="cardStatusBtn" class="btn card-status hidden" title="相机相册 / SD 卡状态">
         <span class="btn-icon" id="cardStatusIcon" data-icon="sdCard"></span>
         <span id="cardStatusText">SD 卡已连接</span>
         <span id="cardPendingDot" class="card-pending-dot hidden">0</span>
@@ -250,72 +250,135 @@
 
   <!-- Settings modal -->
   <div id="settingsModal" class="modal hidden">
-    <div class="modal-content">
+    <div class="modal-content settings-content">
       <button class="modal-close" data-close="settingsModal"><span class="btn-icon" data-icon="close"></span></button>
-      <h2><span class="modal-title-icon" data-icon="settings"></span>拾光设置 · 模型与回忆服务</h2>
-      <div class="form-grid">
-        <label>API Base URL
-          <input id="setApiBase" type="text" placeholder="http://localhost:1234/v1 或 Ollama 地址" />
-        </label>
-        <label>API Key
-          <input id="setApiKey" type="password" placeholder="not-needed" />
-        </label>
-        <label>多模态模型名称
-          <input id="setModel" type="text" placeholder="例如：llava, qwen-vl, local-model" />
-        </label>
-        <label class="full-row">自定义系统提示词
-          <textarea id="setSystemPrompt" rows="5" placeholder="只填写风格/身份提示词；JSON 格式要求会在请求时自动拼接"></textarea>
-          <div class="prompt-template-row" id="promptPresetRow">
-            <button type="button" class="btn small preset-btn" data-preset="playful"><span class="btn-icon" data-icon="sparkles"></span>活泼（默认）</button>
-            <button type="button" class="btn small preset-btn" data-preset="literary"><span class="btn-icon" data-icon="feather"></span>文艺</button>
-            <button type="button" class="btn small preset-btn" data-preset="humorous"><span class="btn-icon" data-icon="smile"></span>幽默</button>
-            <button type="button" class="btn small preset-btn" data-preset="warm"><span class="btn-icon" data-icon="sun"></span>温暖</button>
-            <button type="button" class="btn small preset-btn" data-preset="melancholy"><span class="btn-icon" data-icon="cloudRain"></span>伤感</button>
-          </div>
-        </label>
-        <label>模型并发请求数
-          <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />
-        </label>
-        <label>模型请求重试次数
-          <input id="setModelRetries" type="number" min="0" max="10" step="1" />
-        </label>
-        <label>请求超时（秒）
-          <input id="setTimeout" type="number" min="5" />
-        </label>
-        <label>代理图片最大边长 (px)
-          <input id="setMaxEdge" type="number" min="64" step="64" />
-        </label>
-        <label>代理图片质量 (1-100)
-          <input id="setProxyQuality" type="number" min="1" max="100" step="1" />
-        </label>
-        <label>画廊缩略图边长 (px)
-          <input id="setGalleryThumbSize" type="number" min="96" max="1024" step="32" />
-        </label>
-        <label>画廊缩略图质量 (1-100)
-          <input id="setThumbQuality" type="number" min="1" max="100" step="1" />
-        </label>
-        <label>索引线程数
-          <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
-        </label>
-        <label>地理编码服务
-          <select id="setGeocodingProvider">
-            <option value="nominatim">Nominatim（免费，无需 Key）</option>
-            <option value="amap">高德地图 API</option>
-          </select>
-        </label>
-        <label>地理编码 API Key
-          <input id="setGeocodingApiKey" type="password" placeholder="高德 Key（可选）" />
-        </label>
-        <label>地理编码请求间隔（秒）
-          <input id="setGeocodingInterval" type="number" min="0.1" max="10" step="0.1" />
-        </label>
-        <label>地理编码请求重试次数
-          <input id="setGeocodingRetries" type="number" min="0" max="10" step="1" />
-        </label>
+      <h2><span class="modal-title-icon" data-icon="settings"></span>拾光设置</h2>
+
+      <div class="settings-tabs" role="tablist" aria-label="设置分类">
+        <span class="settings-tab-ink" id="settingsTabInk" aria-hidden="true"></span>
+        <button class="settings-tab active" role="tab" data-tab="model" id="tabBtnModel"
+                aria-selected="true" aria-controls="tabModel">
+          <span class="btn-icon" data-icon="sparkles"></span><span class="tab-label">大模型</span>
+        </button>
+        <button class="settings-tab" role="tab" data-tab="image" id="tabBtnImage"
+                aria-selected="false" aria-controls="tabImage" tabindex="-1">
+          <span class="btn-icon" data-icon="imageSize"></span><span class="tab-label">图片处理</span>
+        </button>
+        <button class="settings-tab" role="tab" data-tab="geo" id="tabBtnGeo"
+                aria-selected="false" aria-controls="tabGeo" tabindex="-1">
+          <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地理编码</span>
+        </button>
+        <button class="settings-tab" role="tab" data-tab="data" id="tabBtnData"
+                aria-selected="false" aria-controls="tabData" tabindex="-1">
+          <span class="btn-icon" data-icon="archive"></span><span class="tab-label">数据管理</span>
+        </button>
       </div>
+
+      <div class="settings-panes" id="settingsPanes">
+
+        <section class="settings-pane active" id="tabModel" role="tabpanel"
+                 aria-labelledby="tabBtnModel" data-pane="model">
+          <div class="form-grid">
+            <label>API Base URL
+              <input id="setApiBase" type="text" placeholder="http://localhost:1234/v1 或 Ollama 地址" />
+            </label>
+            <label>API Key
+              <input id="setApiKey" type="password" placeholder="not-needed" />
+            </label>
+            <label class="full-row">多模态模型名称
+              <input id="setModel" type="text" placeholder="例如：llava, qwen-vl, local-model" />
+            </label>
+            <label class="full-row">自定义系统提示词
+              <textarea id="setSystemPrompt" rows="5" placeholder="只填写风格/身份提示词；JSON 格式要求会在请求时自动拼接"></textarea>
+              <div class="prompt-template-row" id="promptPresetRow">
+                <button type="button" class="btn small preset-btn" data-preset="playful"><span class="btn-icon" data-icon="sparkles"></span>活泼（默认）</button>
+                <button type="button" class="btn small preset-btn" data-preset="literary"><span class="btn-icon" data-icon="feather"></span>文艺</button>
+                <button type="button" class="btn small preset-btn" data-preset="humorous"><span class="btn-icon" data-icon="smile"></span>幽默</button>
+                <button type="button" class="btn small preset-btn" data-preset="warm"><span class="btn-icon" data-icon="sun"></span>温暖</button>
+                <button type="button" class="btn small preset-btn" data-preset="melancholy"><span class="btn-icon" data-icon="cloudRain"></span>伤感</button>
+              </div>
+            </label>
+            <label>模型并发请求数
+              <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />
+            </label>
+            <label>模型请求重试次数
+              <input id="setModelRetries" type="number" min="0" max="10" step="1" />
+            </label>
+            <label>请求超时（秒）
+              <input id="setTimeout" type="number" min="5" />
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-pane" id="tabImage" role="tabpanel"
+                 aria-labelledby="tabBtnImage" data-pane="image" hidden>
+          <p class="settings-hint">代理图是送去给模型看的那张图，画廊缩略图只用于网格显示。数值越大越清晰，也越占空间。</p>
+          <div class="form-grid">
+            <label>代理图片最大边长 (px)
+              <input id="setMaxEdge" type="number" min="64" step="64" />
+            </label>
+            <label>代理图片质量 (1-100)
+              <input id="setProxyQuality" type="number" min="1" max="100" step="1" />
+            </label>
+            <label>画廊缩略图边长 (px)
+              <input id="setGalleryThumbSize" type="number" min="96" max="1024" step="32" />
+            </label>
+            <label>画廊缩略图质量 (1-100)
+              <input id="setThumbQuality" type="number" min="1" max="100" step="1" />
+            </label>
+            <label>索引线程数
+              <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-pane" id="tabGeo" role="tabpanel"
+                 aria-labelledby="tabBtnGeo" data-pane="geo" hidden>
+          <p class="settings-hint">只有带 GPS 的照片会联网换取地名，其余照片全程离线处理。</p>
+          <div class="form-grid">
+            <label>地理编码服务
+              <select id="setGeocodingProvider">
+                <option value="nominatim">Nominatim（免费，无需 Key）</option>
+                <option value="amap">高德地图 API</option>
+              </select>
+            </label>
+            <label>地理编码 API Key
+              <input id="setGeocodingApiKey" type="password" placeholder="高德 Key（可选）" />
+            </label>
+            <label>请求间隔（秒）
+              <input id="setGeocodingInterval" type="number" min="0.1" max="10" step="0.1" />
+            </label>
+            <label>请求重试次数
+              <input id="setGeocodingRetries" type="number" min="0" max="10" step="1" />
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-pane" id="tabData" role="tabpanel"
+                 aria-labelledby="tabBtnData" data-pane="data" hidden>
+          <p class="settings-hint">这里的操作只影响数据库记录与代理图缓存，不会碰你的照片原图。</p>
+          <div class="settings-danger-zone">
+            <div class="settings-danger-row">
+              <div class="settings-danger-text">
+                <strong>移除当前目录</strong>
+                <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
+              </div>
+              <button id="removeFolderBtn" class="btn danger remove-folder-btn"><span class="btn-icon" data-icon="trash"></span>移除</button>
+            </div>
+            <div class="settings-danger-row">
+              <div class="settings-danger-text">
+                <strong>清理缓存</strong>
+                <span>删除没有被任何照片引用的代理图与缩略图，释放磁盘空间。</span>
+              </div>
+              <button id="cleanCacheBtn" class="btn"><span class="btn-icon" data-icon="clean"></span>清理</button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
       <div class="modal-actions">
-        <button id="removeFolderBtn" class="btn danger remove-folder-btn"><span class="btn-icon" data-icon="trash"></span>移除当前目录</button>
-        <button id="cleanCacheBtn" class="btn"><span class="btn-icon" data-icon="clean"></span>清理缓存</button>
+        <button id="settingsCancelBtn" class="btn" data-close="settingsModal"><span class="btn-icon" data-icon="close"></span>取消</button>
         <button id="saveSettingsBtn" class="btn primary"><span class="btn-icon" data-icon="check"></span>保存设置</button>
       </div>
     </div>

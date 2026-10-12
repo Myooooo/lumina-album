@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +45,11 @@ from .exif import extract_exif
 from .geocode import reverse_geocode
 from .importer import ImportError_
 from .paths import canonical_folder, canonical_path, is_in_named_dir, same_path
+from .repair import (
+    needs_orientation_repair,
+    register_repair_thread,
+    run_startup_repairs,
+)
 from .scanner import (
     JOBS,
     RAW_EXTENSIONS,
@@ -98,6 +104,9 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         "has_raw": bool(raw_path),
         "is_raw": _is_raw_file(photo.get("path") or photo.get("original_path")),
         "raw_ext": Path(raw_path).suffix.lstrip(".").upper() if raw_path else "",
+        # Size of the raw sibling, so the detail page can say "10 MB + 30 MB".
+        # One stat() call, and only for photos that actually have a raw file.
+        "raw_size": _file_size(raw_path),
     }
     if detail:
         payload.update(
@@ -113,6 +122,21 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
             }
         )
     return payload
+
+
+def _file_size(path: str | None) -> int:
+    """Size of a file on disk, or 0 when it is missing.
+
+    Used for the raw sibling's size in the detail payload. Only single-photo
+    endpoints pay for this, so the gallery list never stats files it does not
+    display.
+    """
+    if not path:
+        return 0
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
 
 
 def _normalize_folder(path: str) -> str:
@@ -590,6 +614,29 @@ def _prune_legacy_settings(database: Database) -> int:
     return len(stale)
 
 
+def _start_background_repairs(database: Database, cfg: Config) -> None:
+    """Run one-off data repairs without delaying startup.
+
+    The orientation repair walks every file header in the library, which takes
+    a second or two on a large album. It runs in a daemon thread so the UI is
+    usable immediately; the gallery picks the corrected sizes up on the next
+    refresh. It is a no-op once the database records the repair as done.
+    """
+    if not needs_orientation_repair(database):
+        return
+
+    def worker() -> None:
+        try:
+            run_startup_repairs(database, cfg)
+        except Exception:
+            # A failed repair must never take the server down with it.
+            logger.warning("startup repairs failed", exc_info=True)
+
+    thread = threading.Thread(target=worker, name="lumina-repair", daemon=True)
+    register_repair_thread(thread)
+    thread.start()
+
+
 def create_app(config: Config | None = None, db: Database | None = None) -> Flask:
     from .config import CONFIG
     from .db import get_db
@@ -598,6 +645,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     database = db or get_db(cfg.db_path)
     _prune_legacy_settings(database)
     _load_settings_from_db(database, cfg)
+    _start_background_repairs(database, cfg)
     static_dir = str(Path(__file__).resolve().parent.parent / "static")
     app = Flask(__name__, static_folder=static_dir, static_url_path="/static")
     app.config["JSON_AS_ASCII"] = False
@@ -1237,7 +1285,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             try:
                 folder = photo.get("folder") or os.path.dirname(path)
                 thumb_dir = ensure_cache_dirs(folder, cfg.cache_dir_name)
-                proxy_path, _, _, _, thumb_path = make_proxy(
+                proxy_path, _, _, phash, thumb_path = make_proxy(
                     path,
                     max_edge=cfg.proxy_max_edge,
                     cache_dir=str(thumb_dir),
@@ -1245,7 +1293,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     thumb_size=cfg.gallery_thumb_size,
                     thumb_quality=cfg.thumb_quality,
                 )
-                database.update_cache_paths(photo_id, thumb_path, proxy_path)
+                database.update_cache_paths(photo_id, thumb_path, proxy_path, phash)
                 return send_file(thumb_path, mimetype="image/jpeg", conditional=True)
             except (OSError, ValueError):
                 logger.warning(

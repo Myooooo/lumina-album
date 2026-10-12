@@ -1906,54 +1906,60 @@ select {
 }
 
 /* ---------- Camera album / SD card status ---------- */
-/* The badge is deliberately loud: it is the one thing on screen that tells the
-   user whether tidying up here also tidies the card. */
-.card-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 13px;
-  border-radius: 99px;
-  border: 1px solid var(--border-strong);
-  background: rgba(255, 254, 251, 0.9);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: border-color .2s ease, background-color .2s ease, color .2s ease;
-}
-
-.card-status svg { width: 15px; height: 15px; }
-
-.card-status.state-connected {
-  border-color: #7fa87f;
-  background: rgba(226, 240, 222, 0.92);
-  color: #40663f;
-}
-.card-status.state-connected::before {
+/* The badge carries the ``btn`` class in the markup and is re-painted with it
+   on every status refresh, so it shares the toolbar's box metrics exactly. The
+   rules below only add the state dot and its tint - a fully saturated chip in a
+   warm paper toolbar looked pasted on. */
+.card-status::before {
   content: "";
   width: 7px;
   height: 7px;
   border-radius: 99px;
-  background: #5f9e5c;
-  box-shadow: 0 0 0 3px rgba(95, 158, 92, 0.22);
-  animation: cardPulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+  background: var(--muted-light);
 }
+
+.card-status.state-connected {
+  border-color: rgba(96, 141, 109, 0.32);
+  background: rgba(96, 141, 109, 0.09);
+  color: var(--keep);
+}
+.card-status.state-connected::before {
+  background: var(--keep);
+  box-shadow: 0 0 0 3px rgba(96, 141, 109, 0.18);
+  animation: cardPulse 2.6s ease-in-out infinite;
+}
+.card-status.state-connected:hover {
+  background: rgba(96, 141, 109, 0.14);
+  border-color: rgba(96, 141, 109, 0.45);
+}
+
 .card-status.state-disconnected {
   border-style: dashed;
   color: var(--muted);
 }
+.card-status.state-disconnected::before { background: var(--muted-light); }
+
 .card-status.state-read_only,
 .card-status.state-volume_mismatch {
-  border-color: #c9a06a;
-  background: rgba(251, 241, 224, 0.92);
+  border-color: rgba(199, 141, 70, 0.35);
+  background: rgba(199, 141, 70, 0.1);
   color: #8a6122;
 }
-.card-status.state-volume_mismatch { border-color: var(--danger); }
+.card-status.state-read_only::before { background: var(--maybe); }
+.card-status.state-read_only:hover { background: rgba(199, 141, 70, 0.16); }
+
+.card-status.state-volume_mismatch {
+  border-color: rgba(194, 89, 83, 0.35);
+  background: rgba(194, 89, 83, 0.09);
+  color: var(--danger);
+}
+.card-status.state-volume_mismatch::before { background: var(--danger); }
+.card-status.state-volume_mismatch:hover { background: rgba(194, 89, 83, 0.15); }
 
 @keyframes cardPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .35; }
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 3px rgba(96, 141, 109, 0.18); }
+  50% { opacity: .55; box-shadow: 0 0 0 5px rgba(96, 141, 109, 0.06); }
 }
 
 .card-pending-dot {
@@ -1967,6 +1973,12 @@ select {
   line-height: 17px;
   text-align: center;
   font-weight: 600;
+  animation: dotPop .3s cubic-bezier(.2,.9,.25,1.2);
+}
+
+@keyframes dotPop {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 /* The "N deletions are waiting for the card" strip under the toolbar. */
@@ -2054,6 +2066,149 @@ select {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 .form-grid .full-row { grid-column: 1 / -1; }
+
+/* ---------- Settings dialog: tabbed ---------- */
+.settings-content { max-width: 720px; }
+
+.settings-pane { margin-top: 4px; }
+.settings-pane[hidden] { display: none; }
+
+/* Replayed every time a tab is opened: the pane goes from display:none to
+   displayed, so the animation restarts on its own without JS bookkeeping. */
+.settings-pane.active {
+  animation: paneIn .32s cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes paneIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.settings-hint {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+  padding: 9px 13px;
+  border-radius: var(--radius-md);
+  background: rgba(179, 129, 90, 0.07);
+  border: 1px solid rgba(179, 129, 90, 0.14);
+}
+
+.settings-tabs {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: rgba(179, 129, 90, 0.08);
+  border: 1px solid rgba(179, 129, 90, 0.14);
+}
+
+/* The sliding "ink" behind the active tab label. Its width and offset come from
+   JS, measured off the real tab so the responsive label rule is honoured.
+   ``left: 0`` resolves against the padding box, which is where the tabs start. */
+.settings-tab-ink {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 0;
+  border-radius: calc(var(--radius-md) - 4px);
+  background: var(--panel-solid);
+  box-shadow: 0 2px 8px rgba(60, 40, 20, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: transform .34s cubic-bezier(.34, 1.3, .5, 1), width .34s cubic-bezier(.34, 1.3, .5, 1);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.settings-tab {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: calc(var(--radius-md) - 4px);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .22s ease, transform .22s cubic-bezier(.2,.8,.2,1);
+}
+
+/* The ink measures this box, so a label change must not shift the padding. */
+.settings-tab .tab-label { display: inline-block; }
+
+.settings-tab:hover { color: var(--text-secondary); }
+.settings-tab:active { transform: scale(0.97); }
+.settings-tab svg { width: 15px; height: 15px; }
+
+.settings-tab.active {
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.settings-tab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Data-management tab: two flat rows instead of a form grid. */
+.settings-danger-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.settings-danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.7);
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+.settings-danger-row:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 4px 14px rgba(60, 40, 20, 0.06);
+}
+
+.settings-danger-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.settings-danger-text strong {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-danger-text span {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .settings-tab .tab-label { display: none; }
+  .settings-tab { padding: 9px 8px; }
+}
+
 .prompt-template-row {
   display: flex;
   flex-wrap: wrap;
@@ -2334,9 +2489,17 @@ select {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+@keyframes modalBackdropOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 @keyframes modalPop {
   0% { opacity: 0; transform: scale(0.92) translateY(18px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes modalPopOut {
+  0% { opacity: 1; transform: scale(1) translateY(0); }
+  100% { opacity: 0; transform: scale(0.96) translateY(10px); }
 }
 @keyframes cardPop {
   from { opacity: 0; transform: scale(0.95) rotate(0deg); }
@@ -2345,6 +2508,33 @@ select {
 @keyframes dropdownIn {
   from { opacity: 0; transform: translateY(-6px) scaleY(0.96); }
   to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+@keyframes dropdownOut {
+  from { opacity: 1; transform: translateY(0) scaleY(1); }
+  to { opacity: 0; transform: translateY(-5px) scaleY(0.97); }
+}
+
+/* ---------- Exit animations ---------- */
+/* ``hideModal`` / the dropdown helper add ``.closing`` and remove the element
+   from view once the reverse animation has played. Durations here must stay in
+   step with ``EXIT_MS`` in js/ui-kit.js. */
+.modal.closing {
+  animation: modalBackdropOut .19s ease both;
+  pointer-events: none;
+}
+.modal.closing > .modal-content,
+.modal.closing > .preview-content {
+  animation: modalPopOut .19s cubic-bezier(.4,0,.7,.3) both;
+}
+/* The fullscreen viewer has no dialog box, so only its backdrop fades. */
+.fs-viewer.closing {
+  animation: modalBackdropOut .19s ease both;
+  pointer-events: none;
+}
+.custom-select-menu.closing {
+  display: block;
+  animation: dropdownOut .19s ease both;
+  pointer-events: none;
 }
 
 /* ---------- Scrollbars & Responsive ---------- */
@@ -2372,7 +2562,7 @@ select {
   .stats { padding: 10px 16px 4px; }
   .modal-content { padding: 22px 18px; }
   /* Only the icon fits; the state is carried by its colour. */
-  .card-status { padding: 7px 10px; }
+  .card-status { padding: 8px 10px; }
   .card-status #cardStatusText { display: none; }
   .card-banner { flex-wrap: wrap; }
 }
@@ -2380,8 +2570,14 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .modal, .modal-content, .preview-body img, .polaroid-card,
   .preview-switch-left, .preview-switch-right, .stat, .btn,
-  .card-status.state-connected::before {
+  .card-status.state-connected::before, .folder-history, .folder-history-item,
+  .custom-select-menu, .settings-pane, .card-pending-dot, .toast {
     animation: none !important;
     transition: none !important;
+  }
+  /* Exit animations are skipped entirely; js/ui-kit.js hides immediately. */
+  .modal.closing, .custom-select-menu.closing, .folder-history.closing,
+  .modal.closing > .modal-content, .modal.closing > .preview-content {
+    animation: none !important;
   }
 }

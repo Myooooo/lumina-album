@@ -201,7 +201,16 @@ class Database:
         return conn
 
     def close(self) -> None:
-        """Close every cached connection (tests and shutdown paths)."""
+        """Close every cached connection (tests and shutdown paths).
+
+        Background repairs share this instance, so they are waited for first:
+        closing the connections underneath a running pass would raise
+        ``sqlite3.OperationalError`` in the repair thread and leave rows
+        half-fixed.
+        """
+        from .repair import wait_for_repairs
+
+        wait_for_repairs(timeout=60)
         with self._connections_lock:
             connections, self._connections = self._connections, []
         for conn in connections:
@@ -252,6 +261,10 @@ class Database:
                     CREATE INDEX IF NOT EXISTS idx_photos_score ON photos(score);
                     CREATE INDEX IF NOT EXISTS idx_photos_path ON photos(path);
                     CREATE TABLE IF NOT EXISTS settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS app_meta (
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     );
@@ -888,6 +901,36 @@ class Database:
                 conn.close()
 
     # ------------------------------------------------------------------
+    # Application metadata (migration markers, one-off repair versions)
+    # ------------------------------------------------------------------
+
+    def get_meta(self, key: str) -> str | None:
+        """Read one ``app_meta`` entry, or ``None`` when it is not set."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT value FROM app_meta WHERE key=?", (str(key),)
+                ).fetchone()
+                return row["value"] if row else None
+            finally:
+                conn.close()
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Record one ``app_meta`` entry, overwriting any previous value."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "INSERT INTO app_meta(key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (str(key), str(value)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
     # UI state
     # ------------------------------------------------------------------
 
@@ -1280,17 +1323,96 @@ class Database:
             finally:
                 conn.close()
 
+    def rows_for_orientation_check(
+        self,
+    ) -> list[tuple[int, str, int, int, str | None, str | None, str | None]]:
+        """``(id, path, width, height, thumb_path, proxy_path, phash)``.
+
+        Used by the orientation repair pass, which only needs file headers and
+        therefore wants the cheapest possible query.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, path, width, height, thumb_path, proxy_path, phash "
+                    "FROM photos WHERE path IS NOT NULL AND path != ''"
+                ).fetchall()
+                return [
+                    (
+                        int(r["id"]),
+                        r["path"],
+                        int(r["width"] or 0),
+                        int(r["height"] or 0),
+                        r["thumb_path"],
+                        r["proxy_path"],
+                        r["phash"],
+                    )
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+
+    def update_dimensions_only(self, updates: Sequence[tuple[int, int, int]]) -> int:
+        """Write corrected ``(width, height)`` for a batch of photo ids."""
+        if not updates:
+            return 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.executemany(
+                    "UPDATE photos SET width=?, height=? WHERE id=?",
+                    [(w, h, pid) for pid, w, h in updates],
+                )
+                conn.commit()
+                return len(updates)
+            finally:
+                conn.close()
+
+    def clear_rendered_cache(self, photo_ids: Sequence[int]) -> int:
+        """Forget thumb/proxy/hash so the next view re-renders from scratch.
+
+        The cache files themselves are removed by the caller; clearing the
+        columns is what makes the existing on-demand generation in
+        ``/api/thumbnail`` and ``/api/proxy`` kick in again.
+        """
+        if not photo_ids:
+            return 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.executemany(
+                    "UPDATE photos SET thumb_path=NULL, proxy_path=NULL, phash=NULL "
+                    "WHERE id=?",
+                    [(int(pid),) for pid in photo_ids],
+                )
+                conn.commit()
+                return len(photo_ids)
+            finally:
+                conn.close()
+
     def update_cache_paths(
-        self, photo_id: int, thumb_path: str, proxy_path: str
+        self,
+        photo_id: int,
+        thumb_path: str,
+        proxy_path: str,
+        phash: str | None = None,
     ) -> None:
         """Persist gallery/proxy paths generated on demand."""
         with self._lock:
             conn = self._connect()
             try:
-                conn.execute(
-                    "UPDATE photos SET thumb_path=?, proxy_path=? WHERE id=?",
-                    (thumb_path, proxy_path, photo_id),
-                )
+                if phash:
+                    conn.execute(
+                        "UPDATE photos SET thumb_path=?, proxy_path=?, phash=? "
+                        "WHERE id=?",
+                        (thumb_path, proxy_path, phash, photo_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE photos SET thumb_path=?, proxy_path=? WHERE id=?",
+                        (thumb_path, proxy_path, photo_id),
+                    )
                 conn.commit()
             finally:
                 conn.close()

@@ -14,6 +14,7 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.parse import quote
 
 from PIL import Image
 
@@ -57,6 +58,11 @@ from photo_reviewer.importer import (
     run_import,
 )
 from photo_reviewer.paths import canonical_path, is_in_named_dir
+from photo_reviewer.repair import (
+    needs_orientation_repair,
+    repair_orientation_sizes,
+    run_startup_repairs,
+)
 from photo_reviewer.scanner import (
     JOBS,
     discover_images,
@@ -67,6 +73,7 @@ from photo_reviewer.server import create_app
 from photo_reviewer.thumbnailer import (
     cleanup_cache,
     hamming_distance,
+    image_size_on_disk,
     make_proxy,
 )
 
@@ -1558,6 +1565,7 @@ class RawSupportTests(unittest.TestCase):
         self.assertTrue(photo["has_raw"])
         self.assertFalse(photo["is_raw"])
         self.assertEqual(photo["raw_ext"], "NEF")
+        self.assertEqual(photo["raw_size"], 3)
 
     def test_raw_only_photo_is_flagged_as_raw(self) -> None:
         raw = os.path.join(self.folder, "SOLO.ARW")
@@ -1576,6 +1584,51 @@ class RawSupportTests(unittest.TestCase):
         photo = client.get("/api/photos").get_json()["photos"][0]
         self.assertTrue(photo["is_raw"])
         self.assertFalse(photo["has_raw"])
+
+    def test_raw_sibling_size_is_reported_for_the_detail_page(self) -> None:
+        """The detail page shows "10 MB + 30 MB" for a paired photo."""
+        image = os.path.join(self.folder, "PAIR.JPG")
+        raw = os.path.join(self.folder, "PAIR.NEF")
+        Image.new("RGB", (640, 480), (120, 90, 60)).save(image, "JPEG")
+        Path(raw).write_bytes(b"N" * 4096)
+        self.db.upsert_photo(
+            {
+                "path": image,
+                "folder": self.folder,
+                "filename": "PAIR.JPG",
+                "status": "analyzed",
+                "score": 7.0,
+                "raw_path": raw,
+            }
+        )
+        app = create_app(self.cfg, self.db)
+        client = app.test_client()
+        photo_id = self.db.get_photo_by_path(image)["id"]
+
+        listed = client.get("/api/photos").get_json()["photos"][0]
+        self.assertEqual(listed["raw_size"], 4096)
+
+        detail = client.get(f"/api/photo/{photo_id}").get_json()
+        self.assertEqual(detail["raw_size"], 4096)
+        self.assertTrue(detail["has_raw"])
+
+    def test_a_missing_raw_sibling_reports_zero_not_an_error(self) -> None:
+        image = os.path.join(self.folder, "GONE.JPG")
+        Image.new("RGB", (64, 48), (120, 90, 60)).save(image, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": image,
+                "folder": self.folder,
+                "filename": "GONE.JPG",
+                "status": "analyzed",
+                "raw_path": os.path.join(self.folder, "GONE.NEF"),
+            }
+        )
+        app = create_app(self.cfg, self.db)
+        client = app.test_client()
+        photo = client.get("/api/photos").get_json()["photos"][0]
+        self.assertTrue(photo["has_raw"])
+        self.assertEqual(photo["raw_size"], 0)
 
     def test_embedded_preview_is_extracted_from_a_fake_raw(self) -> None:
         """A TIFF container holding a JPEG preview is rendered from the preview."""
@@ -2840,7 +2893,9 @@ class UiStateTests(unittest.TestCase):
         resp = self.client.post("/api/ui-state", json={"evil": "payload"})
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(self.client.get("/api/ui-state").get_json()["state"], {})
-        self.assertEqual(self.db.get_settings(), {})
+        stored = self.db.get_settings()
+        self.assertNotIn("evil", stored)
+        self.assertNotIn("payload", stored.values())
 
     def test_a_malformed_history_is_rejected(self) -> None:
         resp = self.client.post("/api/ui-state", json={"folder_history": "D:\\相册"})
@@ -2975,6 +3030,218 @@ class DeletionSafetyTests(unittest.TestCase):
         )
         self.assertFalse(is_in_named_dir(None, self.cfg.trash_dir_name))
         self.assertFalse(is_in_named_dir(inside, ""))
+
+
+class OrientationTests(unittest.TestCase):
+    """Portrait photos must be recorded - and rendered - the way viewers show them.
+
+    Cameras store the sensor's landscape frame and mark the rotation in EXIF.
+    An earlier version recorded the raw header size, so every portrait shot was
+    filed as landscape and the gallery drew it sideways.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cache = os.path.join(self.folder, "cache")
+        self.db = Database(os.path.join(self.tmp.name, "library.db"))
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _oriented(self, name: str, orientation: int, size=(600, 400)) -> str:
+        path = os.path.join(self.folder, name)
+        exif = Image.Exif()
+        exif[274] = orientation
+        Image.new("RGB", size, (150, 120, 90)).save(path, "JPEG", exif=exif)
+        return path
+
+    def test_a_rotated_tag_swaps_the_measured_size(self) -> None:
+        for orientation in (6, 8):
+            path = self._oriented(f"rot{orientation}.jpg", orientation)
+            self.assertEqual(image_size_on_disk(path), (400, 600), orientation)
+
+    def test_an_upright_photo_keeps_its_size(self) -> None:
+        for orientation in (1, 3):
+            path = self._oriented(f"flat{orientation}.jpg", orientation)
+            self.assertEqual(image_size_on_disk(path), (600, 400), orientation)
+
+    def test_a_missing_file_reports_nothing(self) -> None:
+        self.assertIsNone(image_size_on_disk(os.path.join(self.folder, "nope.jpg")))
+
+    def test_make_proxy_returns_display_dimensions_and_writes_upright_files(self) -> None:
+        path = self._oriented("portrait.jpg", 6)
+        proxy, width, height, _hash, thumb = make_proxy(
+            path, cache_dir=self.cache, max_edge=400, thumb_size=200
+        )
+        self.assertEqual((width, height), (400, 600))
+        for produced in (proxy, thumb):
+            with Image.open(produced) as img:
+                self.assertGreater(img.size[1], img.size[0], produced)
+                # The pixels are baked in, so the tag must not be re-applied.
+                self.assertIn((img.getexif() or {}).get(274), (None, 1), produced)
+
+    def test_make_proxy_gives_rotated_photos_a_distinct_cache_key(self) -> None:
+        """An upright photo must not pick up the sideways proxy of the old build."""
+        upright = self._oriented("plain.jpg", 1)
+        rotated = self._oriented("turned.jpg", 6)
+        base = os.path.basename(
+            make_proxy(upright, cache_dir=self.cache)[0]
+        ).replace("_proxy.jpg", "")
+        turned = os.path.basename(
+            make_proxy(rotated, cache_dir=self.cache)[0]
+        ).replace("_proxy.jpg", "")
+        self.assertNotEqual(base, turned)
+
+    def test_the_repair_fixes_sizes_and_drops_the_stale_cache(self) -> None:
+        portrait = self._oriented("shot.jpg", 6)
+        # Cache a sideways proxy under the key the photo had before the fix.
+        stale = os.path.join(self.cache, "legacy_proxy.jpg")
+        os.makedirs(self.cache, exist_ok=True)
+        Image.new("RGB", (600, 400)).save(stale, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": portrait,
+                "folder": self.folder,
+                "filename": "shot.jpg",
+                "status": "analyzed",
+                "width": 600,
+                "height": 400,
+                "thumb_path": stale,
+                "proxy_path": stale,
+            }
+        )
+        pid = self.db.get_photo_by_path(portrait)["id"]
+
+        report = repair_orientation_sizes(self.db, self.cfg)
+        self.assertEqual(report["fixed"], 1)
+        self.assertEqual(report["cache_dropped"], 1)
+
+        row = self.db.get_photo(pid)
+        self.assertEqual((row["width"], row["height"]), (400, 600))
+        self.assertIsNone(row["proxy_path"])
+        self.assertFalse(os.path.exists(stale))
+
+    def test_the_repair_leaves_upright_photos_alone(self) -> None:
+        path = self._oriented("fine.jpg", 1)
+        keep = os.path.join(self.cache, "keep_proxy.jpg")
+        os.makedirs(self.cache, exist_ok=True)
+        Image.new("RGB", (600, 400)).save(keep, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": "fine.jpg",
+                "status": "analyzed",
+                "width": 600,
+                "height": 400,
+                "thumb_path": keep,
+                "proxy_path": keep,
+            }
+        )
+        report = repair_orientation_sizes(self.db, self.cfg)
+        self.assertEqual(report["fixed"], 0)
+        self.assertTrue(os.path.exists(keep))
+
+    def test_the_repair_runs_once_per_database(self) -> None:
+        self.assertTrue(needs_orientation_repair(self.db))
+        run_startup_repairs(self.db, self.cfg)
+        self.assertFalse(needs_orientation_repair(self.db))
+        # A second call is a no-op rather than a second pass.
+        self.assertEqual(run_startup_repairs(self.db, self.cfg), {})
+
+    def test_rows_without_a_file_are_skipped(self) -> None:
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.folder, "gone.jpg"),
+                "folder": self.folder,
+                "filename": "gone.jpg",
+                "status": "pending",
+                "width": 600,
+                "height": 400,
+            }
+        )
+        report = repair_orientation_sizes(self.db, self.cfg)
+        self.assertEqual(report["checked"], 0)
+
+
+class CardStatusPayloadTests(unittest.TestCase):
+    """The toolbar badge is driven by /api/card/status.
+
+    The frontend matches the state strings against its own table, so the payload
+    shape is part of the contract and is worth pinning.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.card = os.path.join(self.tmp.name, "card")
+        self.album = os.path.join(self.tmp.name, "album")
+        os.makedirs(os.path.join(self.card, "DCIM"))
+        os.makedirs(os.path.join(self.album, "DCIM"))
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_a_paired_album_reports_the_connected_state(self) -> None:
+        record_pairing(self.db, self.album, self.card)
+        body = self.client.get(
+            "/api/card/status?folder=" + quote(self.album)
+        ).get_json()
+        current = body["current"]
+        self.assertIsNotNone(current)
+        self.assertEqual(current["state"], "connected")
+        self.assertTrue(current["usable"])
+        self.assertEqual(current["pending"]["total"], 0)
+
+    def test_an_album_with_no_card_reports_nothing_current(self) -> None:
+        body = self.client.get(
+            "/api/card/status?folder=" + quote(self.album)
+        ).get_json()
+        self.assertIsNone(body["current"])
+        self.assertEqual(body["cards"], [])
+
+    def test_a_removed_card_reports_the_disconnected_state(self) -> None:
+        record_pairing(self.db, self.album, self.card)
+        shutil.rmtree(self.card)
+        body = self.client.get(
+            "/api/card/status?folder=" + quote(self.album)
+        ).get_json()
+        self.assertEqual(body["current"]["state"], "disconnected")
+        self.assertFalse(body["current"]["usable"])
+
+    def test_the_queue_shows_up_in_the_payload(self) -> None:
+        record_pairing(self.db, self.album, self.card)
+        self.db.save_card_action(
+            {
+                "album": self.album,
+                "source": self.card,
+                "volume": None,
+                "kind": KIND_DELETE,
+                "state": STATE_PENDING,
+                "relative_path": "DCIM/DSC_0001.JPG",
+                "card_path": os.path.join(self.card, "DCIM", "DSC_0001.JPG"),
+                "filename": "DSC_0001.JPG",
+                "size": 128,
+                "is_raw": 0,
+                "photo_id": 1,
+            }
+        )
+        body = self.client.get(
+            "/api/card/status?folder=" + quote(self.album)
+        ).get_json()
+        self.assertEqual(body["current"]["pending"]["total"], 1)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,10 @@ const state = {
   cardBannerDismissed: false,
   cardPendingSeen: 0,
   cardTimer: null,
+  historyCloseTimer: null,
+  //: Which status filter this album opens on ("analyzed", or "all" for a folder
+  //: that has only been indexed). Set once the album is known.
+  defaultStatusFilter: "analyzed",
   fullscreen: {
     scale: 1,
     panX: 0,
@@ -51,6 +55,8 @@ const {
   enhanceSelect,
   setSelectValue,
   showToast,
+  showModal,
+  hideModal,
   showLoading,
   hideLoading,
   confirmDialog,
@@ -161,6 +167,7 @@ async function loadInitialFolder() {
   saveUiState({ folder: state.folder });
   $("folderInput").value = state.folder;
   if (state.folder) {
+    await applyDefaultStatusFilter();
     await loadPhotos();
     resumeScanJob();
   } else {
@@ -171,6 +178,32 @@ async function loadInitialFolder() {
     loadTags();
     loadYears();
   }
+}
+
+/**
+ * Pick the filter this album should open on.
+ *
+ * The default is "已收录", which is what someone browsing a finished album
+ * wants. A folder that has only been indexed - an import run with the model
+ * switched off, say - has nothing under that filter, and landing on an empty
+ * gallery looks like a failure. In that case fall back to "全部回忆".
+ *
+ * The answer is remembered on ``state`` so "重置" falls back to the same view
+ * instead of undoing the fallback the user never chose.
+ */
+async function applyDefaultStatusFilter() {
+  let value = "analyzed";
+  if (state.folder) {
+    try {
+      const stats = await api(`/api/stats?folder=${encodeURIComponent(state.folder)}`);
+      if (!stats.analyzed && stats.total) value = "all";
+    } catch (e) {
+      console.warn("loadStats failed", e);
+    }
+  }
+  state.defaultStatusFilter = value;
+  setSelectValue($("statusFilter"), value);
+  updateActiveStat();
 }
 
 function updateActiveStat() {
@@ -225,6 +258,19 @@ function fmtSize(bytes) {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
   return (bytes / 1024 / 1024).toFixed(1) + " MB";
+}
+
+/**
+ * File size as shown on the detail page.
+ *
+ * When a same-named raw file sits next to the photo, its size is part of what
+ * the pair takes up on disk, so both numbers are shown: "10.2 MB + 30.4 MB".
+ */
+function fileSizeText(photo) {
+  const image = fmtSize(photo.size);
+  const rawSize = Number(photo.raw_size);
+  if (!photo.has_raw || !rawSize) return image;
+  return `${image} + ${fmtSize(rawSize)}`;
 }
 
 function escapeHtml(s) {
@@ -380,7 +426,7 @@ function hasDimensionScores(dims, score) {
 
 function dimensionRows(dims, score) {
   if (!hasDimensionScores(dims, score)) {
-    return `<div class="dimension-empty">这张照片还没有分项评分，点击详情页的“编辑回忆”即可补上。</div>`;
+    return `<div class="dimension-empty">这张照片还没有评分，使用“重新解读”或“编辑回忆”打分吧。</div>`;
   }
   const d = dims || {};
   return Object.keys(DIMENSION_NAMES).map((key) => {
@@ -634,8 +680,22 @@ function renderGallery(options = {}) {
     const tagsHtml = (photo.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
     const rawBadge = rawBadgeHtml(photo, "card");
 
+    // A photo that has only been indexed has no score yet. Printing "总分 -"
+    // for it is noise, so the whole score row is dropped until there is
+    // something to show. The sub-scores keep their own rule: they appear only
+    // when the breakdown is actually meaningful.
+    const hasScore = photo.score !== null && photo.score !== undefined;
+    const scorePills = hasScore
+      ? `<div class="score-pills">
+              <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
+              ${dimensionValues(dims, photo.score)}
+            </div>`
+      : "";
+
     let deleteActions = "";
     if (isDeleted) {
+      // A trashed photo is not analysed again; offering the button would only
+      // invite the model to describe a file that is on its way out.
       deleteActions = `
         <button class="btn small restore-btn" title="恢复"><span class="btn-icon">${ICONS.restore}</span>恢复</button>
         <button class="btn small danger permanent-btn" title="彻底移除"><span class="btn-icon">${ICONS.close}</span></button>
@@ -645,6 +705,9 @@ function renderGallery(options = {}) {
         <button class="btn small danger delete-btn" title="暂时收起"><span class="btn-icon">${ICONS.trash}</span></button>
       `;
     }
+    const reanalyzeAction = isDeleted
+      ? ""
+      : `<button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>`;
 
     card.innerHTML = `
       <div class="polaroid-inner">
@@ -657,16 +720,13 @@ function renderGallery(options = {}) {
             ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
             ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
             <div class="back-tags">${tagsHtml || ""}</div>
-            <div class="score-pills">
-              <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
-              ${dimensionValues(dims, photo.score)}
-            </div>
+            ${scorePills}
             <div class="card-actions">
               <label class="card-check" title="选择">
                 <input type="checkbox" />
               </label>
               <span class="card-btn-group">
-                <button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>
+                ${reanalyzeAction}
                 ${deleteActions}
               </span>
             </div>
@@ -715,10 +775,13 @@ function renderGallery(options = {}) {
       updateSelectionBar();
     });
 
-    card.querySelector(".reanalyze-btn").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await reanalyze(photo.id);
-    });
+    const reanalyzeBtn = card.querySelector(".reanalyze-btn");
+    if (reanalyzeBtn) {
+      reanalyzeBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await reanalyze(photo.id);
+      });
+    }
 
     if (isDeleted) {
       card.querySelector(".restore-btn").addEventListener("click", async (e) => {
@@ -927,7 +990,7 @@ async function deletePhotos(ids) {
     confirmText: "暂时收起",
     danger: true,
     checkbox: canSync
-      ? { label: "同步删除 SD 卡中的照片（含同名 RAW）", checked: true }
+      ? { label: "同步删除 SD 卡中的照片", checked: true }
       : null,
   });
   const confirmed = typeof answer === "object" ? answer.confirmed : answer;
@@ -1144,7 +1207,7 @@ function folderHistoryOpen() {
   return !$("folderHistory").classList.contains("hidden");
 }
 
-async function closeFolderHistory() {
+function closeFolderHistory() {
   const panel = $("folderHistory");
   const toggle = $("folderHistoryBtn");
   if (toggle) {
@@ -1152,11 +1215,24 @@ async function closeFolderHistory() {
     toggle.setAttribute("aria-expanded", "false");
   }
   if (panel.classList.contains("hidden")) return;
-  // Let the closing animation play out before the panel is taken out of flow.
+  // Let the lift-out play before the panel is taken out of flow. The duration
+  // matches ``historyLift`` in style.css. Re-opening cancels the timer, so a
+  // quick toggle cannot hide a panel that has just been shown again.
   panel.classList.add("closing");
-  await new Promise((resolve) => setTimeout(resolve, 160));
-  panel.classList.add("hidden");
-  panel.classList.remove("closing");
+  if (state.historyCloseTimer) clearTimeout(state.historyCloseTimer);
+  state.historyCloseTimer = setTimeout(() => {
+    state.historyCloseTimer = null;
+    panel.classList.add("hidden");
+    panel.classList.remove("closing");
+  }, 170);
+}
+
+/** Cancel a pending close so the panel can be re-opened without a flicker. */
+function cancelFolderHistoryClose() {
+  if (state.historyCloseTimer) {
+    clearTimeout(state.historyCloseTimer);
+    state.historyCloseTimer = null;
+  }
 }
 
 /** Merge "recently used" with "currently indexed" into one de-duplicated list. */
@@ -1182,7 +1258,7 @@ function folderHistoryEntries(indexed) {
 
 async function toggleFolderHistory() {
   if (folderHistoryOpen()) {
-    await closeFolderHistory();
+    closeFolderHistory();
     return;
   }
   const panel = $("folderHistory");
@@ -1212,6 +1288,8 @@ async function toggleFolderHistory() {
       });
     });
   }
+  // A pending close must not hide the panel we are about to show.
+  cancelFolderHistoryClose();
   panel.classList.remove("closing");
   panel.classList.remove("hidden");
   $("folderHistoryBtn").classList.add("open");
@@ -1306,12 +1384,12 @@ function openFullscreenViewer() {
 
   fsImg.src = `/api/original/${photo.id}`;
   applyFsTransform();
-  fsModal.classList.remove("hidden");
+  showModal(fsModal);
 }
 
 function closeFullscreenViewer() {
   const fsModal = $("fullscreenModal");
-  if (fsModal) fsModal.classList.add("hidden");
+  hideModal(fsModal);
   state.fullscreen.scale = 1;
   state.fullscreen.panX = 0;
   state.fullscreen.panY = 0;
@@ -1345,12 +1423,18 @@ function resetFullscreenZoom() {
 function openPreview(id) {
   state.previewNavToken += 1;
   state.currentPreviewId = id;
-  $("previewModal").classList.remove("hidden");
+  showModal($("previewModal"));
   updatePreview();
 }
 
-function closeModal(id) {
-  $(id).classList.add("hidden");
+/**
+ * Close a dialog, playing the reverse of its entrance animation first.
+ *
+ * ``hideModal`` keeps the element in the DOM for the length of the exit, so a
+ * dialog that is re-opened mid-animation is handled (see ui-kit.js).
+ */
+function closeModal(id, onHidden) {
+  hideModal($(id), onHidden);
   if (id === "previewModal") {
     state.currentPreviewId = null;
     state.previewNavToken += 1;
@@ -1377,6 +1461,8 @@ function updatePreview(options = {}) {
   $("previewDeleteBtn").classList.toggle("hidden", isDeleted);
   $("previewRestoreBtn").classList.toggle("hidden", !isDeleted);
   $("previewPermanentDeleteBtn").classList.toggle("hidden", !isDeleted);
+  // A trashed photo is not analysed again, so the action is not offered either.
+  $("previewReanalyzeBtn").classList.toggle("hidden", isDeleted);
   
   const favBtn = $("previewFavoriteBtn");
   favBtn.classList.toggle("active", !!photo.favorite);
@@ -1469,7 +1555,7 @@ function updatePreview(options = {}) {
       </div>
       <div class="meta-item-row" title="文件大小">
         ${ICONS.fileSize}
-        <div class="meta-content">${fmtSize(photo.size)}</div>
+        <div class="meta-content">${fileSizeText(photo)}</div>
       </div>
       <div class="meta-item-row" title="物理路径">
         ${ICONS.path}
@@ -1505,7 +1591,7 @@ function updatePreview(options = {}) {
 }
 
 function resetFilters() {
-  setSelectValue($("statusFilter"), "analyzed");
+  setSelectValue($("statusFilter"), state.defaultStatusFilter || "analyzed");
   setSelectValue($("favoriteFilter"), "");
   setSelectValue($("minScoreFilter"), "");
   setSelectValue($("tagFilter"), "");
@@ -1559,6 +1645,75 @@ function applyPromptPreset(name) {
   highlightPromptPreset(promptText);
 }
 
+/* ==========================================================================
+   Settings dialog: tabs
+   ========================================================================== */
+
+const SETTINGS_TABS = ["model", "image", "geo", "data"];
+
+/** Slide the "ink" behind the active tab and show its pane. */
+function showSettingsTab(name, options = {}) {
+  const target = SETTINGS_TABS.includes(name) ? name : SETTINGS_TABS[0];
+  const tabs = [...document.querySelectorAll("#settingsModal .settings-tab")];
+  const panes = [...document.querySelectorAll("#settingsModal .settings-pane")];
+  if (!tabs.length) return;
+
+  tabs.forEach((tab) => {
+    const active = tab.dataset.tab === target;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.tabIndex = active ? 0 : -1;
+  });
+  panes.forEach((pane) => {
+    const active = pane.dataset.pane === target;
+    // ``hidden`` is what actually takes the pane out of the layout; the CSS
+    // animation then replays from the start each time a tab is opened.
+    pane.hidden = !active;
+    pane.classList.toggle("active", active);
+  });
+
+  moveSettingsTabInk();
+  if (options.focus) {
+    const activeTab = tabs.find((tab) => tab.dataset.tab === target);
+    if (activeTab) activeTab.focus();
+  }
+}
+
+/** Position the sliding highlight under the active tab. */
+function moveSettingsTabInk() {
+  const ink = $("settingsTabInk");
+  const container = document.querySelector("#settingsModal .settings-tabs");
+  const active = container ? container.querySelector(".settings-tab.active") : null;
+  if (!ink || !container || !active) return;
+  const rect = active.getBoundingClientRect();
+  if (!rect.width) {
+    // The dialog is still hidden, so there is nothing to measure yet.
+    ink.style.opacity = "0";
+    return;
+  }
+  // ``left: 0`` on the ink is the padding edge, while getBoundingClientRect is
+  // the border edge; subtracting the border width lines the two up.
+  const base = container.getBoundingClientRect();
+  const border = container.clientLeft || 0;
+  ink.style.opacity = "1";
+  ink.style.width = `${rect.width}px`;
+  ink.style.transform = `translateX(${rect.left - base.left - border}px)`;
+}
+
+/** Arrow-key navigation between tabs, as expected of a real tablist. */
+function onSettingsTabKeydown(e) {
+  const keys = { ArrowRight: 1, ArrowLeft: -1, Home: "first", End: "last" };
+  if (!(e.key in keys)) return;
+  e.preventDefault();
+  const tabs = [...document.querySelectorAll("#settingsModal .settings-tab")];
+  const current = tabs.findIndex((tab) => tab.classList.contains("active"));
+  let next;
+  if (keys[e.key] === "first") next = 0;
+  else if (keys[e.key] === "last") next = tabs.length - 1;
+  else next = (current + keys[e.key] + tabs.length) % tabs.length;
+  showSettingsTab(tabs[next].dataset.tab, { focus: true });
+}
+
 async function openSettings() {
   try {
     await loadPromptPresets();
@@ -1581,7 +1736,11 @@ async function openSettings() {
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
-    $("settingsModal").classList.remove("hidden");
+    // Always open on the model tab: that is what most visits are for.
+    showSettingsTab("model");
+    showModal($("settingsModal"));
+    // The tab widths are only measurable once the dialog is on screen.
+    requestAnimationFrame(moveSettingsTabInk);
   } catch (e) {
     showToast("读取设置失败：" + e.message, "error");
   }
@@ -1703,7 +1862,7 @@ function openEditPreview() {
   $("editLocation").value = photo.location || "";
   $("editTags").value = (photo.tags || []).join("，");
   $("editReason").value = photo.reason || "";
-  $("editModal").classList.remove("hidden");
+  showModal($("editModal"));
 }
 
 async function saveEditedPhoto() {
@@ -1834,7 +1993,7 @@ function handlePromptPresetClick(name) {
 
 async function openDirBrowser() {
   const path = state.folder || "";
-  $("dirModal").classList.remove("hidden");
+  showModal($("dirModal"));
   await loadDirList(path || "");
 }
 
@@ -2045,7 +2204,7 @@ async function openImportDialog() {
     $("importSource").value = state.importSource;
   }
   setImportPreview("");
-  $("importModal").classList.remove("hidden");
+  showModal($("importModal"));
   // Opening the dialog is the moment the card is expected to be in the reader,
   // so any deletion queued while it was away is offered right here.
   const source = $("importSource").value.trim();
@@ -2056,7 +2215,7 @@ async function pickImportSource() {
   // Reuse the folder browser. The pending flag makes the browser hand its
   // selection back to the import dialog instead of switching the album folder.
   state.importPickPending = true;
-  $("importModal").classList.add("hidden");
+  hideModal($("importModal"));
   await openDirBrowser();
 }
 
@@ -2188,8 +2347,10 @@ function paintCardStatus() {
     $("cardBanner").classList.add("hidden");
     return;
   }
+  // Same box metrics as the toolbar buttons next to it; only the state class
+  // differs, so the badge reads as one of them rather than as a pasted-on chip.
+  btn.className = `btn card-status state-${card.state}`;
   btn.classList.remove("hidden");
-  btn.className = `card-status state-${card.state}`;
   btn.title = card.source + (card.warnings && card.warnings.length ? `\n${card.warnings.join("\n")}` : "");
   $("cardStatusText").textContent = CARD_STATE_TEXT[card.state] || "相机相册";
   $("cardStatusIcon").innerHTML = ICONS[CARD_STATE_ICON[card.state]] || ICONS.sdCard || "";
@@ -2290,7 +2451,7 @@ async function openCardSyncDialog(options = {}) {
   $("cardSyncRawRow").classList.toggle("hidden", !hasRaw);
   $("cardSyncRunBtn").disabled = !preview.ready || !preview.summary.total;
   $("cardSyncRunBtn").title = preview.ready ? "" : "SD 卡当前不可用";
-  $("cardSyncModal").classList.remove("hidden");
+  showModal($("cardSyncModal"));
 }
 
 async function reloadCardPreview() {
@@ -2574,7 +2735,7 @@ function init() {
       $("importSource").value = state.currentDirPath;
       rememberImportSource(state.currentDirPath);
       closeModal("dirModal");
-      $("importModal").classList.remove("hidden");
+      showModal($("importModal"));
       planImport({ silent: true });
       return;
     }
@@ -2589,6 +2750,14 @@ function init() {
   $("saveSettingsBtn").addEventListener("click", saveSettings);
   $("cleanCacheBtn").addEventListener("click", cleanCache);
   $("removeFolderBtn").addEventListener("click", removeCurrentFolder);
+  document.querySelectorAll("#settingsModal .settings-tab").forEach((tab) => {
+    tab.addEventListener("click", () => showSettingsTab(tab.dataset.tab));
+    tab.addEventListener("keydown", onSettingsTabKeydown);
+  });
+  // Tab widths change with the window (and with the responsive label rule).
+  window.addEventListener("resize", () => {
+    if (!$("settingsModal").classList.contains("hidden")) moveSettingsTabInk();
+  });
   $("editSaveBtn").addEventListener("click", saveEditedPhoto);
   $("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
   initScoreEditors();
@@ -2603,7 +2772,7 @@ function init() {
         // Cancelling the folder browser returns to the import dialog.
         state.importPickPending = false;
         closeModal("dirModal");
-        $("importModal").classList.remove("hidden");
+        showModal($("importModal"));
         return;
       }
       closeModal(btn.dataset.close);
@@ -2615,7 +2784,7 @@ function init() {
       if (state.importPickPending && modal.id === "dirModal") {
         state.importPickPending = false;
         closeModal("dirModal");
-        $("importModal").classList.remove("hidden");
+        showModal($("importModal"));
         return;
       }
       closeModal(modal.id);

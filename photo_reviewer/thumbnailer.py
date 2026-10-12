@@ -45,15 +45,35 @@ RAW_EXTENSIONS = frozenset(
 # A stream smaller than this is treated as a stub, not a viewable preview.
 _MIN_PREVIEW_BYTES = 4096
 
+#: EXIF tag 274. Values 5-8 describe a quarter turn, so the stored frame has to
+#: be swapped to match what every viewer actually shows.
+_ORIENTATION_TAG = 274
+_SWAPPED_ORIENTATIONS = frozenset({5, 6, 7, 8})
 
-def _safe_hash(path: str) -> str:
-    """Hash file path + mtime + size to use as a stable cache key."""
+
+def _safe_hash(path: str, orientation: int = 1) -> str:
+    """Hash file path + mtime + size to use as a stable cache key.
+
+    A rotated photo gets the orientation appended, because the rendered result
+    depends on it: a portrait shot must not reuse the landscape proxy an older
+    version wrote for it. Upright photos keep their original key, so upgrading
+    does not invalidate the whole cache.
+    """
+    suffix = f"|o{int(orientation)}" if int(orientation or 1) != 1 else ""
     try:
         st = os.stat(path)
-        key = f"{path}|{st.st_mtime_ns}|{st.st_size}"
+        key = f"{path}|{st.st_mtime_ns}|{st.st_size}{suffix}"
     except OSError:
-        key = path
+        key = f"{path}{suffix}"
     return hashlib.sha1(key.encode("utf-8", errors="replace")).hexdigest()[:20]
+
+
+def _exif_orientation(img: Image.Image) -> int:
+    """Read EXIF tag 274, defaulting to 1 ("already upright")."""
+    try:
+        return int((img.getexif() or {}).get(_ORIENTATION_TAG) or 1)
+    except (KeyError, TypeError, ValueError):
+        return 1
 
 
 class _BytesReader:
@@ -160,6 +180,40 @@ def open_source_image(image_path: str) -> Image.Image:
     return Image.open(image_path)
 
 
+def image_size_on_disk(image_path: str) -> tuple[int, int] | None:
+    """Return the *display* size of a photo without decoding its pixels.
+
+    Cameras rarely rotate portrait shots; they store the sensor's landscape
+    frame and add an EXIF ``Orientation`` tag (6 or 8 for the two portrait
+    cases). Every viewer honours that tag, so the size a user sees is the
+    swapped one - and that is the size that must be recorded.
+
+    Reading only the JPEG/TIFF header costs about 0.1 ms, so this is cheap
+    enough to run for every row. Raw containers are the documented exception:
+    the header of a ``.nef`` describes a 160x120 placeholder rather than the
+    embedded preview that actually gets rendered, so those are measured through
+    ``open_source_image`` instead. Returns ``None`` when the file cannot be
+    read at all.
+    """
+    image_path = os.path.abspath(image_path)
+    if Path(image_path).suffix.lower() not in RAW_EXTENSIONS:
+        try:
+            with Image.open(image_path) as img:
+                width, height = img.size
+                orientation = _exif_orientation(img)
+            if width > 0 and height > 0:
+                if orientation in _SWAPPED_ORIENTATIONS:
+                    return height, width
+                return width, height
+        except (OSError, ValueError, UnidentifiedImageError):
+            return None
+    try:
+        with open_source_image(image_path) as img:
+            return img.size
+    except (OSError, ValueError, UnidentifiedImageError):
+        return None
+
+
 def make_proxy(
     image_path: str,
     max_edge: int = 1024,
@@ -175,6 +229,12 @@ def make_proxy(
     thumbnail is served to the gallery grid so large albums do not download
     full-size proxies.
 
+    ``width``/``height`` are the **display** size: the EXIF orientation tag is
+    applied first, so a portrait shot is reported as portrait rather than as the
+    landscape frame the sensor actually stored. Both cached JPEGs are written
+    upright for the same reason - that is what the browser, the model and the
+    fullscreen viewer all expect.
+
     ``image_hash`` is a 64-bit difference hash (dHash) of the image, stored in
     the ``phash`` column; it is not a DCT-based pHash.
 
@@ -185,7 +245,11 @@ def make_proxy(
     cache_dir = os.path.abspath(cache_dir)
     os.makedirs(cache_dir, exist_ok=True)
 
-    with open_source_image(image_path) as img:
+    source = open_source_image(image_path)
+    with source as img:
+        # ``exif_transpose`` needs the tag, so read it before it is stripped.
+        orientation = _exif_orientation(img)
+        img = ImageOps.exif_transpose(img)
         if img.mode in ("RGBA", "LA", "P"):
             img = img.convert("RGBA")
             background = Image.new("RGB", img.size, (255, 255, 255))
@@ -195,7 +259,7 @@ def make_proxy(
             img = img.convert("RGB")
 
         width, height = img.size
-        base = _safe_hash(image_path)
+        base = _safe_hash(image_path, orientation)
 
         proxy_path = os.path.join(cache_dir, f"{base}_proxy.jpg")
         if not os.path.exists(proxy_path):
