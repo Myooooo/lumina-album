@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-from .cache import cleanup_folder_cache, load_scan_results_from_cache
+from .cache import cleanup_folder_cache
 from .config import Config
 from .db import Database
 from .exif import extract_exif
@@ -560,7 +560,6 @@ def _scan_worker(
     if not job:
         return
     try:
-        load_scan_results_from_cache(folder, db, config.cache_dir_name)
         active_paths = set(db.paths_for_folder(folder))
         JOBS.update(
             job_id,

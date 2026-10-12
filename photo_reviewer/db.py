@@ -255,6 +255,11 @@ class Database:
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS ui_state (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
                     CREATE TABLE IF NOT EXISTS card_albums (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         folder TEXT NOT NULL,
@@ -510,34 +515,6 @@ class Database:
             rows = conn.execute(sql, params).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
-    def count_photos(
-        self,
-        folder: str | None = None,
-        status: str | None = None,
-        recommendation: str | None = None,
-    ) -> int:
-        clauses = []
-        params: list[Any] = []
-        if folder:
-            clauses.append("folder = ?")
-            params.append(folder)
-        if status:
-            clauses.append("status = ?")
-            params.append(status)
-        if recommendation:
-            clauses.append("recommendation = ?")
-            params.append(recommendation)
-        where = "WHERE " + " AND ".join(clauses) if clauses else ""
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    f"SELECT COUNT(*) AS c FROM photos {where}", params
-                ).fetchone()
-                return int(row["c"])
-            finally:
-                conn.close()
-
     def stats(self, folder: str | None = None) -> dict[str, int]:
         clauses = []
         params: list[Any] = []
@@ -712,24 +689,6 @@ class Database:
             finally:
                 conn.close()
 
-    def mark_error(self, photo_id: int, error: str) -> None:
-        """Record a processing failure for one photo.
-
-        Superseded by ``scanner._record_photo_error`` (which preserves an
-        existing good analysis); kept because it is the narrow, explicit way to
-        flag a row and is used by tests.
-        """
-        with self._lock:
-            conn = self._connect()
-            try:
-                conn.execute(
-                    "UPDATE photos SET status='error', error=?, analyzed_at=? WHERE id=?",
-                    (error, utc_now(), photo_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
     def update_raw_path(self, photo_id: int, raw_path: str | None) -> None:
         """Attach (or clear) the same-named raw sibling of one photo."""
         with self._lock:
@@ -884,49 +843,6 @@ class Database:
             finally:
                 conn.close()
 
-    def analyzed_rows_for_folder(self, folder: str) -> list[dict[str, Any]]:
-        with self._lock:
-            conn = self._connect()
-            try:
-                rows = conn.execute(
-                    "SELECT * FROM photos WHERE folder=? AND status='analyzed' AND phash IS NOT NULL",
-                    (folder,),
-                ).fetchall()
-                return [self._row_to_dict(r) for r in rows]
-            finally:
-                conn.close()
-
-    def update_duplicate_tag(
-        self, photo_id: int, score: float, recommendation: str, reason: str
-    ) -> None:
-        with self._lock:
-            conn = self._connect()
-            try:
-                row = conn.execute(
-                    "SELECT tags FROM photos WHERE id=?", (photo_id,)
-                ).fetchone()
-                tags = []
-                if row and row["tags"]:
-                    try:
-                        tags = json.loads(row["tags"])
-                    except (TypeError, ValueError):
-                        tags = []
-                if "duplicate" not in tags:
-                    tags.append("duplicate")
-                conn.execute(
-                    "UPDATE photos SET tags=?, score=?, recommendation=?, reason=? WHERE id=?",
-                    (
-                        json.dumps(tags, ensure_ascii=False),
-                        score,
-                        recommendation,
-                        reason,
-                        photo_id,
-                    ),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
     def get_settings(self) -> dict[str, str]:
         with self._lock:
             conn = self._connect()
@@ -968,6 +884,51 @@ class Database:
                 )
                 conn.commit()
                 return max(0, cursor.rowcount)
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # UI state
+    # ------------------------------------------------------------------
+
+    def get_ui_state(self) -> dict[str, Any]:
+        """Return the browser-independent UI state.
+
+        This used to live in ``localStorage``, which meant clearing the
+        browser's site data silently threw away the folder list, the open album
+        and the remembered card path. Keeping it beside the photos makes the
+        album's memory belong to the album.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute("SELECT key, value FROM ui_state").fetchall()
+            finally:
+                conn.close()
+        state: dict[str, Any] = {}
+        for row in rows:
+            try:
+                state[row["key"]] = json.loads(row["value"])
+            except (TypeError, ValueError):
+                state[row["key"]] = row["value"]
+        return state
+
+    def save_ui_state(self, data: dict[str, Any]) -> None:
+        """Merge ``data`` into the stored UI state."""
+        if not data:
+            return
+        now = utc_now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO ui_state(key, value, updated_at) VALUES (?, ?, ?)",
+                    [
+                        (str(k), json.dumps(v, ensure_ascii=False), now)
+                        for k, v in data.items()
+                    ],
+                )
+                conn.commit()
             finally:
                 conn.close()
 
@@ -1199,36 +1160,6 @@ class Database:
             finally:
                 conn.close()
 
-    def delete_card_actions_for_album(self, album: str) -> int:
-        with self._lock:
-            conn = self._connect()
-            try:
-                cursor = conn.execute(
-                    "DELETE FROM card_actions WHERE album=?", (album,)
-                )
-                conn.commit()
-                return max(0, cursor.rowcount)
-            finally:
-                conn.close()
-
-    def drop_card_actions_for_paths(
-        self, album: str, relative_paths: Sequence[str]
-    ) -> int:
-        """Forget queued actions for files that no longer exist locally."""
-        if not relative_paths:
-            return 0
-        with self._lock:
-            conn = self._connect()
-            try:
-                cursor = conn.executemany(
-                    "DELETE FROM card_actions WHERE album=? AND relative_path=?",
-                    [(album, path) for path in relative_paths],
-                )
-                conn.commit()
-                return max(0, cursor.rowcount)
-            finally:
-                conn.close()
-
     def set_favorite(self, photo_id: int, favorite: bool) -> None:
         with self._lock:
             conn = self._connect()
@@ -1391,8 +1322,3 @@ def get_db(path: str | None = None) -> Database:
     if DB is None:
         DB = Database(path or "data/library.db")
     return DB
-
-
-def set_db(db: Database) -> None:
-    global DB
-    DB = db

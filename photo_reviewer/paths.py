@@ -61,3 +61,23 @@ def is_within(child: str | None, parent: str | None) -> bool:
         ) == os.path.normcase(parent_path)
     except ValueError:  # different drives
         return False
+
+
+def is_in_named_dir(path: str | None, name: str) -> bool:
+    """Return True when a directory called ``name`` is one of ``path``'s parents.
+
+    This is the last line of defence before an irreversible ``os.remove``: the
+    only files the app is allowed to erase outright are the ones it put in its
+    own ``.photo-trash``/``.photo-review-cache`` directories. A row whose
+    ``path`` or ``original_path`` somehow still points at a live photo is refused
+    by this check, so a stale database entry can never delete an original.
+    """
+    if not path or not name:
+        return False
+    resolved = canonical_path(path)
+    if not resolved:
+        return False
+    wanted = os.path.normcase(name)
+    parts = os.path.normcase(resolved).split(os.sep)
+    # The final component is the file itself, so only its ancestors count.
+    return any(part == wanted for part in parts[:-1])

@@ -4,15 +4,11 @@
 "use strict";
 
 const state = {
-  folder: localStorage.getItem("photoFolder") || "",
-  folderHistory: (() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("photoFolderHistory") || "[]");
-      return Array.isArray(saved) ? saved.filter((x) => typeof x === "string") : [];
-    } catch (e) {
-      return [];
-    }
-  })(),
+  // Filled from the server on start (see loadUiState): the album's memory lives
+  // next to the album, not in the browser, so clearing site data cannot lose it.
+  folder: "",
+  folderHistory: [],
+  importSource: "",
   photos: [],
   selected: new Set(),
   currentDirPath: "",
@@ -84,6 +80,37 @@ function folderPathKey(path) {
   return String(path || "").replace(/[\/]+$/, "").toLowerCase();
 }
 
+/* ==========================================================================
+   Remembered UI state
+   The folder history, the open album and the remembered card path are stored by
+   the server (table ``ui_state``), so they survive clearing browser data and are
+   shared by every browser pointed at this album.
+   ========================================================================== */
+
+async function loadUiState() {
+  try {
+    const data = await api("/api/ui-state");
+    const saved = data.state || {};
+    state.folder = typeof saved.folder === "string" ? saved.folder : "";
+    state.folderHistory = Array.isArray(saved.folder_history)
+      ? saved.folder_history.filter((x) => typeof x === "string")
+      : [];
+    state.importSource =
+      typeof saved.import_source === "string" ? saved.import_source : "";
+  } catch (e) {
+    // A brand-new database has no state yet; an empty one is a fine default.
+    console.warn("读取界面状态失败", e);
+  }
+}
+
+/** Persist one slice of UI state. Failure is never worth interrupting the user. */
+function saveUiState(patch) {
+  api("/api/ui-state", {
+    method: "POST",
+    body: JSON.stringify(patch),
+  }).catch((e) => console.warn("保存界面状态失败", e));
+}
+
 function rememberFolder(folder) {
   const clean = String(folder || "").trim();
   if (!clean) return;
@@ -91,11 +118,7 @@ function rememberFolder(folder) {
     clean,
     ...state.folderHistory.filter((item) => folderPathKey(item) !== folderPathKey(clean)),
   ].slice(0, 20);
-  try {
-    localStorage.setItem("photoFolderHistory", JSON.stringify(state.folderHistory));
-  } catch (e) {
-    // localStorage may be unavailable in some environments
-  }
+  saveUiState({ folder_history: state.folderHistory });
 }
 
 async function selectBestFolder() {
@@ -133,8 +156,9 @@ async function resumeScanJob() {
 }
 
 async function loadInitialFolder() {
+  await loadUiState();
   state.folder = await selectBestFolder();
-  localStorage.setItem("photoFolder", state.folder);
+  saveUiState({ folder: state.folder });
   $("folderInput").value = state.folder;
   if (state.folder) {
     await loadPhotos();
@@ -753,7 +777,7 @@ async function startScan() {
   }
   state.folder = folder;
   rememberFolder(folder);
-  localStorage.setItem("photoFolder", folder);
+  saveUiState({ folder });
   const force = $("forceScan").checked;
   try {
     const data = await api("/api/scan", {
@@ -776,7 +800,7 @@ async function startRebuildIndex() {
   }
   state.folder = folder;
   rememberFolder(folder);
-  localStorage.setItem("photoFolder", folder);
+  saveUiState({ folder });
   const force = $("forceScan").checked;
   try {
     const data = await api("/api/rebuild-index", {
@@ -1112,33 +1136,97 @@ async function navigatePreview(delta) {
   updatePreview({ skipImage: true });
 }
 
-async function toggleFolderHistory() {
+/* ==========================================================================
+   Folder history dropdown (the chevron inside the path field)
+   ========================================================================== */
+
+function folderHistoryOpen() {
+  return !$("folderHistory").classList.contains("hidden");
+}
+
+async function closeFolderHistory() {
   const panel = $("folderHistory");
-  if (!panel.classList.contains("hidden")) {
-    panel.classList.add("hidden");
+  const toggle = $("folderHistoryBtn");
+  if (toggle) {
+    toggle.classList.remove("open");
+    toggle.setAttribute("aria-expanded", "false");
+  }
+  if (panel.classList.contains("hidden")) return;
+  // Let the closing animation play out before the panel is taken out of flow.
+  panel.classList.add("closing");
+  await new Promise((resolve) => setTimeout(resolve, 160));
+  panel.classList.add("hidden");
+  panel.classList.remove("closing");
+}
+
+/** Merge "recently used" with "currently indexed" into one de-duplicated list. */
+function folderHistoryEntries(indexed) {
+  const entries = [];
+  const seen = new Set();
+  const push = (path, tag) => {
+    const clean = String(path || "").trim();
+    if (!clean) return;
+    const key = folderPathKey(clean);
+    if (seen.has(key)) {
+      const existing = entries.find((e) => e.key === key);
+      if (existing && tag) existing.tags.add(tag);
+      return;
+    }
+    seen.add(key);
+    entries.push({ key, path: clean, tags: new Set(tag ? [tag] : []) });
+  };
+  (indexed || []).forEach((f) => push(f, "已索引"));
+  state.folderHistory.forEach((f) => push(f, "最近"));
+  return entries;
+}
+
+async function toggleFolderHistory() {
+  if (folderHistoryOpen()) {
+    await closeFolderHistory();
     return;
   }
+  const panel = $("folderHistory");
+  let indexed = [];
   try {
     const data = await api("/api/folders");
-    if (!data.folders || !data.folders.length) {
-      panel.innerHTML = `<div class="folder-history-empty">${ICONS.history || ""} 暂无整理过的文件夹</div>`;
-    } else {
-      panel.innerHTML = data.folders.map((f) => `<div class="folder-history-item" data-path="${escapeHtml(f)}">${ICONS.folder || ""}<span>${escapeHtml(f)}</span></div>`).join("");
-      panel.querySelectorAll(".folder-history-item").forEach((el) => {
-        el.addEventListener("click", () => {
-          state.folder = el.dataset.path;
-          rememberFolder(state.folder);
-          localStorage.setItem("photoFolder", state.folder);
-          $("folderInput").value = state.folder;
-          panel.classList.add("hidden");
-          loadPhotos();
-        });
-      });
-    }
-    panel.classList.remove("hidden");
+    indexed = data.folders || [];
   } catch (e) {
     showToast("读取文件夹列表失败：" + e.message, "error");
   }
+  const entries = folderHistoryEntries(indexed);
+  if (!entries.length) {
+    panel.innerHTML = `<div class="folder-history-empty">${ICONS.history || ""} 还没有整理过的文件夹</div>`;
+  } else {
+    panel.innerHTML = entries
+      .map((entry) => {
+        const tags = [...entry.tags]
+          .map((t) => `<span class="history-tag">${escapeHtml(t)}</span>`)
+          .join("");
+        return `<div class="folder-history-item" role="option" data-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">${ICONS.folder || ""}<span class="history-name">${escapeHtml(entry.path)}</span>${tags}</div>`;
+      })
+      .join("");
+    panel.querySelectorAll(".folder-history-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        selectFolder(el.dataset.path);
+        closeFolderHistory();
+      });
+    });
+  }
+  panel.classList.remove("closing");
+  panel.classList.remove("hidden");
+  $("folderHistoryBtn").classList.add("open");
+  $("folderHistoryBtn").setAttribute("aria-expanded", "true");
+}
+
+/** Switch the album to ``folder`` and remember the choice server-side. */
+function selectFolder(folder) {
+  const clean = String(folder || "").trim();
+  if (!clean) return;
+  state.folder = clean;
+  rememberFolder(clean);
+  saveUiState({ folder: clean });
+  $("folderInput").value = clean;
+  loadPhotos();
 }
 
 async function openFolder() {
@@ -1687,9 +1775,8 @@ async function removeCurrentFolder() {
     state.photos = [];
     state.selected.clear();
     state.photoSignature = "";
-    localStorage.removeItem("photoFolder");
     state.folder = await selectBestFolder();
-    localStorage.setItem("photoFolder", state.folder);
+    saveUiState({ folder: state.folder });
     $("folderInput").value = state.folder;
     await loadPhotos();
     updateTrashActions();
@@ -1954,8 +2041,9 @@ async function openImportDialog() {
     return;
   }
   $("importTarget").value = state.folder;
-  const remembered = localStorage.getItem("photoImportSource");
-  if (remembered && !$("importSource").value) $("importSource").value = remembered;
+  if (state.importSource && !$("importSource").value) {
+    $("importSource").value = state.importSource;
+  }
   setImportPreview("");
   $("importModal").classList.remove("hidden");
   // Opening the dialog is the moment the card is expected to be in the reader,
@@ -1973,11 +2061,8 @@ async function pickImportSource() {
 }
 
 function rememberImportSource(path) {
-  try {
-    localStorage.setItem("photoImportSource", path);
-  } catch (e) {
-    // localStorage may be unavailable
-  }
+  state.importSource = String(path || "").trim();
+  saveUiState({ import_source: state.importSource });
 }
 
 /** Hand an arbitrary folder to the OS file manager. */
@@ -2353,13 +2438,12 @@ function init() {
   renderAllIcons();
 
   setSelectValue($("statusFilter"), "analyzed");
-  $("folderInput").value = state.folder;
   $("folderInput").addEventListener("change", () => {
     const val = $("folderInput").value.trim();
     if (val) {
       state.folder = val;
       rememberFolder(val);
-      localStorage.setItem("photoFolder", val);
+      saveUiState({ folder: val });
       loadPhotos();
     }
   });
@@ -2381,13 +2465,17 @@ function init() {
   $("cardSyncRunBtn").addEventListener("click", runCardSync);
   $("cardSyncRefreshBtn").addEventListener("click", reloadCardPreview);
   $("cardSyncForgetBtn").addEventListener("click", forgetCurrentCard);
+  $("cardSyncCancelBtn").addEventListener("click", () => closeModal("cardSyncModal"));
   $("cardSyncOpenBtn").addEventListener("click", () => {
     const source = state.cardPreview ? state.cardPreview.source : state.card && state.card.source;
     if (source) openFolderByPath(source);
   });
   $("browseBtn").addEventListener("click", openDirBrowser);
   $("openFolderBtn").addEventListener("click", openFolder);
-  $("historyBtn").addEventListener("click", toggleFolderHistory);
+  $("folderHistoryBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFolderHistory();
+  });
   $("settingsBtn").addEventListener("click", openSettings);
   $("searchBtn").addEventListener("click", loadPhotos);
   $("resetFiltersBtn").addEventListener("click", resetFilters);
@@ -2492,7 +2580,7 @@ function init() {
     }
     state.folder = state.currentDirPath;
     rememberFolder(state.folder);
-    localStorage.setItem("photoFolder", state.folder);
+    saveUiState({ folder: state.folder });
     $("folderInput").value = state.folder;
     closeModal("dirModal");
     loadPhotos();
@@ -2534,8 +2622,11 @@ function init() {
     });
   });
   document.addEventListener("click", (e) => {
-    if (!e.target.closest("#historyBtn") && !e.target.closest("#folderHistory")) {
-      $("folderHistory").classList.add("hidden");
+    if (
+      !e.target.closest("#folderHistoryBtn") &&
+      !e.target.closest("#folderHistory")
+    ) {
+      closeFolderHistory();
     }
   });
 

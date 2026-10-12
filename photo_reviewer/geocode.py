@@ -74,16 +74,6 @@ def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
     return lat + d_lat, lon + d_lon
 
 
-def gcj02_to_wgs84(lat: float, lon: float) -> tuple[float, float]:
-    """Convert GCJ-02 coordinates to WGS-84 coordinates."""
-    if _out_of_china(lat, lon):
-        return lat, lon
-    g_lat, g_lon = wgs84_to_gcj02(lat, lon)
-    d_lat = g_lat - lat
-    d_lon = g_lon - lon
-    return lat - d_lat, lon - d_lon
-
-
 def _get_json(
     url: str,
     params: dict,

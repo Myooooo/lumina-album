@@ -11,7 +11,6 @@ they govern how the process boots and stay under the operator's control.
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,22 +55,6 @@ PERSISTED_FIELDS = (
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
 # must never be able to move the cache/trash directories or rebind the server.
 EDITABLE_FIELDS = frozenset(PERSISTED_FIELDS) - {"trash_dir_name", "cache_dir_name"}
-
-# Persisted fields stored as integers (everything else except
-# ``geocoding_interval`` is a string or a float).
-_INT_FIELDS = frozenset(
-    {
-        "proxy_max_edge",
-        "gallery_thumb_size",
-        "proxy_quality",
-        "thumb_quality",
-        "scan_concurrency",
-        "index_concurrency",
-        "request_timeout",
-        "model_retries",
-        "geocoding_retries",
-    }
-)
 
 
 @dataclass
@@ -206,52 +189,11 @@ class Config:
         ".fff",
     )
 
-    # Runtime-computed settings path (legacy JSON import only, see ``_load``).
-    settings_path: str = ""
-
     def __post_init__(self) -> None:
         data = Path(self.data_dir)
         data.mkdir(parents=True, exist_ok=True)
         if not self.db_path:
             self.db_path = str(data / "library.db")
-        self.settings_path = str(data / "settings.json")
-        self._load()
-
-    def _load(self) -> None:
-        """Import a legacy ``settings.json`` once, for backwards compatibility.
-
-        Settings have been stored in the SQLite ``settings`` table since the
-        web UI gained its settings panel; ``Config.save`` is no longer called
-        anywhere. This reader is kept so that a hand-written or very old
-        ``settings.json`` still gets picked up on the first start.
-
-        Import-time defaults are frozen into the class, so ``host``/``port``/
-        ``debug`` are deliberately not importable from here: they must stay
-        under the operator's control via the environment.
-        """
-        if not self.settings_path or not os.path.exists(self.settings_path):
-            return
-        try:
-            with open(self.settings_path, "r", encoding="utf-8") as fh:
-                saved = json.load(fh)
-        except (OSError, ValueError):
-            return
-        if not isinstance(saved, dict):
-            return
-        for key in PERSISTED_FIELDS:
-            if key in saved and hasattr(self, key):
-                value = saved[key]
-                if key in _INT_FIELDS:
-                    try:
-                        value = int(value)
-                    except (TypeError, ValueError):
-                        continue
-                elif key == "geocoding_interval":
-                    try:
-                        value = float(value)
-                    except (TypeError, ValueError):
-                        continue
-                setattr(self, key, value)
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -16,7 +16,6 @@ from typing import Any
 from flask import Flask, jsonify, request, send_file
 
 from .api_client import (
-    DEFAULT_STYLE_PROMPT,
     PROMPT_PRESETS,
     SemanticSearchError,
     semantic_search,
@@ -26,7 +25,6 @@ from .cache import (
     cache_dir_for_folder,
     cleanup_folder_cache,
     ensure_cache_dirs,
-    load_scan_results_from_cache,
 )
 from .cards import (
     CardError,
@@ -45,7 +43,7 @@ from .db import Database, sort_photos
 from .exif import extract_exif
 from .geocode import reverse_geocode
 from .importer import ImportError_
-from .paths import canonical_folder, canonical_path, same_path
+from .paths import canonical_folder, canonical_path, is_in_named_dir, same_path
 from .scanner import (
     JOBS,
     RAW_EXTENSIONS,
@@ -57,6 +55,9 @@ from .sync import build_plan, start_import
 from .thumbnailer import make_proxy
 
 logger = logging.getLogger(__name__)
+
+#: How many recently used folders the UI state keeps.
+UI_STATE_HISTORY_LIMIT = 20
 
 #: Methods that mutate state and therefore require a same-origin request.
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -305,6 +306,26 @@ def _remove_photo_cache(photo: dict[str, Any]) -> None:
                 os.remove(path)
             except OSError:
                 logger.debug("photo cache file is already gone: %s", path)
+
+
+def _trash_only(path: str, cfg: Config) -> bool:
+    """True when ``path`` sits inside one of the app's own trash directories.
+
+    Nothing outside a trash directory is ever erased outright. The two routes
+    that permanently remove files ("彻底移除" and "清空回收站") only ever act on
+    photos the user already moved to the trash, so the file they are about to
+    delete must live under a ``trash_dir_name`` directory. Checking that here
+    means a stale row - one whose ``path`` or ``original_path`` still points at a
+    live photo because of an interrupted move - is refused instead of deleting an
+    original the user never confirmed.
+    """
+    if not path:
+        return False
+    if not os.path.exists(path):
+        # Already gone: there is nothing to protect, and the row is still
+        # removed by the caller.
+        return True
+    return is_in_named_dir(path, cfg.trash_dir_name)
 
 
 def _card_files(photo: dict[str, Any], raw_path: str | None) -> list[dict[str, Any]]:
@@ -569,15 +590,6 @@ def _prune_legacy_settings(database: Database) -> int:
     return len(stale)
 
 
-def _load_legacy_cache_safely(
-    folder: str, database: Database, cache_dir_name: str
-) -> None:
-    try:
-        load_scan_results_from_cache(folder, database, cache_dir_name)
-    except (OSError, ValueError, sqlite3.Error):
-        logger.warning("could not import legacy cache for %s", folder, exc_info=True)
-
-
 def create_app(config: Config | None = None, db: Database | None = None) -> Flask:
     from .config import CONFIG
     from .db import get_db
@@ -625,6 +637,61 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/config")
     def api_config():
         return jsonify(cfg.to_dict())
+
+    @app.get("/api/ui-state")
+    def api_ui_state():
+        """Return the browser-independent UI state.
+
+        The folder history, the open album and the remembered card path used to
+        live in ``localStorage``, so clearing the browser's site data threw the
+        album's memory away. They are kept in the database instead, next to the
+        photos they describe.
+        """
+        return jsonify({"state": database.get_ui_state()})
+
+    @app.post("/api/ui-state")
+    def api_save_ui_state():
+        """Merge a partial UI state into the stored one.
+
+        Only known, bounded keys are accepted: this endpoint is writable from the
+        browser, so it must not become a way to stuff arbitrary rows into the
+        database. Values are validated into a staging dict first, so a rejected
+        field cannot leave half an update behind.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "请求内容不合法"}), 400
+        staged: dict[str, Any] = {}
+
+        if "folder" in data:
+            staged["folder"] = str(data["folder"] or "").strip()[:512]
+
+        if "folder_history" in data:
+            raw = data["folder_history"]
+            if not isinstance(raw, list):
+                return jsonify({"error": "folder_history 必须是数组"}), 400
+            history = []
+            seen = set()
+            for item in raw:
+                text = str(item or "").strip()[:512]
+                if not text:
+                    continue
+                key = os.path.normcase(text.rstrip("\\/"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                history.append(text)
+                if len(history) >= UI_STATE_HISTORY_LIMIT:
+                    break
+            staged["folder_history"] = history
+
+        if "import_source" in data:
+            staged["import_source"] = str(data["import_source"] or "").strip()[:512]
+
+        if not staged:
+            return jsonify({"error": "没有可保存的字段"}), 400
+        database.save_ui_state(staged)
+        return jsonify({"state": database.get_ui_state()})
 
     @app.post("/api/config")
     def api_update_config():
@@ -700,16 +767,18 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         _save_settings_to_db(database, cfg)
         return jsonify(cfg.to_dict())
 
-    @app.get("/api/prompt-template")
-    def api_prompt_template():
-        return jsonify({"template": DEFAULT_STYLE_PROMPT})
-
     @app.get("/api/prompt-presets")
     def api_prompt_presets():
         return jsonify({"presets": PROMPT_PRESETS, "default": "playful"})
 
     @app.get("/api/dirs")
     def api_dirs():
+        """List the sub-directories of one path, for the folder browser.
+
+        The app's own directories are filtered out: ``.photo-review-cache`` and
+        ``.photo-trash`` are hidden bookkeeping, and offering them as photo
+        folders invites a user to index or delete their own cache by hand.
+        """
         path = request.args.get("path", "").strip()
         if not path:
             path = str(Path.home())
@@ -720,8 +789,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             entries = sorted(os.listdir(path), key=str.lower)
         except OSError as exc:
             return jsonify({"error": str(exc)}), 500
+        hidden = {cfg.cache_dir_name, cfg.trash_dir_name}
         dirs = []
         for name in entries:
+            if name in hidden:
+                continue
             full = os.path.join(path, name)
             if os.path.isdir(full) and not os.path.islink(full):
                 dirs.append({"name": name, "path": full})
@@ -815,7 +887,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             folder = _normalize_folder(folder)
         except NotADirectoryError as exc:
             return jsonify({"error": str(exc)}), 400
-        _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         for existing in JOBS.list():
             if existing.folder == folder and existing.status == "running":
                 return jsonify(
@@ -953,8 +1024,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/years")
     def api_years():
         folder = request.args.get("folder", "").strip() or None
-        if folder:
-            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         return jsonify({"years": database.capture_years(folder)})
 
     @app.get("/api/folders")
@@ -1015,8 +1084,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             return jsonify({"error": "limit/offset 参数不合法"}), 400
         requested_limit = max(1, requested_limit)
         fetch_limit = requested_limit + 1
-        if folder:
-            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         photos = database.list_photos(
             folder=folder,
             status=status,
@@ -1086,9 +1153,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             )
         except (TypeError, ValueError):
             return jsonify({"error": "score 参数不合法"}), 400
-        if folder:
-            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
-
         all_candidates = database.list_photos(
             folder=folder,
             status=status,
@@ -1144,8 +1208,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/stats")
     def api_stats():
         folder = request.args.get("folder", "").strip() or None
-        if folder:
-            _load_legacy_cache_safely(folder, database, cfg.cache_dir_name)
         return jsonify(database.stats(folder))
 
     @app.get("/api/photo/<int:photo_id>")
@@ -1399,6 +1461,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             path = photo.get("path") or photo.get("original_path")
             file_removed = False
             if path and os.path.exists(path):
+                if not _trash_only(path, cfg):
+                    errors.append(
+                        {
+                            "id": pid,
+                            "error": "该记录指向的不是回收站文件，已跳过以免误删原图",
+                        }
+                    )
+                    continue
                 try:
                     os.remove(path)
                     file_removed = True
@@ -1409,7 +1479,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             # photo must not leave it behind.
             if delete_raw:
                 sibling = _trashed_raw_candidate(photo)
-                if sibling:
+                if sibling and _trash_only(sibling, cfg):
                     try:
                         os.remove(sibling)
                         raw_removed += 1
@@ -1555,6 +1625,18 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             for candidate in candidates:
                 if not candidate or not os.path.exists(candidate):
                     continue
+                # Only files the user already parked in the trash may be erased;
+                # anything else means the row is stale and the original is still
+                # live, which emptying the bin must never touch.
+                if not _trash_only(candidate, cfg):
+                    errors.append(
+                        {
+                            "id": photo["id"],
+                            "error": "该记录指向的不是回收站文件，已跳过以免误删原图",
+                        }
+                    )
+                    failed = True
+                    break
                 try:
                     os.remove(candidate)
                     if delete_raw and _is_raw_file(candidate):

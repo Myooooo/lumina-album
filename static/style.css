@@ -9,7 +9,6 @@
   --bg-deep: #efe8dc;
   --panel: rgba(255, 253, 249, 0.88);
   --panel-solid: #fffefb;
-  --panel-card: #fdfbf7;
   
   /* Ink & Typography Colors */
   --text: #2c241d;
@@ -25,13 +24,9 @@
   
   /* Accent & Status Tones */
   --heart: #d9534f;
-  --heart-bg: rgba(217, 83, 79, 0.1);
   --danger: #c25953;
-  --danger-bg: rgba(194, 89, 83, 0.12);
   --keep: #608d6d;
-  --keep-bg: rgba(96, 141, 109, 0.12);
   --maybe: #c78d46;
-  --maybe-bg: rgba(199, 141, 70, 0.12);
   
   /* Four-dimensional Memory Tones */
   --dim-technical: #5b7c99;
@@ -44,10 +39,8 @@
   /* Borders & Shadows */
   --border: rgba(130, 100, 70, 0.13);
   --border-strong: rgba(130, 100, 70, 0.22);
-  --border-light: rgba(130, 100, 70, 0.08);
   --radius-sm: 8px;
   --radius-md: 14px;
-  --radius-lg: 20px;
   --radius-xl: 28px;
   
   --shadow-soft: 0 4px 20px rgba(60, 40, 20, 0.05), 0 1px 3px rgba(60, 40, 20, 0.03);
@@ -182,7 +175,7 @@ svg {
 .folder-row input[type="text"],
 .folder-row input:not([type="checkbox"]) {
   width: 100%;
-  padding: 9px 14px 9px 36px;
+  padding: 9px 40px 9px 36px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.75);
@@ -192,6 +185,36 @@ svg {
   outline: none;
   transition: all .2s ease;
 }
+
+/* The folder-history toggle lives inside the field, at its right edge. */
+.folder-history-toggle {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color .18s ease, color .18s ease;
+}
+
+.folder-history-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform .24s cubic-bezier(.4, 0, .2, 1);
+}
+
+.folder-history-toggle:hover { background: var(--primary-light); color: var(--primary-dark); }
+.folder-history-toggle.open { color: var(--primary-dark); }
+.folder-history-toggle.open svg { transform: rotate(180deg); }
 
 .folder-row input:focus {
   border-color: var(--primary);
@@ -1792,13 +1815,15 @@ select {
 .dir-actions { text-align: right; margin-top: 14px; }
 
 /* ---------- Folder History Dropdown ---------- */
+/* Anchored to the input wrapper, so it drops out of the field's right edge. */
 .folder-history {
   position: absolute;
-  top: 70px;
-  left: 28px;
-  right: 28px;
-  z-index: 40;
-  max-height: 280px;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 320px;
+  max-width: min(620px, 84vw);
+  z-index: 45;
+  max-height: 300px;
   overflow: auto;
   background: rgba(255, 254, 251, 0.98);
   backdrop-filter: blur(20px);
@@ -1807,7 +1832,25 @@ select {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-modal);
   padding: 6px;
+  transform-origin: top right;
+  animation: historyDrop .22s cubic-bezier(.34, 1.3, .64, 1) both;
 }
+
+.folder-history.closing {
+  animation: historyLift .16s ease-in both;
+  pointer-events: none;
+}
+
+@keyframes historyDrop {
+  from { opacity: 0; transform: translateY(-10px) scaleY(.9); }
+  to   { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+
+@keyframes historyLift {
+  from { opacity: 1; transform: translateY(0) scaleY(1); }
+  to   { opacity: 0; transform: translateY(-8px) scaleY(.94); }
+}
+
 .folder-history-item {
   padding: 9px 14px;
   border-radius: var(--radius-sm);
@@ -1821,8 +1864,35 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  animation: historyItemIn .24s ease both;
 }
+
+.folder-history-item:nth-child(1) { animation-delay: .01s; }
+.folder-history-item:nth-child(2) { animation-delay: .03s; }
+.folder-history-item:nth-child(3) { animation-delay: .05s; }
+.folder-history-item:nth-child(4) { animation-delay: .07s; }
+.folder-history-item:nth-child(5) { animation-delay: .09s; }
+.folder-history-item:nth-child(n+6) { animation-delay: .11s; }
+
+@keyframes historyItemIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
 .folder-history-item svg { width: 14px; height: 14px; color: var(--muted); }
+.folder-history-item .history-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-history-item .history-tag {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  border-radius: 99px;
+  padding: 1px 8px;
+  flex-shrink: 0;
+}
 .folder-history-item:hover {
   background: var(--primary-light);
   color: var(--primary-dark);

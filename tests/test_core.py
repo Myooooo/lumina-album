@@ -23,8 +23,8 @@ from photo_reviewer.api_client import (
     analyze_image,
 )
 from photo_reviewer.cache import (
+    cache_dir_for_folder,
     cleanup_folder_cache,
-    load_scan_results_from_cache,
 )
 from photo_reviewer.cards import (
     KIND_DELETE,
@@ -56,7 +56,7 @@ from photo_reviewer.importer import (
     plan_import,
     run_import,
 )
-from photo_reviewer.paths import canonical_path
+from photo_reviewer.paths import canonical_path, is_in_named_dir
 from photo_reviewer.scanner import (
     JOBS,
     discover_images,
@@ -1675,47 +1675,6 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(result["photos_affected"], 1)
         self.assertTrue(os.path.exists(os.path.join(cache, "notes.txt")))
 
-    def test_legacy_cache_import_skips_deleted_and_analyzed(self) -> None:
-        cache = os.path.join(self.folder, ".cache")
-        os.makedirs(cache)
-        payload = {
-            "photos": [
-                {"path": os.path.join(self.folder, "new.jpg"), "status": "analyzed"},
-                {"path": os.path.join(self.folder, "gone.jpg"), "status": "deleted"},
-                {"path": os.path.join(self.folder, "done.jpg"), "status": "analyzed"},
-            ]
-        }
-        cache_file = os.path.join(cache, "scan_results.json")
-        Path(cache_file).write_text(json.dumps(payload), encoding="utf-8")
-        self.db.upsert_photo(
-            {
-                "path": os.path.join(self.folder, "gone.jpg"),
-                "folder": self.folder,
-                "filename": "gone.jpg",
-                "status": "deleted",
-            }
-        )
-        self.db.upsert_photo(
-            {
-                "path": os.path.join(self.folder, "done.jpg"),
-                "folder": self.folder,
-                "filename": "done.jpg",
-                "status": "analyzed",
-                "score": 9.0,
-            }
-        )
-
-        imported = load_scan_results_from_cache(self.folder, self.db, ".cache")
-        self.assertEqual(imported, 1)
-        self.assertIsNotNone(
-            self.db.get_photo_by_path(os.path.join(self.folder, "new.jpg"))
-        )
-        self.assertEqual(
-            self.db.get_photo_by_path(os.path.join(self.folder, "done.jpg"))["score"],
-            9.0,
-        )
-        self.assertFalse(os.path.exists(cache_file))
-
 
 class PathAndSortTests(unittest.TestCase):
     def test_canonical_path_normalises_case(self) -> None:
@@ -2820,6 +2779,202 @@ class CardApiTests(unittest.TestCase):
         self.assertEqual(len(entry), 1)
         self.assertEqual(entry[0]["source"], canonical_path(source))
         self.assertTrue(entry[0]["connected"])
+
+
+class UiStateTests(unittest.TestCase):
+    """The folder history and the open album live in the database.
+
+    They used to live in ``localStorage``, so clearing the browser's site data
+    threw away the album's memory. These tests pin the behaviour that replaced
+    it: the state survives a fresh client, and the endpoint cannot be used to
+    write arbitrary rows.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_state_starts_empty(self) -> None:
+        body = self.client.get("/api/ui-state").get_json()
+        self.assertEqual(body["state"], {})
+
+    def test_folder_and_history_round_trip(self) -> None:
+        resp = self.client.post(
+            "/api/ui-state",
+            json={"folder": self.folder, "folder_history": [self.folder, "D:\\其他"]},
+        )
+        self.assertEqual(resp.status_code, 200)
+        # A brand-new client (a cleared browser) sees the same state.
+        fresh = self.app.test_client()
+        state = fresh.get("/api/ui-state").get_json()["state"]
+        self.assertEqual(state["folder"], self.folder)
+        self.assertEqual(state["folder_history"], [self.folder, "D:\\其他"])
+
+    def test_a_partial_update_keeps_the_other_keys(self) -> None:
+        self.client.post("/api/ui-state", json={"folder": self.folder})
+        self.client.post("/api/ui-state", json={"import_source": "E:\\DCIM"})
+        state = self.client.get("/api/ui-state").get_json()["state"]
+        self.assertEqual(state["folder"], self.folder)
+        self.assertEqual(state["import_source"], "E:\\DCIM")
+
+    def test_the_history_is_deduplicated_and_capped(self) -> None:
+        history = [f"D:\\相册\\{i}" for i in range(40)]
+        history.insert(3, "d:\\相册\\0")  # same path, different case
+        self.client.post("/api/ui-state", json={"folder_history": history})
+        stored = self.client.get("/api/ui-state").get_json()["state"]["folder_history"]
+        self.assertEqual(len(stored), 20)
+        self.assertEqual(len({s.lower() for s in stored}), 20)
+
+    def test_an_unknown_key_is_rejected(self) -> None:
+        resp = self.client.post("/api/ui-state", json={"evil": "payload"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.client.get("/api/ui-state").get_json()["state"], {})
+        self.assertEqual(self.db.get_settings(), {})
+
+    def test_a_malformed_history_is_rejected(self) -> None:
+        resp = self.client.post("/api/ui-state", json={"folder_history": "D:\\相册"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_the_directory_browser_hides_the_apps_own_folders(self) -> None:
+        """Cache and trash directories are bookkeeping, not photo folders."""
+        for name in (self.cfg.cache_dir_name, self.cfg.trash_dir_name, "旅行"):
+            os.makedirs(os.path.join(self.folder, name))
+        body = self.client.get(f"/api/dirs?path={self.folder}").get_json()
+        names = [d["name"] for d in body["directories"]]
+        self.assertEqual(names, ["旅行"])
+
+
+class DeletionSafetyTests(unittest.TestCase):
+    """Nothing outside a trash directory is ever erased.
+
+    Both routes that remove files for good - "彻底移除" and "清空回收站" - must
+    only ever act on photos the user already moved to the trash. A stale row
+    whose path still points at a live photo is the case that matters: an
+    interrupted move, or a hand-edited database, must not turn a confirmation
+    dialog into the loss of an original.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _photo(self, name="keep.jpg", *, status="deleted", folder=None):
+        path = os.path.join(self.folder, name)
+        Image.new("RGB", (24, 18), (120, 90, 60)).save(path, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "original_path": path,
+                "folder": folder or self.folder,
+                "filename": name,
+                "status": status,
+            }
+        )
+        return self.db.get_photo_by_path(path)["id"], path
+
+    def test_permanent_delete_refuses_a_path_outside_the_trash(self) -> None:
+        photo_id, live_path = self._photo()
+        resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
+        body = resp.get_json()
+        self.assertEqual(body["purged"], [])
+        self.assertTrue(body["errors"])
+        self.assertTrue(os.path.exists(live_path), "the original was deleted!")
+        # The row is kept as well, so the album does not lose track of the file.
+        self.assertIsNotNone(self.db.get_photo(photo_id))
+
+    def test_permanent_delete_still_removes_a_trashed_file(self) -> None:
+        photo_id, _live = self._photo(status="analyzed")
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        trashed = self.db.get_photo(photo_id)["path"]
+        self.assertIn(self.cfg.trash_dir_name, trashed)
+        resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
+        self.assertEqual(len(resp.get_json()["purged"]), 1)
+        self.assertFalse(os.path.exists(trashed))
+        self.assertIsNone(self.db.get_photo(photo_id))
+
+    def test_emptying_the_bin_refuses_a_live_photo(self) -> None:
+        photo_id, live_path = self._photo("stale.jpg")
+        resp = self.client.post("/api/trash/empty", json={})
+        body = resp.get_json()
+        self.assertEqual(body["deleted"], 0)
+        self.assertTrue(body["errors"], "the refusal must be reported, not silent")
+        self.assertTrue(os.path.exists(live_path), "the original was deleted!")
+        self.assertIsNotNone(self.db.get_photo(photo_id))
+
+    def test_the_trash_check_rejects_a_lookalike_directory(self) -> None:
+        """``.photo-trash-backup`` is not the trash, however similar it looks."""
+        lookalike = os.path.join(self.folder, self.cfg.trash_dir_name + "-backup")
+        os.makedirs(lookalike)
+        photo_id, live_path = self._photo("x.jpg", folder=self.folder)
+        self.db.mark_deleted([photo_id], {photo_id: os.path.join(lookalike, "x.jpg")})
+        if not os.path.exists(live_path):
+            Image.new("RGB", (10, 10)).save(live_path, "JPEG")
+        shutil.move(live_path, os.path.join(lookalike, "x.jpg"))
+        moved = os.path.join(lookalike, "x.jpg")
+        resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
+        self.assertEqual(resp.get_json()["purged"], [])
+        self.assertTrue(os.path.exists(moved))
+
+    def test_a_cache_cleanup_cannot_escape_its_directory(self) -> None:
+        """A cache directory name of "." would point at the photos themselves."""
+        with self.assertRaises(ValueError):
+            cache_dir_for_folder(self.folder, ".")
+        with self.assertRaises(ValueError):
+            cache_dir_for_folder(self.folder, "")
+        with self.assertRaises(ValueError):
+            cache_dir_for_folder(self.folder, "../elsewhere")
+        # The normal names still resolve as before.
+        self.assertEqual(
+            cache_dir_for_folder(self.folder, ".photo-review-cache"),
+            Path(self.folder) / ".photo-review-cache",
+        )
+
+    def test_a_photo_is_never_indexed_from_a_trash_or_cache_directory(self) -> None:
+        """Scanning cannot pick a trashed photo up and re-admit it as a photo."""
+        trash = os.path.join(self.folder, self.cfg.trash_dir_name, "20260101")
+        os.makedirs(trash)
+        Image.new("RGB", (16, 16)).save(os.path.join(trash, "old.jpg"), "JPEG")
+        Image.new("RGB", (16, 16)).save(os.path.join(self.folder, "new.jpg"), "JPEG")
+        found = [
+            os.path.basename(p)
+            for p in discover_images(self.folder, skip_dirs=[self.cfg.trash_dir_name])
+        ]
+        self.assertEqual(found, ["new.jpg"])
+
+    def test_is_in_named_dir_only_looks_at_ancestors(self) -> None:
+        inside = os.path.join(self.folder, self.cfg.trash_dir_name, "20260101", "a.jpg")
+        self.assertTrue(is_in_named_dir(inside, self.cfg.trash_dir_name))
+        self.assertFalse(is_in_named_dir(os.path.join(self.folder, "a.jpg"), self.cfg.trash_dir_name))
+        # A file *named* like the trash directory is not inside it.
+        self.assertFalse(
+            is_in_named_dir(
+                os.path.join(self.folder, self.cfg.trash_dir_name), self.cfg.trash_dir_name
+            )
+        )
+        self.assertFalse(is_in_named_dir(None, self.cfg.trash_dir_name))
+        self.assertFalse(is_in_named_dir(inside, ""))
 
 
 if __name__ == "__main__":

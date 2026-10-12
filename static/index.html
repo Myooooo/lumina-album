@@ -15,19 +15,22 @@
       <div class="folder-input-wrapper">
         <span class="input-icon" id="folderInputIcon"></span>
         <input id="folderInput" type="text" placeholder="选择存放回忆的文件夹，例如 D:\Photos" />
+        <button id="folderHistoryBtn" class="folder-history-toggle" type="button"
+                title="整理过的文件夹" aria-haspopup="listbox" aria-expanded="false"
+                aria-controls="folderHistory"><span class="btn-icon" data-icon="chevronDown"></span></button>
+        <div id="folderHistory" class="folder-history hidden" role="listbox" aria-label="整理过的文件夹"></div>
       </div>
       <button id="browseBtn" class="btn" title="浏览文件夹"><span class="btn-icon" data-icon="folder"></span>浏览</button>
       <button id="openFolderBtn" class="btn icon-only" title="在文件管理器中打开"><span class="btn-icon" data-icon="folderOpen"></span></button>
-      <button id="historyBtn" class="btn icon-only" title="整理过的文件夹"><span class="btn-icon" data-icon="history"></span></button>
       <button id="scanBtn" class="btn primary"><span class="btn-icon" data-icon="sparkles"></span>开始整理</button>
       <button id="rebuildIndexBtn" class="btn" title="同步相册"><span class="btn-icon" data-icon="sync"></span>同步相册</button>
+      <label class="force-label"><input type="checkbox" id="forceScan" /> 重新整理全部</label>
       <button id="importBtn" class="btn" title="从 SD 卡导入"><span class="btn-icon" data-icon="import"></span>从 SD 卡导入</button>
       <button id="cardStatusBtn" class="card-status hidden" title="相机相册 / SD 卡状态">
         <span class="btn-icon" id="cardStatusIcon" data-icon="sdCard"></span>
         <span id="cardStatusText">SD 卡已连接</span>
         <span id="cardPendingDot" class="card-pending-dot hidden">0</span>
       </button>
-      <label class="force-label"><input type="checkbox" id="forceScan" /> 重新整理全部</label>
       <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
     <div id="cardBanner" class="card-banner hidden">
@@ -36,7 +39,6 @@
       <button id="cardBannerSyncBtn" class="btn small primary">同步到 SD 卡</button>
       <button id="cardBannerHideBtn" class="btn small icon-only" title="稍后再说"><span class="btn-icon" data-icon="close"></span></button>
     </div>
-    <div id="folderHistory" class="folder-history hidden"></div>
     <div id="scanProgress" class="scan-progress hidden">
       <div class="progress-text" id="progressText">准备中…</div>
       <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>

@@ -47,7 +47,6 @@ RAW_POLICIES = (RAW_POLICY_IMAGE_FIRST, RAW_POLICY_BOTH, RAW_POLICY_RAW_ONLY)
 AFTER_COPY_ONLY = "copy"
 AFTER_INDEX = "index"
 AFTER_ORGANIZE = "organize"
-AFTER_CHOICES = (AFTER_COPY_ONLY, AFTER_INDEX, AFTER_ORGANIZE)
 
 #: Upper bound on how many rows a single response describes in detail.
 MAX_REPORTED_ITEMS = 200
