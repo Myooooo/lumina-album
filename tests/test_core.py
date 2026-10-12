@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -24,6 +25,25 @@ from photo_reviewer.api_client import (
 from photo_reviewer.cache import (
     cleanup_folder_cache,
     load_scan_results_from_cache,
+)
+from photo_reviewer.cards import (
+    KIND_DELETE,
+    STATE_APPLIED,
+    STATE_ERASE,
+    STATE_PENDING,
+    CardError,
+    apply_pending,
+    card_path_for,
+    card_status,
+    delete_from_card,
+    find_on_card,
+    pending_preview,
+    purge_for_photo,
+    record_pairing,
+    relative_to_album,
+    resolve_card,
+    restore_to_card,
+    volume_id,
 )
 from photo_reviewer.config import PERSISTED_FIELDS, Config
 from photo_reviewer.db import Database, parse_capture_datetime, sort_photos
@@ -2124,6 +2144,682 @@ class ImportApiTests(unittest.TestCase):
         self.assertEqual(
             self.client.post("/api/open-file", json={"photo_id": 999}).status_code, 404
         )
+
+
+class CardSyncTests(unittest.TestCase):
+    """Camera-album pairings and the queued card work.
+
+    The "card" is an ordinary temporary directory: as far as this module is
+    concerned a card is any path recorded as the source of an album, and using a
+    real directory keeps the tests offline and hermetically sealed.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.card = os.path.join(self.tmp.name, "card")
+        self.album = os.path.join(self.tmp.name, "album")
+        os.makedirs(os.path.join(self.card, "DCIM", "100D3500"))
+        os.makedirs(os.path.join(self.album, "DCIM", "100D3500"))
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _pair(self, stem="DSC_0001", *, on_card=True, in_album=True) -> tuple[str, str]:
+        """Create a same-named jpg+raw on both sides and return their paths."""
+        album_dir = os.path.join(self.album, "DCIM", "100D3500")
+        card_dir = os.path.join(self.card, "DCIM", "100D3500")
+        os.makedirs(album_dir, exist_ok=True)
+        os.makedirs(card_dir, exist_ok=True)
+        image = os.path.join(album_dir, f"{stem}.JPG")
+        raw = os.path.join(album_dir, f"{stem}.NEF")
+        if in_album:
+            Image.new("RGB", (20, 15), (120, 90, 60)).save(image, "JPEG")
+            Path(raw).write_bytes(b"raw-payload" * 8)
+        if on_card:
+            Image.new("RGB", (20, 15), (60, 90, 120)).save(
+                os.path.join(card_dir, f"{stem}.JPG"), "JPEG"
+            )
+            Path(os.path.join(card_dir, f"{stem}.NEF")).write_bytes(
+                b"card-raw-payload" * 8
+            )
+        return image, raw
+
+    def _register(self) -> dict:
+        """Record the pairing, the way a finished import does."""
+        return record_pairing(self.db, self.album, self.card)
+
+    def _target(self):
+        return resolve_card(self.album, self.card, volume_id(self.card))
+
+    def _track(self, image, raw) -> int:
+        """Index the pair as one photo row carrying its raw sibling."""
+        self.db.upsert_photo(
+            {
+                "path": image,
+                "folder": self.album,
+                "filename": os.path.basename(image),
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        return self.db.get_photo_by_path(image)["id"]
+
+    def _card_files(self, *sub) -> list[str]:
+        root = os.path.join(self.card, *sub)
+        return sorted(os.listdir(root)) if os.path.isdir(root) else []
+
+    def _card_trash_day(self) -> str:
+        """The single day folder the card's trash created during a test."""
+        days = self._card_files(self.cfg.trash_dir_name)
+        self.assertEqual(len(days), 1, days)
+        return days[0]
+
+    def _queue_offline(self, name: str, is_raw: bool = False, photo_id=None) -> None:
+        """Queue a deletion the way an unplugged card produces one."""
+        offline = self._target()
+        offline.connected = False
+        delete_from_card(
+            self.db,
+            offline,
+            os.path.join("DCIM", "100D3500", name),
+            self.cfg.trash_dir_name,
+            filename=name,
+            is_raw=is_raw,
+            size=2048,
+            photo_id=photo_id,
+        )
+
+    # -- pairings and status ------------------------------------------------
+
+    def test_a_folder_only_becomes_a_camera_album_after_a_pairing(self) -> None:
+        self.assertEqual(card_status(self.db, self.album), [])
+        recorded = self._register()
+        self.assertEqual(recorded["album"], canonical_path(self.album))
+        entry = card_status(self.db, self.album)[0]
+        self.assertTrue(entry["connected"])
+        self.assertTrue(entry["same_volume"])
+        self.assertEqual(entry["state"], "connected")
+        self.assertEqual(entry["pending"]["total"], 0)
+
+    def test_a_missing_card_reports_disconnected_not_an_error(self) -> None:
+        self._register()
+        shutil.rmtree(self.card)
+        entry = card_status(self.db, self.album)[0]
+        self.assertFalse(entry["connected"])
+        self.assertFalse(entry["usable"])
+        self.assertEqual(entry["state"], "disconnected")
+
+    def test_a_reused_drive_letter_is_detected(self) -> None:
+        """A card that is not the recorded one must never be written to."""
+        self._register()
+        self.db.upsert_card_album(canonical_path(self.album), canonical_path(self.card), 1)
+        target = resolve_card(canonical_path(self.album), canonical_path(self.card), 1)
+        self.assertTrue(target.connected)
+        self.assertFalse(target.same_volume)
+        self.assertFalse(target.usable)
+        self.assertEqual(target.state, "volume_mismatch")
+
+    def test_volume_id_is_stable_for_one_directory(self) -> None:
+        first = volume_id(self.card)
+        self.assertIsNotNone(first)
+        self.assertEqual(first, volume_id(os.path.join(self.card, "DCIM")))
+
+    def test_relative_to_album_rejects_an_outside_path(self) -> None:
+        self.assertEqual(
+            relative_to_album(self.album, os.path.join(self.album, "DCIM", "x.jpg")),
+            os.path.join("DCIM", "x.jpg"),
+        )
+        self.assertIsNone(
+            relative_to_album(self.album, os.path.join(self.tmp.name, "y.jpg"))
+        )
+        self.assertIsNone(relative_to_album(self.album, None))
+
+    def test_card_path_for_refuses_to_escape_the_card(self) -> None:
+        self.assertEqual(
+            card_path_for(self.card, os.path.join("DCIM", "a.jpg")),
+            os.path.join(canonical_path(self.card), "DCIM", "a.jpg"),
+        )
+        for bad in ("..\\secret.txt", "../secret.txt", os.path.abspath("C:\\Windows")):
+            with self.assertRaises(CardError):
+                card_path_for(self.card, bad)
+
+    def test_a_card_whose_root_moved_a_level_is_still_found(self) -> None:
+        """Importing ``E:\\`` instead of ``E:\\DCIM`` shifts every path.
+
+        The tail of the recorded path still matches exactly one file, so the
+        photo is found rather than being reported as missing.
+        """
+        self._pair()
+        self._register()
+        # Pretend the import took the drive root: one level deeper on disk.
+        moved = os.path.join(self.card, "card-root")
+        shutil.move(os.path.join(self.card, "DCIM"), os.path.join(moved, "DCIM"))
+        found = find_on_card(
+            self._target(), os.path.join("DCIM", "100D3500", "DSC_0001.JPG")
+        )
+        self.assertIsNotNone(found)
+        self.assertTrue(found.endswith(os.path.join("100D3500", "DSC_0001.JPG")))
+
+    def test_an_ambiguous_file_name_is_never_guessed(self) -> None:
+        """Numbered camera folders repeat names; a guess would delete a stranger.
+
+        With no path that matches, two candidates must resolve to "not found"
+        rather than to an arbitrary one of them.
+        """
+        self._pair()
+        self._register()
+        other = os.path.join(self.card, "DCIM", "101D3500")
+        os.makedirs(other, exist_ok=True)
+        Image.new("RGB", (20, 15), (9, 9, 9)).save(
+            os.path.join(other, "DSC_0001.JPG"), "JPEG"
+        )
+
+        found = find_on_card(self._target(), os.path.join("DCIM", "999D3500", "DSC_0001.JPG"))
+        self.assertIsNone(found)
+        # The exact path still wins over the tie, so nothing is lost by this.
+        exact = find_on_card(
+            self._target(), os.path.join("DCIM", "100D3500", "DSC_0001.JPG")
+        )
+        self.assertIsNotNone(exact)
+
+    # -- deleting -----------------------------------------------------------
+
+    def test_deleting_on_a_connected_card_trashes_both_halves(self) -> None:
+        image, raw = self._pair()
+        self._register()
+        target = self._target()
+
+        first = delete_from_card(
+            self.db,
+            target,
+            os.path.join("DCIM", "100D3500", "DSC_0001.JPG"),
+            self.cfg.trash_dir_name,
+            filename="DSC_0001.JPG",
+        )
+        second = delete_from_card(
+            self.db,
+            target,
+            os.path.join("DCIM", "100D3500", "DSC_0001.NEF"),
+            self.cfg.trash_dir_name,
+            filename="DSC_0001.NEF",
+            is_raw=True,
+        )
+        self.assertTrue(first["synced"])
+        self.assertTrue(second["synced"])
+        self.assertEqual(self._card_files("DCIM", "100D3500"), [])
+        day = self._card_trash_day()
+        self.assertEqual(
+            self._card_files(self.cfg.trash_dir_name, day),
+            ["DSC_0001.JPG", "DSC_0001.NEF"],
+        )
+        # The album copies are untouched: this module only moves card files.
+        self.assertTrue(os.path.exists(image))
+        self.assertTrue(os.path.exists(raw))
+        self.assertEqual(len(self.db.card_actions(source=canonical_path(self.card))), 2)
+
+    def test_deleting_without_a_card_queues_the_intent(self) -> None:
+        self._pair(on_card=True)
+        self._register()
+        # The card is unplugged: its directory is simply gone.
+        shutil.rmtree(self.card)
+        outcome = delete_from_card(
+            self.db,
+            self._target(),
+            os.path.join("DCIM", "100D3500", "DSC_0001.JPG"),
+            self.cfg.trash_dir_name,
+            filename="DSC_0001.JPG",
+            size=1234,
+        )
+        self.assertFalse(outcome["synced"])
+        self.assertTrue(outcome["queued"])
+        queued = self.db.card_actions(state=STATE_PENDING)
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["size"], 1234)
+
+    def test_a_read_only_card_queues_instead_of_failing(self) -> None:
+        self._pair()
+        self._register()
+        target = self._target()
+        target.writable = False
+        outcome = delete_from_card(
+            self.db,
+            target,
+            os.path.join("DCIM", "100D3500", "DSC_0001.JPG"),
+            self.cfg.trash_dir_name,
+        )
+        self.assertTrue(outcome["queued"])
+        self.assertEqual(
+            self._card_files("DCIM", "100D3500"), ["DSC_0001.JPG", "DSC_0001.NEF"]
+        )
+
+    def test_a_displaced_card_is_never_written_to(self) -> None:
+        self._pair()
+        self._register()
+        target = self._target()
+        target.same_volume = False
+        outcome = delete_from_card(
+            self.db,
+            target,
+            os.path.join("DCIM", "100D3500", "DSC_0001.JPG"),
+            self.cfg.trash_dir_name,
+        )
+        self.assertTrue(outcome["queued"])
+        self.assertEqual(
+            self._card_files("DCIM", "100D3500"), ["DSC_0001.JPG", "DSC_0001.NEF"]
+        )
+
+    def test_a_file_missing_from_the_card_is_not_queued_forever(self) -> None:
+        self._pair(on_card=False)
+        self._register()
+        outcome = delete_from_card(
+            self.db,
+            self._target(),
+            os.path.join("DCIM", "100D3500", "DSC_0001.JPG"),
+            self.cfg.trash_dir_name,
+        )
+        self.assertFalse(outcome["synced"])
+        self.assertFalse(outcome["queued"])
+        self.assertEqual(self.db.card_actions(), [])
+
+    def test_a_twice_deleted_photo_keeps_its_finished_action(self) -> None:
+        """Re-deleting must not turn an applied action back into a queued one."""
+        self._pair()
+        self._register()
+        target = self._target()
+        relative = os.path.join("DCIM", "100D3500", "DSC_0001.JPG")
+        first = delete_from_card(self.db, target, relative, self.cfg.trash_dir_name)
+        self.assertTrue(first["synced"])
+        again = delete_from_card(self.db, target, relative, self.cfg.trash_dir_name)
+        self.assertFalse(again["queued"])
+        self.assertTrue(again["already"])
+        self.assertEqual(self.db.card_actions(state=STATE_PENDING), [])
+        applied = self.db.card_actions(state=STATE_APPLIED)
+        self.assertEqual(len(applied), 1, "the finished action must survive")
+
+    # -- applying the queue ------------------------------------------------
+
+    def test_applying_the_queue_moves_the_card_files(self) -> None:
+        self._pair(on_card=True)
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        self._queue_offline("DSC_0001.NEF", is_raw=True)
+        self.assertEqual(len(self.db.card_actions(state=STATE_PENDING)), 2)
+
+        result = apply_pending(self.db, self.card, self.cfg.trash_dir_name)
+        self.assertEqual(result["applied"], 2)
+        self.assertEqual(result["remaining"], 0)
+        self.assertEqual(self._card_files("DCIM", "100D3500"), [])
+        # Still on the card, but parked in its trash.
+        day = self._card_trash_day()
+        self.assertEqual(
+            self._card_files(self.cfg.trash_dir_name, day),
+            ["DSC_0001.JPG", "DSC_0001.NEF"],
+        )
+        # Running it again is a no-op rather than an error.
+        self.assertEqual(
+            apply_pending(self.db, self.card, self.cfg.trash_dir_name)["applied"], 0
+        )
+
+    def test_include_raw_false_leaves_the_raw_on_the_card(self) -> None:
+        self._pair()
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        self._queue_offline("DSC_0001.NEF", is_raw=True)
+        result = apply_pending(
+            self.db, self.card, self.cfg.trash_dir_name, include_raw=False
+        )
+        self.assertEqual(result["applied"], 1)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(self._card_files("DCIM", "100D3500"), ["DSC_0001.NEF"])
+        self.assertEqual(len(self.db.card_actions(state=STATE_PENDING)), 1)
+
+    def test_a_queued_delete_of_a_missing_file_is_dropped(self) -> None:
+        self._pair(on_card=False)
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        result = apply_pending(self.db, self.card, self.cfg.trash_dir_name)
+        self.assertEqual(result["missing"], 1)
+        self.assertEqual(result["remaining"], 0)
+
+    def test_the_queue_cannot_be_applied_on_the_wrong_card(self) -> None:
+        self._pair()
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        self.db.upsert_card_album(
+            canonical_path(self.album), canonical_path(self.card), 1
+        )
+        result = apply_pending(self.db, self.card, self.cfg.trash_dir_name)
+        self.assertEqual(result["applied"], 0)
+        self.assertTrue(result["failed"])
+        self.assertEqual(
+            self._card_files("DCIM", "100D3500"), ["DSC_0001.JPG", "DSC_0001.NEF"]
+        )
+
+    # -- preview, restore, purge ------------------------------------------
+
+    def test_the_preview_describes_what_will_be_deleted(self) -> None:
+        self._pair()
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        self._queue_offline("DSC_0001.NEF", is_raw=True)
+        preview = pending_preview(self.db, self.card)
+        summary = preview["summary"]
+        self.assertEqual(summary["delete_count"], 2)
+        self.assertEqual(summary["raw_count"], 1)
+        self.assertEqual(summary["total_bytes"], 4096)
+        self.assertEqual(summary["missing_count"], 0)
+        self.assertTrue(preview["ready"])
+        self.assertEqual(
+            sorted(item["filename"] for item in preview["items"]),
+            ["DSC_0001.JPG", "DSC_0001.NEF"],
+        )
+        self.assertTrue(all(item["on_card"] for item in preview["items"]))
+        self.assertEqual([i["kind"] for i in preview["items"]], [KIND_DELETE] * 2)
+
+    def test_the_preview_flags_files_the_card_no_longer_has(self) -> None:
+        self._pair(on_card=False)
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        preview = pending_preview(self.db, self.card)
+        self.assertEqual(preview["summary"]["missing_count"], 1)
+        self.assertFalse(preview["items"][0]["on_card"])
+
+    def test_restoring_cancels_a_queued_delete(self) -> None:
+        self._pair()
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        outcome = restore_to_card(
+            self.db,
+            self._target(),
+            os.path.join("DCIM", "100D3500", "DSC_0001.JPG"),
+        )
+        self.assertTrue(outcome["cancelled"])
+        self.assertEqual(self.db.card_actions(), [])
+        self.assertEqual(len(self._card_files("DCIM", "100D3500")), 2)
+
+    def test_restoring_puts_an_applied_delete_back_on_the_card(self) -> None:
+        self._pair()
+        self._register()
+        target = self._target()
+        relative = os.path.join("DCIM", "100D3500", "DSC_0001.JPG")
+        delete_from_card(self.db, target, relative, self.cfg.trash_dir_name)
+        self.assertEqual(self._card_files("DCIM", "100D3500"), ["DSC_0001.NEF"])
+
+        outcome = restore_to_card(self.db, target, relative)
+        self.assertTrue(outcome["synced"])
+        self.assertEqual(
+            self._card_files("DCIM", "100D3500"), ["DSC_0001.JPG", "DSC_0001.NEF"]
+        )
+        self.assertEqual(self.db.card_actions(), [])
+
+    def test_restoring_without_a_card_queues_a_restore(self) -> None:
+        self._pair()
+        self._register()
+        target = self._target()
+        relative = os.path.join("DCIM", "100D3500", "DSC_0001.JPG")
+        delete_from_card(self.db, target, relative, self.cfg.trash_dir_name)
+
+        offline = self._target()
+        offline.connected = False
+        outcome = restore_to_card(self.db, offline, relative)
+        self.assertTrue(outcome["queued"])
+        self.assertEqual(
+            [a["kind"] for a in self.db.card_actions(state=STATE_PENDING)], ["restore"]
+        )
+
+        result = apply_pending(self.db, self.card, self.cfg.trash_dir_name)
+        self.assertEqual(result["restored"], 1)
+        self.assertEqual(
+            self._card_files("DCIM", "100D3500"), ["DSC_0001.JPG", "DSC_0001.NEF"]
+        )
+
+    def test_deleting_again_after_a_restore_is_a_real_deletion(self) -> None:
+        self._pair()
+        self._register()
+        target = self._target()
+        relative = os.path.join("DCIM", "100D3500", "DSC_0001.JPG")
+        delete_from_card(self.db, target, relative, self.cfg.trash_dir_name)
+        restore_to_card(self.db, target, relative)
+
+        outcome = delete_from_card(self.db, target, relative, self.cfg.trash_dir_name)
+        # The card has the file again, so this is a fresh, real deletion.
+        self.assertTrue(outcome["synced"])
+        self.assertEqual(self._card_files("DCIM", "100D3500"), ["DSC_0001.NEF"])
+
+    def test_permanent_delete_erases_the_card_copy(self) -> None:
+        image, raw = self._pair()
+        self._register()
+        photo_id = self._track(image, raw)
+        target = self._target()
+        for name, is_raw in (("DSC_0001.JPG", False), ("DSC_0001.NEF", True)):
+            delete_from_card(
+                self.db,
+                target,
+                os.path.join("DCIM", "100D3500", name),
+                self.cfg.trash_dir_name,
+                filename=name,
+                is_raw=is_raw,
+                photo_id=photo_id,
+            )
+        result = purge_for_photo(self.db, target, photo_id)
+        self.assertEqual(result["purged"], 2)
+        self.assertEqual(result["deferred"], 0)
+        self.assertEqual(self.db.card_actions(), [])
+
+    def test_permanent_delete_on_an_absent_card_is_deferred(self) -> None:
+        """The card copy is erased next time, not silently forgotten."""
+        image, raw = self._pair(on_card=False)
+        self._register()
+        photo_id = self._track(image, raw)
+        self._queue_offline("DSC_0001.JPG", photo_id=photo_id)
+
+        offline = self._target()
+        offline.connected = False
+        result = purge_for_photo(self.db, offline, photo_id)
+        self.assertEqual(result["purged"], 0)
+        self.assertEqual(result["deferred"], 1)
+        self.assertEqual(len(self.db.card_actions(state=STATE_ERASE)), 1)
+
+        # The card comes back with the file still on it: the erase runs.
+        self._pair(on_card=True)
+        applied = apply_pending(self.db, self.card, self.cfg.trash_dir_name)
+        self.assertEqual(applied["erased"], 1)
+        self.assertEqual(self._card_files("DCIM", "100D3500"), ["DSC_0001.NEF"])
+
+    def test_forgetting_a_card_drops_the_queue_without_touching_files(self) -> None:
+        from photo_reviewer.cards import forget_card
+
+        self._pair()
+        self._register()
+        self._queue_offline("DSC_0001.JPG")
+        result = forget_card(self.db, self.album)
+        self.assertEqual(result["pairings_removed"], 1)
+        self.assertEqual(self.db.card_actions(), [])
+        self.assertEqual(card_status(self.db, self.album), [])
+        self.assertEqual(len(self._card_files("DCIM", "100D3500")), 2)
+
+
+class CardApiTests(unittest.TestCase):
+    """The HTTP surface of the camera-album feature."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.card = os.path.join(self.tmp.name, "card")
+        self.album = os.path.join(self.tmp.name, "album")
+        os.makedirs(os.path.join(self.card, "DCIM", "100D3500"))
+        os.makedirs(os.path.join(self.album, "DCIM", "100D3500"))
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _photo(self, stem="DSC_0001", on_card=True) -> tuple[int, str, str]:
+        album_dir = os.path.join(self.album, "DCIM", "100D3500")
+        card_dir = os.path.join(self.card, "DCIM", "100D3500")
+        image = os.path.join(album_dir, f"{stem}.JPG")
+        raw = os.path.join(album_dir, f"{stem}.NEF")
+        Image.new("RGB", (20, 15), (120, 90, 60)).save(image, "JPEG")
+        Path(raw).write_bytes(b"raw-payload" * 8)
+        if on_card:
+            Image.new("RGB", (20, 15), (60, 90, 120)).save(
+                os.path.join(card_dir, f"{stem}.JPG"), "JPEG"
+            )
+            Path(os.path.join(card_dir, f"{stem}.NEF")).write_bytes(b"card-raw" * 8)
+        self.db.upsert_photo(
+            {
+                "path": image,
+                "folder": self.album,
+                "filename": f"{stem}.JPG",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        record_pairing(self.db, self.album, self.card)
+        return self.db.get_photo_by_path(image)["id"], image, raw
+
+    def _card_trash_day(self) -> tuple[str, str]:
+        """Return ``(trash root, day folder)`` for the card's own trash."""
+        root = os.path.join(self.card, self.cfg.trash_dir_name)
+        days = os.listdir(root)
+        self.assertEqual(len(days), 1, days)
+        return root, os.path.join(root, days[0])
+
+    def test_status_reports_the_current_album(self) -> None:
+        self._photo()
+        resp = self.client.get(f"/api/card/status?folder={self.album}")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(len(body["cards"]), 1)
+        self.assertTrue(body["current"]["connected"])
+        self.assertEqual(body["current"]["pending"]["total"], 0)
+
+    def test_delete_with_sync_card_moves_both_halves_off_the_card(self) -> None:
+        photo_id, image, raw = self._photo()
+        resp = self.client.post(
+            "/api/delete", json={"ids": [photo_id], "sync_card": True}
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body["card"]["synced"], 2)
+        self.assertEqual(body["card"]["queued"], 0)
+        self.assertFalse(os.path.exists(image))
+        self.assertFalse(os.path.exists(raw))
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(self.card, "DCIM", "100D3500"))), []
+        )
+        # The card copies were parked in the card's own trash, not deleted.
+        _root, day = self._card_trash_day()
+        self.assertEqual(
+            sorted(os.listdir(day)), ["DSC_0001.JPG", "DSC_0001.NEF"]
+        )
+
+    def test_delete_without_sync_leaves_the_card_alone(self) -> None:
+        photo_id, _image, _raw = self._photo()
+        resp = self.client.post(
+            "/api/delete", json={"ids": [photo_id], "sync_card": False}
+        )
+        body = resp.get_json()
+        self.assertEqual(body["card"]["synced"], 0)
+        self.assertEqual(body["card"]["queued"], 0)
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(self.card, "DCIM", "100D3500"))),
+            ["DSC_0001.JPG", "DSC_0001.NEF"],
+        )
+        self.assertEqual(self.db.card_actions(), [])
+
+    def test_delete_queues_when_the_card_is_away(self) -> None:
+        photo_id, _image, _raw = self._photo(on_card=False)
+        shutil.rmtree(self.card)
+        resp = self.client.post(
+            "/api/delete", json={"ids": [photo_id], "sync_card": False}
+        )
+        self.assertEqual(resp.get_json()["card"]["queued"], 2)
+        preview = self.client.post("/api/card/pending", json={}).get_json()["preview"]
+        self.assertEqual(preview["summary"]["delete_count"], 2)
+        self.assertEqual(preview["summary"]["raw_count"], 1)
+        self.assertFalse(preview["ready"])
+
+    def test_restore_with_sync_card_puts_both_halves_back(self) -> None:
+        photo_id, _image, _raw = self._photo()
+        self.client.post("/api/delete", json={"ids": [photo_id], "sync_card": True})
+        restore_resp = self.client.post(
+            "/api/restore", json={"ids": [photo_id], "sync_card": True}
+        )
+        self.assertEqual(restore_resp.get_json()["card"]["restored"], 2)
+        self.assertEqual(
+            sorted(os.listdir(os.path.join(self.card, "DCIM", "100D3500"))),
+            ["DSC_0001.JPG", "DSC_0001.NEF"],
+        )
+
+    def test_card_sync_endpoint_needs_a_source(self) -> None:
+        self.assertEqual(self.client.post("/api/card/sync", json={}).status_code, 400)
+
+    def test_card_sync_endpoint_applies_a_queued_delete(self) -> None:
+        photo_id, _image, _raw = self._photo(on_card=False)
+        shutil.rmtree(self.card)
+        self.client.post("/api/delete", json={"ids": [photo_id], "sync_card": False})
+        # The card comes back with its files.
+        os.makedirs(os.path.join(self.card, "DCIM", "100D3500"))
+        Image.new("RGB", (20, 15), (60, 90, 120)).save(
+            os.path.join(self.card, "DCIM", "100D3500", "DSC_0001.JPG"), "JPEG"
+        )
+        resp = self.client.post("/api/card/sync", json={"source": self.card})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["applied"], 1)
+        self.assertEqual(
+            os.listdir(os.path.join(self.card, "DCIM", "100D3500")), []
+        )
+
+    def test_folder_remove_forgets_the_card_link(self) -> None:
+        self._photo()
+        resp = self.client.post("/api/folder/remove", json={"folder": self.album})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["card_links_removed"], 1)
+        self.assertEqual(card_status(self.db, self.album), [])
+
+    def test_permanent_delete_clears_the_card_trash(self) -> None:
+        photo_id, _image, _raw = self._photo()
+        self.client.post("/api/delete", json={"ids": [photo_id], "sync_card": True})
+        _root, day = self._card_trash_day()
+        self.assertEqual(len(os.listdir(day)), 2)
+
+        resp = self.client.post("/api/delete/permanent", json={"ids": [photo_id]})
+        self.assertEqual(resp.get_json()["card_removed"], 2)
+        self.assertEqual(os.listdir(day), [])
+
+    def test_an_import_records_the_camera_album(self) -> None:
+        """The import is what turns a folder into a camera album."""
+        source = os.path.join(self.tmp.name, "incoming")
+        os.makedirs(os.path.join(source, "DCIM"))
+        Image.new("RGB", (20, 15), (10, 20, 30)).save(
+            os.path.join(source, "DCIM", "DSC_0009.JPG"), "JPEG"
+        )
+        resp = self.client.post(
+            "/api/import/run",
+            json={
+                "source": source,
+                "target": self.album,
+                "mode": "incremental",
+                "after": "copy",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        wait_for_job(resp.get_json()["job_id"])
+        entry = card_status(self.db, self.album)
+        self.assertEqual(len(entry), 1)
+        self.assertEqual(entry[0]["source"], canonical_path(source))
+        self.assertTrue(entry[0]["connected"])
 
 
 if __name__ == "__main__":

@@ -28,6 +28,18 @@ from .cache import (
     ensure_cache_dirs,
     load_scan_results_from_cache,
 )
+from .cards import (
+    CardError,
+    apply_pending,
+    card_status,
+    delete_from_card,
+    forget_card,
+    pending_preview,
+    purge_for_photo,
+    relative_to_album,
+    restore_to_card,
+    target_for,
+)
 from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, Config
 from .db import Database, sort_photos
 from .exif import extract_exif
@@ -105,6 +117,15 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
 def _normalize_folder(path: str) -> str:
     """Resolve a user-supplied folder to its on-disk spelling."""
     return canonical_folder(path)
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    """Read a checkbox value that may arrive as a real bool or a string."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 def _is_raw_file(path: str | None) -> bool:
@@ -284,6 +305,137 @@ def _remove_photo_cache(photo: dict[str, Any]) -> None:
                 os.remove(path)
             except OSError:
                 logger.debug("photo cache file is already gone: %s", path)
+
+
+def _card_files(photo: dict[str, Any], raw_path: str | None) -> list[dict[str, Any]]:
+    """Describe the local files of a photo as card-relative paths.
+
+    The import mirrors the card's layout, so a file's path relative to the album
+    is also its path on the card. Only files that really sat on the card are
+    returned: a photo indexed from somewhere else, or stored outside its album
+    folder, has no card counterpart.
+    """
+    album = photo.get("folder") or ""
+    if not album:
+        return []
+    entries = []
+    for path, is_raw in ((photo.get("path"), False), (raw_path, True)):
+        relative = relative_to_album(album, path)
+        if not relative:
+            continue
+        try:
+            size = os.path.getsize(path) if path and os.path.exists(path) else 0
+        except OSError:
+            size = 0
+        entries.append(
+            {
+                "relative_path": relative,
+                "filename": os.path.basename(path),
+                "size": size,
+                "is_raw": is_raw,
+            }
+        )
+    return entries
+
+
+def _sync_delete_to_card(
+    database: Database,
+    cfg: Config,
+    photo: dict[str, Any],
+    raw_path: str | None,
+    sync_card: bool,
+) -> dict[str, Any] | None:
+    """Handle the card side of trashing a photo.
+
+    ``sync_card`` is the user's answer to the "also delete from the SD card"
+    checkbox. When the card is not usable the answer is necessarily false (the
+    dialog only offers the checkbox for a card that is plugged in), and the
+    deletion is queued instead of being lost, so it can be carried out the next
+    time that card appears.
+    """
+    target = target_for(database, photo.get("folder") or "")
+    if target is None:
+        return None
+    entries = _card_files(photo, raw_path)
+    if not entries:
+        return None
+
+    result = {"source": target.source, "synced": 0, "queued": 0, "skipped": 0, "errors": []}
+    for entry in entries:
+        try:
+            if target.usable and not sync_card:
+                # The card is right here and the user cleared the checkbox, so
+                # its copy stays. Nothing is queued either: this was a decision,
+                # not a card that happened to be missing.
+                result["skipped"] += 1
+                continue
+            outcome = delete_from_card(
+                database,
+                target,
+                entry["relative_path"],
+                cfg.trash_dir_name,
+                filename=entry["filename"],
+                size=entry["size"],
+                is_raw=entry["is_raw"],
+                photo_id=photo["id"],
+            )
+        except (CardError, OSError) as exc:
+            logger.warning("card delete failed for %s", entry["relative_path"], exc_info=True)
+            result["errors"].append({"path": entry["relative_path"], "error": str(exc)})
+            continue
+        if outcome.get("synced"):
+            result["synced"] += 1
+        elif outcome.get("queued"):
+            result["queued"] += 1
+        else:
+            result["skipped"] += 1
+    return result
+
+
+def _sync_restore_to_card(
+    database: Database,
+    photo: dict[str, Any],
+    raw_path: str | None,
+    sync_card: bool,
+) -> dict[str, Any] | None:
+    """Handle the card side of bringing a photo back out of the trash.
+
+    Restoring only undoes a deletion the card actually saw. A card that is away
+    keeps a queued restore, which ``apply_pending`` carries out later.
+    """
+    target = target_for(database, photo.get("folder") or "")
+    if target is None:
+        return None
+    album = photo.get("folder") or ""
+    candidates = [
+        (photo.get("original_path") or photo.get("path"), False),
+        (raw_path, True),
+    ]
+    result = {"source": target.source, "restored": 0, "queued": 0, "errors": []}
+    for path, is_raw in candidates:
+        relative = relative_to_album(album, path)
+        if not relative:
+            continue
+        try:
+            if target.usable and not sync_card:
+                continue
+            outcome = restore_to_card(
+                database,
+                target,
+                relative,
+                filename=os.path.basename(path or ""),
+                is_raw=is_raw,
+                photo_id=photo["id"],
+            )
+        except (CardError, OSError) as exc:
+            logger.warning("card restore failed for %s", relative, exc_info=True)
+            result["errors"].append({"path": relative, "error": str(exc)})
+            continue
+        if outcome.get("synced"):
+            result["restored"] += 1
+        elif outcome.get("queued"):
+            result["queued"] += 1
+    return result
 
 
 def _ensure_exif(
@@ -700,6 +852,50 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             }
         )
 
+    @app.get("/api/card/status")
+    def api_card_status():
+        """Which camera albums exist, whether their card is here, and the queue.
+
+        Cheap on purpose (``isdir``, ``os.access``, one ``os.stat`` per card), so
+        the toolbar can poll it to keep the "SD card connected" badge honest.
+        """
+        folder = request.args.get("folder", "").strip() or None
+        folder = canonical_path(folder) if folder else None
+        cards = card_status(database, folder)
+        current = None
+        if folder:
+            current = next((c for c in cards if c["album"] == folder), None)
+        return jsonify({"cards": cards, "current": current})
+
+    @app.post("/api/card/pending")
+    def api_card_pending():
+        """Preview the queued card work without touching the card."""
+        data = request.get_json(force=True, silent=True) or {}
+        source = data.get("source", "").strip() or None
+        return jsonify({"preview": pending_preview(database, source)})
+
+    @app.post("/api/card/sync")
+    def api_card_sync():
+        """Carry the queued deletions and restores out on the card."""
+        data = request.get_json(force=True, silent=True) or {}
+        source = canonical_path(data.get("source", "").strip())
+        if not source:
+            return jsonify({"error": "请提供 SD 卡路径"}), 400
+        include_raw = _as_bool(data.get("include_raw", True), default=True)
+        result = apply_pending(database, source, cfg.trash_dir_name, include_raw)
+        return jsonify(result)
+
+    @app.post("/api/card/forget")
+    def api_card_forget():
+        """Stop syncing a folder with its card. Never deletes any file."""
+        data = request.get_json(force=True, silent=True) or {}
+        folder = data.get("folder", "").strip()
+        if not folder:
+            return jsonify({"error": "请提供文件夹路径"}), 400
+        source = data.get("source", "").strip() or None
+        result = forget_card(database, canonical_path(folder), source)
+        return jsonify(result)
+
     @app.get("/api/scan/jobs")
     def api_scan_jobs():
         folder = request.args.get("folder", "").strip() or None
@@ -1037,13 +1233,23 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
     @app.post("/api/delete")
     def api_delete():
+        """Move photos to the trash, and optionally off the camera card too.
+
+        ``sync_card`` is the answer to the "also delete from the SD card"
+        checkbox, which the UI only offers while that card is connected. When the
+        card is away the answer is false by construction and the deletion is
+        queued for the next time the card shows up.
+        """
         data = request.get_json(force=True, silent=True) or {}
         ids = data.get("ids", [])
         if not isinstance(ids, list) or not ids:
             return jsonify({"error": "请选择要删除的照片"}), 400
+        sync_card = _as_bool(data.get("sync_card", False))
         moved = []
         errors = []
         touched_folders = set()
+        card_totals = {"synced": 0, "queued": 0, "skipped": 0, "errors": []}
+        any_card = False
         for pid in ids:
             try:
                 pid = int(pid)
@@ -1057,6 +1263,17 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             if photo.get("status") == "deleted":
                 errors.append({"id": pid, "error": "照片已在回收站"})
                 continue
+            # The card side is decided before the local move, because moving the
+            # raw sibling clears raw_path and loses the half of the pair that
+            # also has to disappear from the card.
+            raw_path = photo.get("raw_path")
+            try:
+                card_result = _sync_delete_to_card(
+                    database, cfg, photo, raw_path, sync_card
+                )
+            except Exception:
+                logger.warning("card sync failed for photo %s", pid, exc_info=True)
+                card_result = None
             try:
                 new_path = _move_to_trash(photo, cfg)
                 # The raw sibling followed the photo into the trash, so it no
@@ -1070,12 +1287,22 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append({"id": pid, "error": str(exc)})
+                continue
+            if card_result:
+                any_card = True
+                for key in ("synced", "queued", "skipped"):
+                    card_totals[key] += card_result[key]
+                card_totals["errors"].extend(card_result["errors"])
+                card_totals["source"] = card_result["source"]
         for folder in touched_folders:
             try:
                 cleanup_folder_cache(folder, database, cfg.cache_dir_name)
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", folder, exc_info=True)
-        return jsonify({"moved": moved, "errors": errors})
+        payload = {"moved": moved, "errors": errors}
+        if any_card:
+            payload["card"] = card_totals
+        return jsonify(payload)
 
     @app.post("/api/restore")
     def api_restore():
@@ -1083,9 +1310,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         ids = data.get("ids", [])
         if not isinstance(ids, list) or not ids:
             return jsonify({"error": "请选择要恢复的照片"}), 400
+        sync_card = _as_bool(data.get("sync_card", False))
         restored = []
         errors = []
         touched_folders = set()
+        card_totals = {"restored": 0, "queued": 0, "errors": []}
+        any_card = False
         for pid in ids:
             try:
                 pid = int(pid)
@@ -1111,12 +1341,29 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 )
             except Exception as exc:  # noqa: BLE001
                 errors.append({"id": pid, "error": str(exc)})
+                continue
+            try:
+                card_result = _sync_restore_to_card(
+                    database, photo, restored_raw, sync_card
+                )
+            except Exception:
+                logger.warning("card restore failed for photo %s", pid, exc_info=True)
+                card_result = None
+            if card_result:
+                any_card = True
+                card_totals["restored"] += card_result["restored"]
+                card_totals["queued"] += card_result["queued"]
+                card_totals["errors"].extend(card_result["errors"])
+                card_totals["source"] = card_result["source"]
         for folder in touched_folders:
             try:
                 cleanup_folder_cache(folder, database, cfg.cache_dir_name)
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", folder, exc_info=True)
-        return jsonify({"restored": restored, "errors": errors})
+        payload = {"restored": restored, "errors": errors}
+        if any_card:
+            payload["card"] = card_totals
+        return jsonify(payload)
 
     @app.post("/api/delete/permanent")
     def api_delete_permanent():
@@ -1129,13 +1376,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         ids = data.get("ids", [])
         if not isinstance(ids, list) or not ids:
             return jsonify({"error": "请选择要永久删除的照片"}), 400
-        delete_raw = data.get("delete_raw", True)
-        if isinstance(delete_raw, str):
-            delete_raw = delete_raw.strip().lower() in ("1", "true", "yes", "on")
-        delete_raw = bool(delete_raw)
+        delete_raw = _as_bool(data.get("delete_raw", True), default=True)
         purged = []
         errors = []
         raw_removed = 0
+        card_removed = 0
+        card_deferred = 0
         touched_folders = set()
         for pid in ids:
             try:
@@ -1169,6 +1415,17 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                         raw_removed += 1
                     except OSError:
                         logger.debug("raw sibling already gone: %s", sibling)
+            # A file that was moved into the card's trash earlier is erased now,
+            # so permanently removing a photo does not leave a copy behind on the
+            # card. A card that is away defers this to its next connection.
+            try:
+                card_result = purge_for_photo(
+                    database, target_for(database, photo.get("folder") or ""), pid
+                )
+                card_removed += card_result["purged"]
+                card_deferred += card_result["deferred"]
+            except (CardError, OSError):
+                logger.warning("card purge failed for photo %s", pid, exc_info=True)
             touched_folders.add(
                 photo.get("folder")
                 or os.path.dirname(photo.get("original_path") or photo["path"])
@@ -1182,7 +1439,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", folder, exc_info=True)
         return jsonify(
-            {"purged": purged, "raw_removed": raw_removed, "errors": errors}
+            {
+                "purged": purged,
+                "raw_removed": raw_removed,
+                "card_removed": card_removed,
+                "card_deferred": card_deferred,
+                "errors": errors,
+            }
         )
 
     @app.post("/api/folder/remove")
@@ -1196,12 +1459,22 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             if existing.folder == folder and existing.status == "running":
                 return jsonify({"error": "该文件夹正在整理中，请稍后再试"}), 409
         removed = database.remove_folder(folder)
+        # The folder is no longer indexed, so it is no longer a camera album
+        # either; forgetting the pairing drops queued card work with it. No file
+        # on the card is touched by this.
+        links = forget_card(database, folder)
         cache_dir = cache_dir_for_folder(folder, cfg.cache_dir_name)
         cache_removed = False
         if cache_dir.exists():
             shutil.rmtree(cache_dir, ignore_errors=True)
             cache_removed = not cache_dir.exists()
-        return jsonify({"removed": removed, "cache_removed": cache_removed})
+        return jsonify(
+            {
+                "removed": removed,
+                "cache_removed": cache_removed,
+                "card_links_removed": links["pairings_removed"],
+            }
+        )
 
     @app.post("/api/photo/<int:photo_id>/edit")
     def api_photo_edit(photo_id: int):
@@ -1251,10 +1524,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         """
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip() or None
-        delete_raw = data.get("delete_raw", True)
-        if isinstance(delete_raw, str):
-            delete_raw = delete_raw.strip().lower() in ("1", "true", "yes", "on")
-        delete_raw = bool(delete_raw)
+        delete_raw = _as_bool(data.get("delete_raw", True), default=True)
         if folder:
             folder = canonical_path(folder)
         photos = database.list_photos(
@@ -1266,6 +1536,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         )
         deleted = 0
         raw_deleted = 0
+        card_removed = 0
+        card_deferred = 0
         errors = []
         touched_folders = set()
         for photo in photos:
@@ -1293,6 +1565,15 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     break
             if failed:
                 continue
+            # Whatever copy of this photo the card is still holding goes too.
+            try:
+                card_result = purge_for_photo(
+                    database, target_for(database, photo.get("folder") or ""), photo["id"]
+                )
+                card_removed += card_result["purged"]
+                card_deferred += card_result["deferred"]
+            except (CardError, OSError):
+                logger.warning("card purge failed for photo %s", photo["id"], exc_info=True)
             _remove_photo_cache(photo)
             database.delete_rows([photo["id"]])
             deleted += 1
@@ -1305,7 +1586,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             except (OSError, sqlite3.Error):
                 logger.warning("cache cleanup failed for %s", touched, exc_info=True)
         return jsonify(
-            {"deleted": deleted, "raw_deleted": raw_deleted, "errors": errors}
+            {
+                "deleted": deleted,
+                "raw_deleted": raw_deleted,
+                "card_removed": card_removed,
+                "card_deferred": card_deferred,
+                "errors": errors,
+            }
         )
 
     @app.post("/api/cache/clean")

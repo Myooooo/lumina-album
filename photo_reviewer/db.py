@@ -255,6 +255,36 @@ class Database:
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     );
+                    CREATE TABLE IF NOT EXISTS card_albums (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        folder TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        volume INTEGER,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(folder, source)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_card_albums_folder
+                        ON card_albums(folder);
+                    CREATE TABLE IF NOT EXISTS card_actions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        album TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        volume INTEGER,
+                        kind TEXT NOT NULL,
+                        state TEXT NOT NULL,
+                        relative_path TEXT NOT NULL,
+                        card_path TEXT,
+                        filename TEXT NOT NULL,
+                        size INTEGER DEFAULT 0,
+                        is_raw INTEGER DEFAULT 0,
+                        photo_id INTEGER,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        UNIQUE(album, relative_path)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_card_actions_source
+                        ON card_actions(source, state);
                     """
                 )
                 conn.commit()
@@ -952,6 +982,250 @@ class Database:
                     "DELETE FROM photos WHERE id=?", [(pid,) for pid in ids]
                 )
                 conn.commit()
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Camera-album pairings and card action queue
+    # ------------------------------------------------------------------
+
+    def upsert_card_album(self, folder: str, source: str, volume: int | None) -> None:
+        """Remember that ``folder`` receives photos from the card at ``source``."""
+        now = utc_now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO card_albums (folder, source, volume, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(folder, source) DO UPDATE SET
+                        volume=excluded.volume,
+                        updated_at=excluded.updated_at
+                    """,
+                    (folder, source, volume, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def list_card_albums(self, folder: str | None = None) -> list[dict[str, Any]]:
+        """Return recorded camera-album pairings, newest first."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                if folder:
+                    rows = conn.execute(
+                        "SELECT * FROM card_albums WHERE folder=? ORDER BY updated_at DESC",
+                        (folder,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM card_albums ORDER BY updated_at DESC"
+                    ).fetchall()
+                return [self._row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def card_album_for(self, folder: str) -> dict[str, Any] | None:
+        """Return the most recently used pairing for one local folder."""
+        rows = self.list_card_albums(folder)
+        return rows[0] if rows else None
+
+    def remove_card_album(self, folder: str, source: str | None = None) -> int:
+        """Forget a pairing (and its queued actions). Never touches files."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                if source:
+                    cursor = conn.execute(
+                        "DELETE FROM card_albums WHERE folder=? AND source=?",
+                        (folder, source),
+                    )
+                    conn.execute(
+                        "DELETE FROM card_actions WHERE album=? AND source=?",
+                        (folder, source),
+                    )
+                else:
+                    cursor = conn.execute(
+                        "DELETE FROM card_albums WHERE folder=?", (folder,)
+                    )
+                    conn.execute("DELETE FROM card_actions WHERE album=?", (folder,))
+                conn.commit()
+                return max(0, cursor.rowcount)
+            finally:
+                conn.close()
+
+    def save_card_action(self, action: dict[str, Any]) -> int:
+        """Insert or replace the queued action for one file.
+
+        ``UNIQUE(album, relative_path)`` means a photo can only ever have one
+        outstanding action, so a delete followed by a restore overwrites the row
+        instead of stacking two contradictory instructions.
+        """
+        now = utc_now()
+        record = {
+            "album": action["album"],
+            "source": action["source"],
+            "volume": action.get("volume"),
+            "kind": action["kind"],
+            "state": action.get("state", "pending"),
+            "relative_path": action["relative_path"],
+            "card_path": action.get("card_path"),
+            "filename": action.get("filename") or Path(action["relative_path"]).name,
+            "size": int(action.get("size") or 0),
+            "is_raw": 1 if action.get("is_raw") else 0,
+            "photo_id": action.get("photo_id"),
+            "created_at": now,
+            "updated_at": now,
+        }
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO card_actions
+                        (album, source, volume, kind, state, relative_path, card_path,
+                         filename, size, is_raw, photo_id, created_at, updated_at)
+                    VALUES
+                        (:album, :source, :volume, :kind, :state, :relative_path, :card_path,
+                         :filename, :size, :is_raw, :photo_id, :created_at, :updated_at)
+                    ON CONFLICT(album, relative_path) DO UPDATE SET
+                        source=excluded.source,
+                        volume=excluded.volume,
+                        kind=excluded.kind,
+                        state=excluded.state,
+                        card_path=excluded.card_path,
+                        filename=excluded.filename,
+                        size=excluded.size,
+                        is_raw=excluded.is_raw,
+                        photo_id=excluded.photo_id,
+                        updated_at=excluded.updated_at
+                    """,
+                    record,
+                )
+                conn.commit()
+                return cursor.lastrowid or 0
+            finally:
+                conn.close()
+
+    def card_actions(
+        self,
+        source: str | None = None,
+        state: str | None = None,
+        album: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return queued card actions, oldest first."""
+        clauses = []
+        params: list[Any] = []
+        if source:
+            clauses.append("source=?")
+            params.append(source)
+        if state:
+            clauses.append("state=?")
+            params.append(state)
+        if album:
+            clauses.append("album=?")
+            params.append(album)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"SELECT * FROM card_actions {where} ORDER BY id", params
+                ).fetchall()
+                return [self._row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def card_action_for(self, album: str, relative_path: str) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM card_actions WHERE album=? AND relative_path=?",
+                    (album, relative_path),
+                ).fetchone()
+                return self._row_to_dict(row) if row else None
+            finally:
+                conn.close()
+
+    def card_action_for_photo(self, photo_id: int) -> list[dict[str, Any]]:
+        """Return the outstanding card actions belonging to one photo row."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM card_actions WHERE photo_id=? ORDER BY id",
+                    (photo_id,),
+                ).fetchall()
+                return [self._row_to_dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def set_card_action_state(
+        self, action_id: int, state: str, card_path: str | None = None
+    ) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                if card_path is None:
+                    conn.execute(
+                        "UPDATE card_actions SET state=?, updated_at=? WHERE id=?",
+                        (state, utc_now(), action_id),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE card_actions SET state=?, card_path=?, updated_at=? WHERE id=?",
+                        (state, card_path, utc_now(), action_id),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_card_action(self, action_id: int) -> None:
+        self.delete_card_actions([action_id])
+
+    def delete_card_actions(self, ids: Sequence[int]) -> None:
+        if not ids:
+            return
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.executemany(
+                    "DELETE FROM card_actions WHERE id=?", [(int(i),) for i in ids]
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_card_actions_for_album(self, album: str) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    "DELETE FROM card_actions WHERE album=?", (album,)
+                )
+                conn.commit()
+                return max(0, cursor.rowcount)
+            finally:
+                conn.close()
+
+    def drop_card_actions_for_paths(
+        self, album: str, relative_paths: Sequence[str]
+    ) -> int:
+        """Forget queued actions for files that no longer exist locally."""
+        if not relative_paths:
+            return 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                cursor = conn.executemany(
+                    "DELETE FROM card_actions WHERE album=? AND relative_path=?",
+                    [(album, path) for path in relative_paths],
+                )
+                conn.commit()
+                return max(0, cursor.rowcount)
             finally:
                 conn.close()
 

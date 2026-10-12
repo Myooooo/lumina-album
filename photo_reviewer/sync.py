@@ -16,6 +16,7 @@ import os
 import threading
 import time
 
+from .cards import record_pairing
 from .config import Config
 from .db import Database
 from .importer import (
@@ -26,7 +27,7 @@ from .importer import (
     IMPORT_MODES,
     INCREMENTAL,
     RAW_POLICIES,
-    RAW_POLICY_IMAGE_FIRST,
+    RAW_POLICY_BOTH,
     ImportError_,
     plan_import,
     run_import,
@@ -40,11 +41,15 @@ _FOLLOW_INTERVAL = 0.25
 
 
 def normalize_options(data: dict) -> dict:
-    """Validate a request body into import options."""
+    """Validate a request body into import options.
+
+    The fallbacks mirror the import dialog's defaults so a request that omits a
+    field (a script, or a browser serving a cached page) behaves like the form.
+    """
     mode = str(data.get("mode") or INCREMENTAL).strip().lower()
     if mode not in IMPORT_MODES:
         raise ImportError_(f"未知的导入模式: {mode}")
-    raw_policy = str(data.get("raw_policy") or RAW_POLICY_IMAGE_FIRST).strip().lower()
+    raw_policy = str(data.get("raw_policy") or RAW_POLICY_BOTH).strip().lower()
     if raw_policy not in RAW_POLICIES:
         raise ImportError_(f"未知的 RAW 处理方式: {raw_policy}")
     after = str(data.get("after") or AFTER_INDEX).strip().lower()
@@ -143,6 +148,18 @@ def _import_worker(job_id: str, plan, options: dict, db: Database, config: Confi
             return
         if report["failed"]:
             logger.warning("import finished with %d failures", len(report["failed"]))
+
+        # This import is what makes the target a camera album: from here on the
+        # local folder is linked to the card, so deleting a photo can also
+        # remove it from the card. It is recorded even when nothing needed
+        # copying (the card and the folder already matched) because the pairing
+        # is about the user's intent, not about bytes moved.
+        pairing = None
+        try:
+            pairing = record_pairing(db, plan.target, plan.source)
+        except Exception:
+            logger.warning("could not record the camera album pairing", exc_info=True)
+        job.report["card_album"] = pairing
 
         # A full import can replace a file's contents; the previous score,
         # tags and comment described a different picture, so they are cleared.

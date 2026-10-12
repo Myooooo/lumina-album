@@ -1835,6 +1835,119 @@ select {
   font-size: 13px;
 }
 
+/* ---------- Camera album / SD card status ---------- */
+/* The badge is deliberately loud: it is the one thing on screen that tells the
+   user whether tidying up here also tidies the card. */
+.card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 99px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 254, 251, 0.9);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color .2s ease, background-color .2s ease, color .2s ease;
+}
+
+.card-status svg { width: 15px; height: 15px; }
+
+.card-status.state-connected {
+  border-color: #7fa87f;
+  background: rgba(226, 240, 222, 0.92);
+  color: #40663f;
+}
+.card-status.state-connected::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: #5f9e5c;
+  box-shadow: 0 0 0 3px rgba(95, 158, 92, 0.22);
+  animation: cardPulse 2.4s ease-in-out infinite;
+}
+.card-status.state-disconnected {
+  border-style: dashed;
+  color: var(--muted);
+}
+.card-status.state-read_only,
+.card-status.state-volume_mismatch {
+  border-color: #c9a06a;
+  background: rgba(251, 241, 224, 0.92);
+  color: #8a6122;
+}
+.card-status.state-volume_mismatch { border-color: var(--danger); }
+
+@keyframes cardPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+
+.card-pending-dot {
+  min-width: 17px;
+  padding: 0 5px;
+  height: 17px;
+  border-radius: 99px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 11px;
+  line-height: 17px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* The "N deletions are waiting for the card" strip under the toolbar. */
+.card-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 9px 14px;
+  border: 1px solid #c9a06a;
+  border-radius: var(--radius-md);
+  background: rgba(251, 241, 224, 0.92);
+  color: #7c5718;
+  font-size: 13px;
+}
+
+.card-banner svg { width: 15px; height: 15px; flex-shrink: 0; }
+.card-banner span:nth-child(2) { flex: 1; }
+
+.card-sync-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 4px;
+}
+
+.card-sync-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+.card-sync-path svg { width: 14px; height: 14px; flex-shrink: 0; }
+.card-sync-actions { display: flex; gap: 8px; }
+
+#cardSyncModal .modal-content { max-width: 760px; }
+
+/* A queued item the card no longer holds: shown, but never silently "done". */
+.import-list .import-tag.erase { background: var(--danger); color: #fff; }
+.import-list .import-tag.restore { background: #6f8fae; color: #fff; }
+.import-list .import-path.missing { color: var(--danger); }
+.import-list .import-missing-note {
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
 /* ---------- Forms & Settings Grid ---------- */
 .form-grid {
   display: grid;
@@ -2188,11 +2301,16 @@ select {
   .filters { padding: 10px 16px; }
   .stats { padding: 10px 16px 4px; }
   .modal-content { padding: 22px 18px; }
+  /* Only the icon fits; the state is carried by its colour. */
+  .card-status { padding: 7px 10px; }
+  .card-status #cardStatusText { display: none; }
+  .card-banner { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .modal, .modal-content, .preview-body img, .polaroid-card,
-  .preview-switch-left, .preview-switch-right, .stat, .btn {
+  .preview-switch-left, .preview-switch-right, .stat, .btn,
+  .card-status.state-connected::before {
     animation: none !important;
     transition: none !important;
   }

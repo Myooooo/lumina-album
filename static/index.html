@@ -22,8 +22,19 @@
       <button id="scanBtn" class="btn primary"><span class="btn-icon" data-icon="sparkles"></span>开始整理</button>
       <button id="rebuildIndexBtn" class="btn" title="同步相册"><span class="btn-icon" data-icon="sync"></span>同步相册</button>
       <button id="importBtn" class="btn" title="从 SD 卡导入"><span class="btn-icon" data-icon="import"></span>从 SD 卡导入</button>
+      <button id="cardStatusBtn" class="card-status hidden" title="相机相册 / SD 卡状态">
+        <span class="btn-icon" id="cardStatusIcon" data-icon="sdCard"></span>
+        <span id="cardStatusText">SD 卡已连接</span>
+        <span id="cardPendingDot" class="card-pending-dot hidden">0</span>
+      </button>
       <label class="force-label"><input type="checkbox" id="forceScan" /> 重新整理全部</label>
       <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
+    </div>
+    <div id="cardBanner" class="card-banner hidden">
+      <span class="btn-icon" data-icon="sdCard"></span>
+      <span id="cardBannerText"></span>
+      <button id="cardBannerSyncBtn" class="btn small primary">同步到 SD 卡</button>
+      <button id="cardBannerHideBtn" class="btn small icon-only" title="稍后再说"><span class="btn-icon" data-icon="close"></span></button>
     </div>
     <div id="folderHistory" class="folder-history hidden"></div>
     <div id="scanProgress" class="scan-progress hidden">
@@ -372,6 +383,31 @@
     <div class="modal-content loading-content">
       <div class="spinner"></div>
       <p id="loadingText">正在用大模型寻找相关回忆…</p>
+    </div>
+  </div>
+
+  <!-- SD card sync modal -->
+  <div id="cardSyncModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" data-close="cardSyncModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="sdCard"></span>同步到 SD 卡</h2>
+      <div class="card-sync-head">
+        <div class="card-sync-path"><span class="btn-icon" data-icon="sdCard"></span><span id="cardSyncSource">—</span></div>
+        <div class="card-sync-actions">
+          <button id="cardSyncOpenBtn" class="btn small" type="button"><span class="btn-icon" data-icon="folderOpen"></span>打开卡片</button>
+          <button id="cardSyncRefreshBtn" class="btn small" type="button"><span class="btn-icon" data-icon="refresh"></span>重新检查</button>
+        </div>
+      </div>
+      <div id="cardSyncPreview" class="import-preview hidden"></div>
+      <label class="import-check full-row" id="cardSyncRawRow">
+        <input type="checkbox" id="cardSyncIncludeRaw" checked />
+        同时处理 RAW 文件（连同名原始文件一起删除或恢复）
+      </label>
+      <div class="modal-actions">
+        <button id="cardSyncForgetBtn" class="btn small" type="button" title="不再把当前目录与这张卡关联"><span class="btn-icon" data-icon="linkOff"></span>解除关联</button>
+        <button id="cardSyncCancelBtn" class="btn" type="button"><span class="btn-icon" data-icon="close"></span>稍后再说</button>
+        <button id="cardSyncRunBtn" class="btn primary danger" type="button"><span class="btn-icon" data-icon="check"></span>同步到 SD 卡</button>
+      </div>
     </div>
   </div>
 

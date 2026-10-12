@@ -27,6 +27,14 @@ const state = {
   renderedCount: 0,
   loadingMore: false,
   currentJobId: null,
+  // Camera-album state: the card paired with the open folder, every pairing,
+  // and the last preview the sync dialog rendered.
+  card: null,
+  cardAll: [],
+  cardPreview: null,
+  cardBannerDismissed: false,
+  cardPendingSeen: 0,
+  cardTimer: null,
   fullscreen: {
     scale: 1,
     panX: 0,
@@ -496,6 +504,9 @@ async function loadPhotos(options = {}) {
       loadStats();
       loadTags();
       loadYears();
+      // The open folder decides whether a delete can also reach a card, so the
+      // badge is refreshed whenever the gallery is (re)loaded.
+      refreshCardStatus();
     }
   } catch (e) {
     if (quiet) {
@@ -807,6 +818,12 @@ function pollScan() {
         setTimeout(hideProgress, job.report ? 6000 : 1500);
         state.currentJobId = null;
         loadPhotos();
+        // An import is what turns this folder into a camera album, and it may
+        // have arrived on a card that already has deletions queued.
+        const imported = job.report && job.report.card_album;
+        refreshCardStatus().then(() => {
+          if (imported && imported.source) offerCardSync(imported.source);
+        });
         return;
       }
       const pct = job.total ? Math.round((job.processed / job.total) * 100) : 0;
@@ -861,6 +878,9 @@ async function deletePhotos(ids) {
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
+  await refreshCardStatus();
+  const card = state.card;
+  const canSync = !!(card && card.usable);
   let confirmMessage;
   if (ids.length === 1) {
     const photo = state.photos.find((p) => p.id === ids[0]);
@@ -868,15 +888,36 @@ async function deletePhotos(ids) {
   } else {
     confirmMessage = `确定把选中的 ${ids.length} 张照片暂时收起吗？`;
   }
-  if (!await confirmDialog(confirmMessage, { title: "暂时收起", confirmText: "暂时收起", danger: true })) return;
+  if (card && !canSync) {
+    const why = {
+      disconnected: "SD 卡当前未连接",
+      read_only: "SD 卡处于写保护状态",
+      volume_mismatch: "该路径现在不是上次那张卡",
+    }[card.state] || "SD 卡当前不可用";
+    confirmMessage += `\n${why}，这次删除会先记录下来，等卡片再次连接时可以一并同步。`;
+  } else if (canSync) {
+    confirmMessage += `\n这是相机相册，可以同时从 ${card.source} 移除。`;
+  }
+  const answer = await confirmDialog(confirmMessage, {
+    title: "暂时收起",
+    confirmText: "暂时收起",
+    danger: true,
+    checkbox: canSync
+      ? { label: "同步删除 SD 卡中的照片（含同名 RAW）", checked: true }
+      : null,
+  });
+  const confirmed = typeof answer === "object" ? answer.confirmed : answer;
+  if (!confirmed) return;
+  const syncCard = typeof answer === "object" ? answer.checked : false;
   try {
     const data = await api("/api/delete", {
       method: "POST",
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, sync_card: syncCard }),
     });
     if (data.errors && data.errors.length) {
       showToast("部分照片暂时收起失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
+    reportCardResult(data.card, "删除");
     state.photos = state.photos.filter((p) => !ids.includes(p.id));
     state.selected.clear();
     rerenderLoadedGallery();
@@ -886,6 +927,7 @@ async function deletePhotos(ids) {
       if (!p) closeModal("previewModal");
       else updatePreview({ skipImage: true });
     }
+    await refreshCardStatus();
   } catch (e) {
     showToast("暂时收起失败：" + e.message, "error");
   }
@@ -946,14 +988,20 @@ async function restorePhotos(ids) {
     return p && p.status === "deleted";
   });
   if (!ids.length) return;
+  await refreshCardStatus();
+  const card = state.card;
+  // Restoring only touches the card when a deletion actually reached it; a
+  // card that is away queues the undo for its next connection.
+  const syncCard = !!(card && card.usable);
   try {
     const data = await api("/api/restore", {
       method: "POST",
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, sync_card: syncCard }),
     });
     if (data.errors && data.errors.length) {
       showToast("部分照片恢复失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
+    reportCardResult(data.card, "恢复");
     state.photos = state.photos.filter((p) => !ids.includes(p.id));
     state.selected.clear();
     rerenderLoadedGallery();
@@ -963,6 +1011,7 @@ async function restorePhotos(ids) {
       if (!p) closeModal("previewModal");
       else updatePreview({ skipImage: true });
     }
+    await refreshCardStatus();
   } catch (e) {
     showToast("恢复失败：" + e.message, "error");
   }
@@ -1909,6 +1958,10 @@ async function openImportDialog() {
   if (remembered && !$("importSource").value) $("importSource").value = remembered;
   setImportPreview("");
   $("importModal").classList.remove("hidden");
+  // Opening the dialog is the moment the card is expected to be in the reader,
+  // so any deletion queued while it was away is offered right here.
+  const source = $("importSource").value.trim();
+  if (source) await offerCardSync(source);
 }
 
 async function pickImportSource() {
@@ -1924,6 +1977,307 @@ function rememberImportSource(path) {
     localStorage.setItem("photoImportSource", path);
   } catch (e) {
     // localStorage may be unavailable
+  }
+}
+
+/** Hand an arbitrary folder to the OS file manager. */
+async function openFolderByPath(path) {
+  if (!path) {
+    showToast("没有可打开的路径", "error");
+    return;
+  }
+  try {
+    await api("/api/open-folder", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+  } catch (e) {
+    showToast("无法打开文件夹：" + e.message, "error");
+  }
+}
+
+/**
+ * Toolbar badge click: sync when there is queued work, explain when there is
+ * not. The two cases are one click apart on purpose, so the badge never opens
+ * an empty dialog.
+ */
+async function onCardStatusClick() {
+  const card = await refreshCardStatus();
+  if (!card) return;
+  if (!card.pending.total) {
+    const why = card.usable
+      ? "卡片已连接，删除照片时可以选择同时从卡片移除。"
+      : (card.warnings && card.warnings[0]) || "卡片当前不可用。";
+    showToast(`${card.source}\n${why}`, "info");
+    return;
+  }
+  await openCardSyncDialog({ source: card.source });
+}
+
+const CARD_POLL_MS = 15000;
+
+function startCardPolling() {
+  if (state.cardTimer) clearInterval(state.cardTimer);
+  state.cardTimer = setInterval(() => {
+    // Hidden tabs do not need to stat an SD card every 15 seconds.
+    if (document.hidden) return;
+    refreshCardStatus();
+  }, CARD_POLL_MS);
+}
+
+/**
+ * Offer the queued card work when a card that has some shows up.
+ *
+ * Called after an import finishes and when the import dialog is opened with a
+ * remembered source, which is exactly the moment the user just plugged the card
+ * in and expects to be told about last time's deletions.
+ */
+async function offerCardSync(source) {
+  const card = await refreshCardStatus();
+  if (source) {
+    const match = (state.cardAll || []).find(
+      (c) => folderPathKey(c.source) === folderPathKey(source)
+    );
+    if (match) state.card = match;
+  }
+  const target = state.card;
+  if (!target || !target.pending.total || !target.usable) return false;
+  await openCardSyncDialog({ source: target.source });
+  return true;
+}
+
+/* ==========================================================================
+   Camera album / SD card
+   ========================================================================== */
+
+/** Turn one API card report into a toast the user can act on. */
+function reportCardResult(card, action) {
+  if (!card) return;
+  const parts = [];
+  if (card.synced) parts.push(`已从 SD 卡${action} ${card.synced} 个文件`);
+  if (card.restored) parts.push(`已把 ${card.restored} 个文件放回 SD 卡`);
+  if (card.queued) parts.push(`已记录 ${card.queued} 项待同步`);
+  if (card.errors && card.errors.length) {
+    showToast(`SD 卡${action}部分失败：` + card.errors.map((e) => e.error).join("; "), "error");
+  }
+  if (parts.length) showToast(parts.join("，") + "。", "success");
+}
+
+/** Poll the card state of the current album and repaint the toolbar badge. */
+async function refreshCardStatus() {
+  let data;
+  try {
+    const query = state.folder ? `?folder=${encodeURIComponent(state.folder)}` : "";
+    data = await api(`/api/card/status${query}`);
+  } catch (e) {
+    state.card = null;
+    paintCardStatus();
+    return null;
+  }
+  state.card = data.current || null;
+  state.cardAll = data.cards || [];
+  paintCardStatus();
+  return state.card;
+}
+
+const CARD_STATE_TEXT = {
+  connected: "SD 卡已连接",
+  disconnected: "SD 卡未连接",
+  read_only: "SD 卡只读",
+  volume_mismatch: "路径已被其他磁盘占用",
+};
+
+const CARD_STATE_ICON = {
+  connected: "sdCard",
+  disconnected: "sdCardOff",
+  read_only: "sdCardWarning",
+  volume_mismatch: "sdCardWarning",
+};
+
+function paintCardStatus() {
+  const btn = $("cardStatusBtn");
+  if (!btn) return;
+  const card = state.card;
+  if (!card) {
+    btn.classList.add("hidden");
+    $("cardBanner").classList.add("hidden");
+    return;
+  }
+  btn.classList.remove("hidden");
+  btn.className = `card-status state-${card.state}`;
+  btn.title = card.source + (card.warnings && card.warnings.length ? `\n${card.warnings.join("\n")}` : "");
+  $("cardStatusText").textContent = CARD_STATE_TEXT[card.state] || "相机相册";
+  $("cardStatusIcon").innerHTML = ICONS[CARD_STATE_ICON[card.state]] || ICONS.sdCard || "";
+
+  const pending = card.pending || {};
+  const dot = $("cardPendingDot");
+  if (pending.total) {
+    dot.textContent = String(pending.total);
+    dot.classList.remove("hidden");
+  } else {
+    dot.classList.add("hidden");
+  }
+
+  // Dismissing the strip lasts until more work piles up: a dismissal is "I know
+  // about these", not "never tell me again".
+  if (pending.total > (state.cardPendingSeen || 0)) state.cardBannerDismissed = false;
+  if (!pending.total) state.cardBannerDismissed = false;
+  state.cardPendingSeen = pending.total;
+
+  // The strip only appears once there is something waiting and the card can
+  // actually take it: queueing silently is fine, nagging is not.
+  const banner = $("cardBanner");
+  if (pending.total && card.usable && !state.cardBannerDismissed) {
+    const bits = [];
+    if (pending.delete_count) bits.push(`${pending.delete_count} 项删除`);
+    if (pending.restore_count) bits.push(`${pending.restore_count} 项恢复`);
+    if (pending.erase_count) bits.push(`${pending.erase_count} 项彻底清理`);
+    $("cardBannerText").textContent = `${card.source} 上有 ${bits.join("、")}待同步。`;
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+function renderCardPreview(preview) {
+  const summary = preview.summary || {};
+  const rows = (preview.items || [])
+    .map((item) => {
+      const kindLabel = { delete: "删除", restore: "恢复", erase: "彻底清理" }[item.kind] || item.kind;
+      const tags = [`<span class="import-tag ${item.kind}">${kindLabel}</span>`];
+      if (item.is_raw) tags.push('<span class="import-tag raw">RAW</span>');
+      const missing = item.on_card === false
+        ? '<span class="import-missing-note">卡上已找不到</span>'
+        : "";
+      const cls = item.on_card === false ? "import-path missing" : "import-path";
+      return `<li>${tags.join("")}<span class="${cls}" title="${escapeHtml(item.relative_path)}">${escapeHtml(item.relative_path)}</span>${missing}<span>${formatBytes(item.size)}</span></li>`;
+    })
+    .join("");
+  const truncated = preview.items_truncated
+    ? `<li><span class="import-path">…… 另有 ${preview.items_truncated} 个文件未列出</span></li>`
+    : "";
+  const list = rows ? `<ul class="import-list">${rows}${truncated}</ul>` : "";
+  const target = preview.target || {};
+  const targetNote = target.usable
+    ? ""
+    : `<p class="import-warning">${escapeHtml(
+        (target.warnings && target.warnings[0]) || "SD 卡当前不可用，暂时无法同步。"
+      )}</p>`;
+  return `
+    <div class="import-summary">
+      <span>待删除 <strong>${summary.delete_count || 0}</strong></span>
+      <span>待恢复 <strong>${summary.restore_count || 0}</strong></span>
+      <span>彻底清理 <strong>${summary.erase_count || 0}</strong></span>
+      <span>含 RAW <strong>${summary.raw_count || 0}</strong></span>
+      <span>合计 <strong>${formatBytes(summary.total_bytes || 0)}</strong></span>
+    </div>
+    ${targetNote}
+    ${
+      summary.missing_count
+        ? `<p class="import-warning">有 ${summary.missing_count} 个文件在卡上已经找不到了，同步时会跳过。</p>`
+        : ""
+    }
+    ${list}
+    ${
+      summary.total
+        ? ""
+        : `<p class="import-note">没有需要同步的内容，卡片和本地已经一致。</p>`
+    }
+  `;
+}
+
+async function openCardSyncDialog(options = {}) {
+  let preview;
+  try {
+    preview = (await api("/api/card/pending", {
+      method: "POST",
+      body: JSON.stringify({ source: options.source || (state.card ? state.card.source : "") }),
+    })).preview;
+  } catch (e) {
+    showToast("读取待同步内容失败：" + e.message, "error");
+    return;
+  }
+  state.cardPreview = preview;
+  $("cardSyncSource").textContent = preview.source || "—";
+  $("cardSyncPreview").innerHTML = renderCardPreview(preview);
+  $("cardSyncPreview").classList.remove("hidden");
+  const hasRaw = (preview.summary && preview.summary.raw_count) > 0;
+  $("cardSyncRawRow").classList.toggle("hidden", !hasRaw);
+  $("cardSyncRunBtn").disabled = !preview.ready || !preview.summary.total;
+  $("cardSyncRunBtn").title = preview.ready ? "" : "SD 卡当前不可用";
+  $("cardSyncModal").classList.remove("hidden");
+}
+
+async function reloadCardPreview() {
+  await refreshCardStatus();
+  const source = state.cardPreview ? state.cardPreview.source : "";
+  await openCardSyncDialog({ source });
+}
+
+async function runCardSync() {
+  const preview = state.cardPreview;
+  if (!preview) return;
+  const summary = preview.summary || {};
+  if (summary.missing_count) {
+    const ok = await confirmDialog(
+      `有 ${summary.missing_count} 个文件在卡上已经找不到，它们会被跳过。\n其余 ${summary.total - summary.missing_count} 项将立即执行。`,
+      { title: "部分文件缺失", confirmText: "继续同步", danger: true }
+    );
+    if (!ok) return;
+  }
+  const includeRaw = $("cardSyncIncludeRaw").checked;
+  showLoading("正在同步到 SD 卡…");
+  try {
+    const result = await api("/api/card/sync", {
+      method: "POST",
+      body: JSON.stringify({ source: preview.source, include_raw: includeRaw }),
+    });
+    hideLoading();
+    const parts = [];
+    if (result.applied) parts.push(`删除 ${result.applied}`);
+    if (result.restored) parts.push(`恢复 ${result.restored}`);
+    if (result.erased) parts.push(`彻底清理 ${result.erased}`);
+    if (result.missing) parts.push(`跳过缺失 ${result.missing}`);
+    if (result.skipped) parts.push(`保留 RAW ${result.skipped}`);
+    const tail = result.remaining ? `，仍有 ${result.remaining} 项待处理` : "";
+    showToast(`SD 卡同步完成：${parts.join("，") || "无变化"}${tail}。`, "success");
+    if (result.failed && result.failed.length) {
+      showToast("部分项目未能同步：" + result.failed.map((f) => f.error).join("; "), "error");
+    }
+    await refreshCardStatus();
+    if (result.remaining && preview.ready) {
+      await openCardSyncDialog({ source: preview.source });
+    } else {
+      closeModal("cardSyncModal");
+    }
+  } catch (e) {
+    hideLoading();
+    showToast("同步到 SD 卡失败：" + e.message, "error");
+  }
+}
+
+/** Forget the pairing for the current folder (never touches card files). */
+async function forgetCurrentCard() {
+  const card = state.card || state.cardPreview;
+  if (!card) return;
+  const album = card.album || state.folder;
+  if (!album) return;
+  const total = (card.pending && card.pending.total) || 0;
+  const ok = await confirmDialog(
+    `确定不再把“${album}”与 ${card.source} 关联吗？\n会清掉尚未同步的 ${total} 项记录，但不会删除本地或 SD 卡上的任何文件。`,
+    { title: "解除关联", confirmText: "解除关联", danger: true }
+  );
+  if (!ok) return;
+  try {
+    await api("/api/card/forget", {
+      method: "POST",
+      body: JSON.stringify({ folder: album, source: card.source }),
+    });
+    closeModal("cardSyncModal");
+    showToast("已解除相机相册关联，照片与卡片文件都未改动。", "success");
+    await refreshCardStatus();
+  } catch (e) {
+    showToast("解除关联失败：" + e.message, "error");
   }
 }
 
@@ -2018,6 +2372,19 @@ function init() {
   $("importRunBtn").addEventListener("click", runImport);
   $("importMode").addEventListener("change", () => planImport({ silent: true }));
   $("importRawPolicy").addEventListener("change", () => planImport({ silent: true }));
+  $("cardStatusBtn").addEventListener("click", onCardStatusClick);
+  $("cardBannerSyncBtn").addEventListener("click", () => openCardSyncDialog());
+  $("cardBannerHideBtn").addEventListener("click", () => {
+    state.cardBannerDismissed = true;
+    paintCardStatus();
+  });
+  $("cardSyncRunBtn").addEventListener("click", runCardSync);
+  $("cardSyncRefreshBtn").addEventListener("click", reloadCardPreview);
+  $("cardSyncForgetBtn").addEventListener("click", forgetCurrentCard);
+  $("cardSyncOpenBtn").addEventListener("click", () => {
+    const source = state.cardPreview ? state.cardPreview.source : state.card && state.card.source;
+    if (source) openFolderByPath(source);
+  });
   $("browseBtn").addEventListener("click", openDirBrowser);
   $("openFolderBtn").addEventListener("click", openFolder);
   $("historyBtn").addEventListener("click", toggleFolderHistory);
@@ -2216,6 +2583,13 @@ function init() {
   });
 
   loadInitialFolder();
+  // The card can be plugged in or pulled out at any time; the badge is the only
+  // place that says so, so it keeps itself up to date.
+  refreshCardStatus();
+  startCardPolling();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshCardStatus();
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
