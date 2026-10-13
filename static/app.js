@@ -148,19 +148,53 @@ async function selectBestFolder() {
   return chosen;
 }
 
+/**
+ * Pick up a job that was already running when this page loaded.
+ *
+ * A refresh must not lose a job: the server keeps running it, and the toolbar
+ * has to show it again straight away - progress bar, counts and estimate
+ * included. The estimate is rebuilt from the job's own ``elapsed`` time, so it
+ * is right from the first poll rather than re-learned over several seconds.
+ *
+ * The current folder is preferred, but a job on another folder (or one with no
+ * folder at all, like a bin sweep) is still shown: hiding it would make the
+ * work look like it had stopped.
+ */
 async function resumeScanJob() {
-  if (!state.folder || state.currentJobId) return;
+  if (state.currentJobId) return;
   try {
-    const data = await api(`/api/scan/jobs?folder=${encodeURIComponent(state.folder)}`);
-    const running = (data.jobs || []).find((job) => job.status === "running");
-    if (running) {
-      state.currentJobId = running.job_id;
-      showProgress("正在恢复上次整理任务…");
-      pollScan();
-    }
+    const found = await findRunningJob();
+    if (!found) return;
+    state.currentJobId = found.job_id;
+    // A brand-new view: clear the previous run's rate so the estimate seeded
+    // from the server's own ``elapsed`` is what gets shown.
+    state.eta = null;
+    $("scanProgress").classList.remove("hidden");
+    $("progressText").textContent = progressLabel(found);
+    paintJobProgress(found);
+    pollScan();
   } catch (e) {
     console.warn("恢复扫描任务失败", e);
   }
+}
+
+/**
+ * Find the job a freshly loaded page should be showing.
+ *
+ * The current album's job wins, but a job with no folder (a bin sweep) or one
+ * belonging to another album is still returned: it is real work in progress,
+ * and hiding it would make it look as if the refresh had stopped it.
+ */
+async function findRunningJob() {
+  const isLive = (job) => job.status === "running" || job.status === "pending";
+  if (state.folder) {
+    const query = `?folder=${encodeURIComponent(state.folder)}`;
+    const data = await api(`/api/scan/jobs${query}`);
+    const mine = (data.jobs || []).find(isLive);
+    if (mine) return mine;
+  }
+  const all = await api("/api/scan/jobs");
+  return (all.jobs || []).find(isLive) || null;
 }
 
 async function loadInitialFolder() {
@@ -171,7 +205,6 @@ async function loadInitialFolder() {
   if (state.folder) {
     await applyDefaultStatusFilter();
     await loadPhotos();
-    resumeScanJob();
   } else {
     state.photos = [];
     renderGallery();
@@ -394,28 +427,33 @@ function formatCaptureTime(value) {
   return `${y}年${mo}月${d}日 ${hh}:${mm}${ss ? ":" + ss : ""}`;
 }
 
+/**
+ * The three scoring dimensions, in display order.
+ *
+ * "构图" used to be a fourth row. It measured much the same thing as "技术"
+ * (both are craft judgements about the frame rather than about the moment), and
+ * separating them made the model split hairs between two nearly identical
+ * numbers. Composition now lives inside 技术, and older rows are folded in by
+ * the migration in photo_reviewer/db.py.
+ */
 const DIMENSION_NAMES = {
   technical: "技术",
-  composition: "构图",
   memory: "回忆",
   uniqueness: "独特",
 };
 const DIMENSION_COLORS = {
   technical: "#5b8dd9",
-  composition: "#d9a05b",
   memory: "#d96b7b",
   uniqueness: "#6f9e7a",
 };
-/** Total score: the warm brand accent, matching the gallery pills. */
-const TOTAL_SCORE_COLOR = "#b37d56";
 
 /**
  * Score rows that participate in the "the model did not fill this in" check.
  *
  * Some providers answer with a score and a title but an empty (or missing)
- * dimensions object. Treating those zeros as real ratings would show five 0.0
- * bars under a perfectly good total, so a photo whose four dimension scores are
- * all zero while its total is not is reported as "尚未评分" instead.
+ * dimensions object. Treating those zeros as real ratings would show three 0.0
+ * bars under a perfectly good total, so a photo whose dimension scores are all
+ * zero while its total is not is reported as "尚未评分" instead.
  */
 function hasDimensionScores(dims, score) {
   if (score === null || score === undefined) return false;
@@ -904,45 +942,124 @@ function hideProgress() {
    Progress + remaining-time estimate
    ========================================================================== */
 
+//: How strongly a fresh sample pulls the rate estimate. Small enough that one
+//: slow file cannot swing the number, large enough to follow a real change.
+const ETA_RATE_ALPHA = 0.2;
+//: Weight of the whole-run average against the recent-rate average. The overall
+//: average is what the user asked for - it is the steady signal - while the
+//: recent rate is what notices that the job got faster or slower.
+const ETA_OVERALL_WEIGHT = 0.6;
+//: The displayed estimate is smoothed as well, so a wobble in the underlying
+//: rate does not make the pill flicker between two values.
+const ETA_DISPLAY_ALPHA = 0.35;
+//: A new sample is ignored if it arrives sooner than this; at a one-second poll
+//: interval the deltas would otherwise be mostly rounding noise.
+const ETA_MIN_SAMPLE_SECONDS = 0.75;
+
 /**
  * Track how fast a job is moving and estimate what is left.
  *
- * The rate is smoothed with an exponential moving average rather than measured
- * from the start: copy speed varies with file size, and a plain average would
- * keep quoting the first few seconds for the rest of the run. Progress only
- * advances, so the estimate never counts back up.
+ * Two rates are combined. The **overall** rate (``processed / elapsed``) is the
+ * average speed of everything done so far and is the stable part of the number;
+ * ``elapsed`` comes from the server, so it includes the time before a page
+ * refresh. The **recent** rate is an exponential moving average of the samples
+ * since the page last loaded, which is what notices that the job speeded up or
+ * slowed down.
+ *
+ * Mixing them is what removes the jitter: a single slow file moves the recent
+ * rate but barely dents the average, so the estimate drifts instead of jumping.
+ * Progress only ever moves forward, so a stale sample can never push the
+ * estimate back up.
  */
-function updateEta(processed, total) {
+function updateEta(processed, total, elapsedSeconds) {
   const now = performance.now();
   const previous = state.eta;
+  const overallElapsed = Number(elapsedSeconds);
 
-  if (!previous || processed < previous.processed) {
-    state.eta = {
-      processed,
-      total,
-      at: now,
-      rate: 0,
-      shown: previous ? previous.shown : null,
-    };
-    paintEta(null);
+  if (!previous || !Number.isFinite(previous.processed) || processed < previous.processed) {
+    state.eta = seedEta(processed, total, now, overallElapsed);
+    const seeded = state.eta.rate;
+    if (total > 0 && processed >= total) {
+      // Already done: say so rather than leave a stale estimate standing.
+      paintEta(0);
+    } else if (seeded > 0 && total > 0 && processed > 0) {
+      // A resumed job already knows how fast it has been going, so the estimate
+      // appears on the first poll after a refresh instead of a tick later.
+      paintEta(smoothEta((total - processed) / seeded));
+    } else {
+      paintEta(null);
+    }
     return;
   }
 
-  const elapsed = (now - previous.at) / 1000;
+  const seconds = (now - previous.at) / 1000;
   const delta = processed - previous.processed;
-  let rate = previous.rate;
-  if (elapsed >= 0.4 && delta > 0) {
-    const instant = delta / elapsed;
-    // Seed with the first sample, then ease towards it.
-    rate = rate > 0 ? rate * 0.65 + instant * 0.35 : instant;
-  }
-  state.eta = { processed, total, at: now, rate, shown: previous.shown };
+  const rate = previous.rate;
 
-  if (!rate || !total || processed <= 0 || processed >= total) {
+  if (seconds < ETA_MIN_SAMPLE_SECONDS && delta === 0) {
+    // Nothing to learn yet; keep the current estimate on screen.
+    return;
+  }
+
+  let recent = previous.recent;
+  if (delta > 0 && seconds > 0) {
+    const sample = delta / seconds;
+    recent = recent > 0 ? recent * (1 - ETA_RATE_ALPHA) + sample * ETA_RATE_ALPHA : sample;
+  }
+
+  // The overall rate is recomputed from the server's elapsed time every tick,
+  // so it stays correct across a refresh instead of restarting from zero.
+  const overall =
+    Number.isFinite(overallElapsed) && overallElapsed > 0 && processed > 0
+      ? processed / overallElapsed
+      : 0;
+
+  let combined;
+  if (overall > 0 && recent > 0) {
+    combined = overall * ETA_OVERALL_WEIGHT + recent * (1 - ETA_OVERALL_WEIGHT);
+  } else {
+    combined = overall || recent || rate || 0;
+  }
+
+  state.eta = {
+    processed,
+    total,
+    at: now,
+    rate: combined,
+    recent,
+    shown: previous.shown,
+    shownSeconds: previous.shownSeconds,
+  };
+
+  if (!combined || !total || processed <= 0 || processed >= total) {
     paintEta(processed >= total ? 0 : null);
     return;
   }
-  paintEta(Math.round((total - processed) / rate));
+  paintEta(smoothEta((total - processed) / combined));
+}
+
+/** First sample for a job: reuse whatever the server knows about its speed. */
+function seedEta(processed, total, now, elapsedSeconds) {
+  let rate = 0;
+  if (Number.isFinite(elapsedSeconds) && elapsedSeconds > 0 && processed > 0) {
+    rate = processed / elapsedSeconds;
+  }
+  return {
+    processed,
+    total,
+    at: now,
+    rate,
+    recent: 0,
+    shown: state.eta ? state.eta.shown : null,
+    shownSeconds: state.eta ? state.eta.shownSeconds : null,
+  };
+}
+
+/** Ease the displayed seconds towards the new estimate. */
+function smoothEta(seconds) {
+  const previous = state.eta && state.eta.shownSeconds;
+  if (!Number.isFinite(previous)) return seconds;
+  return previous + (seconds - previous) * ETA_DISPLAY_ALPHA;
 }
 
 /** How a duration reads at a glance: "剩 12 秒" / "剩 3 分 20 秒" / "剩 1 小时 5 分". */
@@ -961,22 +1078,36 @@ function formatEta(seconds) {
   return minutes ? `剩 ${hours} 小时 ${minutes} 分` : `剩 ${hours} 小时`;
 }
 
-/** Paint (or hide) the ETA pill next to the progress label. */
+/**
+ * Paint (or hide) the ETA pill next to the progress label.
+ *
+ * The entrance animation plays once, when the pill first appears, and not again
+ * on every value change: a badge that re-animates on each poll reads as flicker
+ * rather than as a live number. The text itself is compared against what is
+ * already on screen, so the pill never re-renders the same string.
+ */
 function paintEta(seconds) {
   const el = $("progressEta");
   if (!el) return;
-  const text =
-    seconds === 0 ? "即将完成" : formatEta(seconds);
+  const value = seconds === 0 ? 0 : seconds;
+  const text = value === 0 ? "即将完成" : formatEta(value);
+
+  if (state.eta) {
+    state.eta.shown = text || null;
+    if (Number.isFinite(value)) state.eta.shownSeconds = value;
+  }
+
   if (!text) {
     el.classList.add("hidden");
     el.textContent = "";
-    if (state.eta) state.eta.shown = null;
     return;
   }
-  if (state.eta && state.eta.shown === text) return;
-  if (state.eta) state.eta.shown = text;
-  el.textContent = text;
-  // Replay the entrance so the pill reads as "live" rather than static.
+
+  const wasHidden = el.classList.contains("hidden");
+  if (el.textContent !== text) el.textContent = text;
+  if (!wasHidden) return;
+
+  // First appearance (including right after a page refresh): slide it in.
   el.classList.remove("hidden");
   el.style.animation = "none";
   void el.offsetWidth;
@@ -998,7 +1129,9 @@ function paintJobProgress(job) {
     // Nothing left to wait for; the summary line replaces the estimate.
     paintEta(0);
   } else {
-    updateEta(processed, total);
+    // ``elapsed`` is the server's clock for the whole job, so a refreshed page
+    // recomputes the average speed from the real start instead of from zero.
+    updateEta(processed, total, Number(job.elapsed));
   }
 }
 
@@ -1466,24 +1599,32 @@ function cancelFolderHistoryClose() {
   }
 }
 
-/** Merge "recently used" with "currently indexed" into one de-duplicated list. */
+/**
+ * Merge "recently used" with "currently indexed" into one de-duplicated list.
+ *
+ * ``folder_history`` keeps the newest entry first, so only its head is really
+ * "the last one used" - tagging every remembered folder "最近" said nothing.
+ * That one goes to the top; the rest are simply indexed albums, and a folder
+ * that is both keeps both badges.
+ */
 function folderHistoryEntries(indexed) {
   const entries = [];
-  const seen = new Set();
+  const byKey = new Map();
   const push = (path, tag) => {
     const clean = String(path || "").trim();
     if (!clean) return;
     const key = folderPathKey(clean);
-    if (seen.has(key)) {
-      const existing = entries.find((e) => e.key === key);
-      if (existing && tag) existing.tags.add(tag);
+    const existing = byKey.get(key);
+    if (existing) {
+      if (tag) existing.tags.add(tag);
       return;
     }
-    seen.add(key);
-    entries.push({ key, path: clean, tags: new Set(tag ? [tag] : []) });
+    const entry = { key, path: clean, tags: new Set(tag ? [tag] : []) };
+    byKey.set(key, entry);
+    entries.push(entry);
   };
+  push(state.folderHistory[0], "最近");
   (indexed || []).forEach((f) => push(f, "已索引"));
-  state.folderHistory.forEach((f) => push(f, "最近"));
   return entries;
 }
 
@@ -1507,9 +1648,13 @@ async function toggleFolderHistory() {
     panel.innerHTML = entries
       .map((entry) => {
         const tags = [...entry.tags]
-          .map((t) => `<span class="history-tag">${escapeHtml(t)}</span>`)
+          .map(
+            (t) =>
+              `<span class="history-tag${t === "最近" ? " recent" : ""}">${escapeHtml(t)}</span>`
+          )
           .join("");
-        return `<div class="folder-history-item" role="option" data-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">${ICONS.folder || ""}<span class="history-name">${escapeHtml(entry.path)}</span>${tags}</div>`;
+        const tagHtml = tags ? `<span class="history-tags">${tags}</span>` : "";
+        return `<div class="folder-history-item" role="option" data-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">${ICONS.folder || ""}<span class="history-name">${escapeHtml(entry.path)}</span>${tagHtml}</div>`;
       })
       .join("");
     panel.querySelectorAll(".folder-history-item").forEach((el) => {
@@ -2021,7 +2166,6 @@ async function cleanCache() {
 const SCORE_EDITORS = [
   { key: "score", numberId: "editScore", rangeId: "editScoreRange" },
   { key: "technical", numberId: "editTechnical", rangeId: "editTechnicalRange" },
-  { key: "composition", numberId: "editComposition", rangeId: "editCompositionRange" },
   { key: "memory", numberId: "editMemory", rangeId: "editMemoryRange" },
   { key: "uniqueness", numberId: "editUniqueness", rangeId: "editUniquenessRange" },
 ];
@@ -2083,7 +2227,6 @@ function openEditPreview() {
   const values = {
     score: photo.score ?? 0,
     technical: dims.technical ?? 0,
-    composition: dims.composition ?? 0,
     memory: dims.memory ?? 0,
     uniqueness: dims.uniqueness ?? 0,
   };
@@ -2106,7 +2249,7 @@ async function saveEditedPhoto() {
     return;
   }
   const dimensions = {};
-  for (const key of ["technical", "composition", "memory", "uniqueness"]) {
+  for (const key of ["technical", "memory", "uniqueness"]) {
     const el = $("edit" + key[0].toUpperCase() + key.slice(1));
     const value = parseFloat(el.value);
     if (Number.isNaN(value) || value < 0 || value > 10) {
@@ -2426,15 +2569,39 @@ async function openImportDialog() {
     return;
   }
   $("importTarget").value = state.folder;
-  if (state.importSource && !$("importSource").value) {
-    $("importSource").value = state.importSource;
-  }
+  await prefillImportSource();
   setImportPreview("");
   showModal($("importModal"));
   // Opening the dialog is the moment the card is expected to be in the reader,
   // so any deletion queued while it was away is offered right here.
   const source = $("importSource").value.trim();
   if (source) await offerCardSync(source);
+}
+
+/**
+ * Fill the source field with the folder this album was last imported from.
+ *
+ * The remembered card path is the fallback, but a camera album's own pairing is
+ * the better answer: it is stored per album, survives a browser change, and is
+ * exactly what the user means by "the SD card I use for these photos". The
+ * field is only filled when it is empty, so a path typed in this session is
+ * never overwritten.
+ */
+async function prefillImportSource() {
+  const field = $("importSource");
+  if (field.value.trim()) return;
+  let source = state.importSource || "";
+  if (state.folder) {
+    try {
+      const query = `?folder=${encodeURIComponent(state.folder)}`;
+      const data = await api(`/api/card/status${query}`);
+      const current = data.current;
+      if (current && current.source) source = current.source;
+    } catch (e) {
+      console.warn("读取相机相册配对失败", e);
+    }
+  }
+  if (source) field.value = source;
 }
 
 async function pickImportSource() {
@@ -3073,6 +3240,10 @@ function init() {
   // place that says so, so it keeps itself up to date.
   refreshCardStatus();
   startCardPolling();
+  // Independent of the album: a job may belong to another folder, or to none.
+  // Runs in parallel with the album load so a refreshed page shows the running
+  // progress bar as early as possible.
+  resumeScanJob();
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshCardStatus();
   });

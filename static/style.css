@@ -28,9 +28,8 @@
   --keep: #608d6d;
   --maybe: #c78d46;
   
-  /* Four-dimensional Memory Tones */
+  /* Three-dimensional Memory Tones */
   --dim-technical: #5b7c99;
-  --dim-composition: #ba8c4e;
   --dim-memory: #bd6371;
   --dim-uniqueness: #658c6a;
   /* Total score uses the warm brand accent, matching the gallery pills. */
@@ -1583,10 +1582,6 @@ select {
   --score-color: var(--dim-technical);
   --score-glow: rgba(91, 124, 153, 0.28);
 }
-.form-grid .score-editor[data-score-key="composition"] {
-  --score-color: var(--dim-composition);
-  --score-glow: rgba(186, 140, 78, 0.28);
-}
 .form-grid .score-editor[data-score-key="memory"] {
   --score-color: var(--dim-memory);
   --score-glow: rgba(189, 99, 113, 0.28);
@@ -1914,14 +1909,28 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.folder-history-item .history-tag {
+/* Tags sit in their own right-aligned group. Putting ``margin-left: auto`` on
+   the group rather than on each tag keeps them in a fixed order and against the
+   right edge, however long the path beside them is. */
+.folder-history-item .history-tags {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.folder-history-item .history-tag {
   font-size: 11px;
   color: var(--primary-dark);
   background: var(--primary-light);
   border-radius: 99px;
   padding: 1px 8px;
-  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* The one folder that was opened last is the only one worth calling out. */
+.folder-history-item .history-tag.recent {
+  color: #fff;
+  background: var(--primary);
 }
 .folder-history-item:hover {
   background: var(--primary-light);

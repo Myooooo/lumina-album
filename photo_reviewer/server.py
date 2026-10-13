@@ -19,6 +19,8 @@ from typing import Any
 from flask import Flask, jsonify, request, send_file
 
 from .api_client import (
+    DIMENSION_KEYS,
+    LEGACY_DIMENSION_KEYS,
     PROMPT_PRESETS,
     SemanticSearchError,
     semantic_search,
@@ -94,7 +96,7 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         "height": photo["height"],
         "location": photo.get("location"),
         "exif": photo.get("exif") or {},
-        "dimensions": photo.get("dimensions") or {},
+        "dimensions": _clean_dimensions(photo.get("dimensions")),
         "score": photo.get("score"),
         "tags": photo.get("tags") or [],
         "reason": photo.get("reason"),
@@ -125,6 +127,34 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
             }
         )
     return payload
+
+
+def _clean_dimensions(raw: Any) -> dict[str, Any]:
+    """Drop retired dimension keys from a stored object before it is served.
+
+    The startup migration rewrites every row, but a row can be read before that
+    background pass reaches it (or after a hand-edited database). The retired
+    key is merged into "technical" with the same rule the migration and the
+    analysis path use, so every caller sees one consistent shape.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return raw if isinstance(raw, dict) else {}
+    retired = [key for key in LEGACY_DIMENSION_KEYS if key in raw]
+    if not retired:
+        return raw
+    merged = dict(raw)
+    values = []
+    for key in retired:
+        try:
+            values.append(max(0.0, min(10.0, float(merged.pop(key) or 0))))
+        except (TypeError, ValueError):
+            values.append(0.0)
+    try:
+        technical = max(0.0, min(10.0, float(merged.get("technical") or 0)))
+    except (TypeError, ValueError):
+        technical = 0.0
+    merged["technical"] = round((technical + sum(values)) / (len(values) + 1), 2)
+    return merged
 
 
 def _file_size(path: str | None) -> int:
@@ -735,6 +765,29 @@ def _cleanup_cache(
     }
 
 
+def _job_payload(job) -> dict[str, Any]:
+    """Shape one job for the API.
+
+    ``started_at`` and ``elapsed`` ride along so a page that is refreshed in the
+    middle of a job can recompute the remaining time from the whole run instead
+    of starting its own measurement from zero.
+    """
+    return {
+        "job_id": job.id,
+        "folder": job.folder,
+        "status": job.status,
+        "total": job.total,
+        "processed": job.processed,
+        "current": job.current,
+        "phase": job.phase,
+        "report": job.report,
+        "error": job.error,
+        "cancelled": job.cancelled,
+        "started_at": job.started_at,
+        "elapsed": round(job.elapsed, 2),
+    }
+
+
 def _load_settings_from_db(database: Database, cfg: Config) -> None:
     """Load persisted settings from the SQLite ``settings`` table."""
     raw = database.get_settings()
@@ -1211,19 +1264,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         for job in JOBS.list():
             if folder and job.folder != folder:
                 continue
-            jobs.append(
-                {
-                    "job_id": job.id,
-                    "folder": job.folder,
-                    "status": job.status,
-                    "total": job.total,
-                    "processed": job.processed,
-                    "current": job.current,
-                    "phase": job.phase,
-                    "error": job.error,
-                    "cancelled": job.cancelled,
-                }
-            )
+            jobs.append(_job_payload(job))
         jobs.sort(key=lambda item: (item["status"] != "running", item["job_id"]))
         return jsonify({"jobs": jobs})
 
@@ -1232,20 +1273,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         job = JOBS.get(job_id)
         if not job:
             return jsonify({"error": "任务不存在"}), 404
-        return jsonify(
-            {
-                "job_id": job.id,
-                "folder": job.folder,
-                "status": job.status,
-                "total": job.total,
-                "processed": job.processed,
-                "current": job.current,
-                "phase": job.phase,
-                "report": job.report,
-                "error": job.error,
-                "cancelled": job.cancelled,
-            }
-        )
+        return jsonify(_job_payload(job))
 
     @app.post("/api/scan/cancel/<job_id>")
     def api_scan_cancel(job_id: str):
@@ -1793,10 +1821,10 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             score = max(0.0, min(10.0, score))
         except (TypeError, ValueError):
             return jsonify({"error": "总分不合法"}), 400
-        dimensions = dict(photo.get("dimensions") or {})
+        dimensions = _clean_dimensions(photo.get("dimensions"))
         raw_dimensions = data.get("dimensions") or {}
         if isinstance(raw_dimensions, dict):
-            for key in ("technical", "composition", "memory", "uniqueness"):
+            for key in DIMENSION_KEYS:
                 if key in raw_dimensions:
                     try:
                         dimensions[key] = max(

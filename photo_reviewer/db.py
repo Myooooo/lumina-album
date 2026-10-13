@@ -1369,6 +1369,52 @@ class Database:
             finally:
                 conn.close()
 
+    def rows_with_dimensions(self) -> list[tuple[int, dict[str, Any]]]:
+        """``(id, dimensions)`` for every photo that has a dimensions object.
+
+        Used by the migration that folds the retired "composition" score into
+        "technical"; the raw JSON is decoded here so the caller only has to
+        decide what the merged object should look like.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, dimensions FROM photos "
+                    "WHERE dimensions IS NOT NULL AND dimensions != '' "
+                    "AND dimensions != '{}'"
+                ).fetchall()
+            finally:
+                conn.close()
+        result: list[tuple[int, dict[str, Any]]] = []
+        for row in rows:
+            try:
+                parsed = json.loads(row["dimensions"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(parsed, dict):
+                result.append((int(row["id"]), parsed))
+        return result
+
+    def rewrite_dimensions(self, updates: Sequence[tuple[int, dict[str, Any]]]) -> int:
+        """Replace the dimensions object of a batch of photos."""
+        if not updates:
+            return 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.executemany(
+                    "UPDATE photos SET dimensions=? WHERE id=?",
+                    [
+                        (json.dumps(dims, ensure_ascii=False), int(pid))
+                        for pid, dims in updates
+                    ],
+                )
+                conn.commit()
+                return len(updates)
+            finally:
+                conn.close()
+
     def clear_rendered_cache(self, photo_ids: Sequence[int]) -> int:
         """Forget thumb/proxy/hash so the next view re-renders from scratch.
 

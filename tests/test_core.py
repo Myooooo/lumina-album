@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -19,7 +20,11 @@ from urllib.parse import quote
 from PIL import Image
 
 from photo_reviewer.api_client import (
+    DEFAULT_STYLE_PROMPT,
+    JSON_FORMAT_SUFFIX,
+    PROMPT_PRESETS,
     SemanticSearchError,
+    _normalize_dimensions,
     _parse_model_json,
     analyze_image,
 )
@@ -59,7 +64,9 @@ from photo_reviewer.importer import (
 )
 from photo_reviewer.paths import canonical_path, is_in_named_dir
 from photo_reviewer.repair import (
+    needs_dimensions_repair,
     needs_orientation_repair,
+    repair_dimension_keys,
     repair_orientation_sizes,
     run_startup_repairs,
 )
@@ -92,7 +99,7 @@ def fake_analysis(proxy_path: str, config: Config, context=None) -> dict:
     return {
         "score": 7.5,
         "title": "温柔的黄昏",
-        "dimensions": {"technical": 7, "composition": 8, "memory": 9, "uniqueness": 6},
+        "dimensions": {"technical": 7, "memory": 9, "uniqueness": 6},
         "tags": ["风景", "黄昏"],
         "comment": "温柔的一刻",
     }
@@ -255,7 +262,7 @@ class DatabaseTests(unittest.TestCase):
         self.db.update_metadata(
             photo_id,
             9.5,
-            {"technical": 9, "composition": 8, "memory": 7, "uniqueness": 6},
+            {"technical": 9, "memory": 7, "uniqueness": 6},
             ["新标签", "风景"],
             "新评语",
             "新标题",
@@ -1023,7 +1030,6 @@ class ServerApiTests(unittest.TestCase):
                 "score": 9.2,
                 "dimensions": {
                     "technical": 9,
-                    "composition": 8,
                     "memory": 9,
                     "uniqueness": 7,
                 },
@@ -1278,7 +1284,7 @@ class ServerApiTests(unittest.TestCase):
         self.db.update_metadata(
             photo_id,
             8.2,
-            {"technical": 7.5, "composition": 8.5, "memory": 9.0, "uniqueness": 7.8},
+            {"technical": 7.5, "memory": 9.0, "uniqueness": 7.8},
             ["夏日"],
             "很好",
             "标题",
@@ -1287,6 +1293,7 @@ class ServerApiTests(unittest.TestCase):
         listing = self.client.get("/api/photos").get_json()["photos"][0]
         self.assertEqual(listing["dimensions"]["technical"], 7.5)
         self.assertEqual(listing["dimensions"]["memory"], 9.0)
+        self.assertNotIn("composition", listing["dimensions"])
         detail = self.client.get(f"/api/photo/{photo_id}").get_json()
         self.assertEqual(detail["dimensions"], listing["dimensions"])
 
@@ -3368,6 +3375,7 @@ class OrientationTests(unittest.TestCase):
         self.assertTrue(needs_orientation_repair(self.db))
         run_startup_repairs(self.db, self.cfg)
         self.assertFalse(needs_orientation_repair(self.db))
+        self.assertFalse(needs_dimensions_repair(self.db))
         # A second call is a no-op rather than a second pass.
         self.assertEqual(run_startup_repairs(self.db, self.cfg), {})
 
@@ -3384,6 +3392,127 @@ class OrientationTests(unittest.TestCase):
         )
         report = repair_orientation_sizes(self.db, self.cfg)
         self.assertEqual(report["checked"], 0)
+
+
+class DimensionMergeTests(unittest.TestCase):
+    """「构图」 was merged into 「技术」; old rows have to follow.
+
+    The two were both craft judgements about the frame, and asking the model for
+    both produced numbers that tracked each other. The retired key must not
+    survive anywhere - not in the database, not in an analysis result, not in a
+    hand-edited settings row.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _photo(self, name: str, dimensions) -> int:
+        path = os.path.join(self.folder, name)
+        Image.new("RGB", (24, 18), (120, 90, 60)).save(path, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": name,
+                "status": "analyzed",
+                "score": 8.0,
+                "dimensions": dimensions,
+            }
+        )
+        return self.db.get_photo_by_path(path)["id"]
+
+    def test_the_merge_averages_the_two_scores(self) -> None:
+        pid = self._photo("a.jpg", {"technical": 6, "composition": 8, "memory": 9})
+        report = repair_dimension_keys(self.db)
+        self.assertEqual(report["merged"], 1)
+        dims = self.db.get_photo(pid)["dimensions"]
+        self.assertEqual(dims["technical"], 7.0)
+        self.assertNotIn("composition", dims)
+        self.assertEqual(dims["memory"], 9)
+
+    def test_rows_without_the_retired_key_are_untouched(self) -> None:
+        pid = self._photo("b.jpg", {"technical": 7, "memory": 8, "uniqueness": 6})
+        report = repair_dimension_keys(self.db)
+        self.assertEqual(report["merged"], 0)
+        self.assertEqual(self.db.get_photo(pid)["dimensions"]["technical"], 7)
+
+    def test_an_empty_dimensions_object_stays_empty(self) -> None:
+        """The UI reads {} as "not scored yet"; it must not gain a fake score."""
+        pid = self._photo("c.jpg", {})
+        repair_dimension_keys(self.db)
+        self.assertEqual(self.db.get_photo(pid)["dimensions"], {})
+
+    def test_the_merge_is_idempotent(self) -> None:
+        pid = self._photo("d.jpg", {"technical": 5, "composition": 5})
+        repair_dimension_keys(self.db)
+        repair_dimension_keys(self.db)
+        self.assertEqual(self.db.get_photo(pid)["dimensions"]["technical"], 5)
+
+    def test_the_model_result_folds_a_four_key_answer(self) -> None:
+        """An old prompt (or a cached one) still gets its composition counted."""
+        result = _normalize_dimensions(
+            {"technical": 6, "composition": 8, "memory": 9, "uniqueness": 4}
+        )
+        self.assertEqual(
+            result, {"technical": 7.0, "memory": 9.0, "uniqueness": 4.0}
+        )
+
+    def test_the_model_result_keeps_three_keys_unchanged(self) -> None:
+        result = _normalize_dimensions({"technical": 6, "memory": 9, "uniqueness": 4})
+        self.assertEqual(
+            result, {"technical": 6.0, "memory": 9.0, "uniqueness": 4.0}
+        )
+
+    def test_the_prompt_no_longer_asks_for_four_dimensions(self) -> None:
+        self.assertNotIn("composition", JSON_FORMAT_SUFFIX)
+        self.assertNotIn("composition", DEFAULT_STYLE_PROMPT)
+        self.assertIn("technical", DEFAULT_STYLE_PROMPT)
+        for preset in PROMPT_PRESETS.values():
+            self.assertNotIn("composition", preset)
+
+    def test_the_schema_has_no_composition_column(self) -> None:
+        """The score lives inside the JSON blob, so the column list is the test."""
+        with self.db as _:
+            pass
+        raw = sqlite3.connect(self.cfg.db_path)
+        columns = [row[1] for row in raw.execute("PRAGMA table_info(photos)")]
+        raw.close()
+        self.assertNotIn("composition", columns)
+
+    def test_the_api_never_returns_the_retired_key(self) -> None:
+        """A row that has not been migrated yet must not leak the old key."""
+        pid = self._photo("e.jpg", {"technical": 5, "memory": 6})
+        # Write straight past upsert_photo so the legacy shape is really stored.
+        raw = sqlite3.connect(self.cfg.db_path)
+        raw.execute(
+            "UPDATE photos SET dimensions=? WHERE id=?",
+            (json.dumps({"technical": 5, "composition": 7, "memory": 6}), pid),
+        )
+        raw.commit()
+        raw.close()
+
+        app = create_app(self.cfg, self.db)
+        client = app.test_client()
+        listing = client.get("/api/photos").get_json()["photos"][0]
+        self.assertNotIn("composition", listing["dimensions"])
+
+        # And an edit that only touches another field still drops it.
+        resp = client.post(
+            f"/api/photo/{pid}/edit",
+            json={"score": 8.0, "dimensions": {"memory": 6}},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("composition", resp.get_json()["dimensions"])
 
 
 class CardStatusPayloadTests(unittest.TestCase):

@@ -6,9 +6,10 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .cache import cleanup_folder_cache
@@ -85,6 +86,15 @@ class ScanJob:
     error: str | None = None
     cancelled: bool = False
     report: dict | None = None
+    #: ``time.time()`` when the job was created. The UI needs it to keep its
+    #: remaining-time estimate honest across a page refresh: without a start
+    #: point a reloaded page has to re-learn the speed from a standing start
+    #: and shows nothing useful for the first few seconds.
+    started_at: float = field(default_factory=time.time)
+
+    @property
+    def elapsed(self) -> float:
+        return max(0.0, time.time() - self.started_at)
 
 
 class JobManager:

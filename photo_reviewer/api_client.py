@@ -18,6 +18,18 @@ class SemanticSearchError(RuntimeError):
     """Raised when the local model cannot complete a semantic search."""
 
 
+#: The scoring dimensions, in the order the UI shows them.
+#:
+#: "composition" was retired: it measured much the same thing as "technical",
+#: and asking the model for both made it split hairs between two nearly
+#: identical numbers. The migration in ``db.py`` averages the old value into
+#: ``technical``, and ``_normalize_dimensions`` applies the same rule to a model
+#: that still answers with four keys.
+DIMENSION_KEYS = ("technical", "memory", "uniqueness")
+
+#: A dimension older builds stored and the prompt no longer asks for.
+LEGACY_DIMENSION_KEYS = ("composition",)
+
 JSON_FORMAT_MARKER = "Return ONLY a JSON object, no markdown, with exactly these keys:"
 
 JSON_FORMAT_SUFFIX = """Return ONLY a JSON object, no markdown, with exactly these keys:
@@ -26,7 +38,6 @@ JSON_FORMAT_SUFFIX = """Return ONLY a JSON object, no markdown, with exactly the
   "title": "<一个简短、有画面感的照片命名，10字以内>",
   "dimensions": {
     "technical": <number 0-10>,
-    "composition": <number 0-10>,
     "memory": <number 0-10>,
     "uniqueness": <number 0-10>
   },
@@ -41,9 +52,8 @@ STYLE_TEMPLATE = """你是「拾光相册」的{style}。
 用户偶尔会附带拍摄时间、地点或设备等元数据，只需把它们当作非常轻的参考，不必刻意使用；
 评分、标签和评价都应以照片中真实可见的内容为主，不要被元数据牵着走，也不要编造画面里没有的东西。
 
-评估四个维度，每项 0-10 分：
-- technical：清晰度、曝光、画质；
-- composition：构图、视觉平衡、美感；
+评估三个维度，每项 0-10 分：
+- technical：清晰度、曝光、画质，以及构图与视觉平衡；
 - memory：情感共鸣、值得回忆的程度；
 - uniqueness：稀有度、故事感、特别之处。"""
 
@@ -266,19 +276,40 @@ def _parse_model_json(content: Any) -> dict[str, Any]:
 
 
 def _normalize_dimensions(raw: Any) -> dict[str, float]:
-    dims = {
-        "technical": 0.0,
-        "composition": 0.0,
-        "memory": 0.0,
-        "uniqueness": 0.0,
-    }
-    if isinstance(raw, dict):
-        for key in dims:
-            try:
-                val = float(raw.get(key, 0))
-                dims[key] = max(0.0, min(10.0, val))
-            except (TypeError, ValueError):
-                pass
+    """Clamp the three scoring dimensions, folding in any legacy "composition".
+
+    A model that still answers with four keys (an old prompt, or a system prompt
+    the user wrote before the merge) is not wrong about the photo, it is just
+    using the previous shape: its composition score belongs to technical, so it
+    is averaged in rather than dropped. The same rule runs over stored rows in
+    ``repair.repair_dimension_keys`` and over API payloads in
+    ``server._clean_dimensions``, so a photo scores the same whichever path it
+    arrives through.
+    """
+    dims = {key: 0.0 for key in DIMENSION_KEYS}
+    if not isinstance(raw, dict):
+        return dims
+    for key in dims:
+        try:
+            val = float(raw.get(key, 0))
+            dims[key] = max(0.0, min(10.0, val))
+        except (TypeError, ValueError):
+            pass
+    legacy_values = []
+    for key in LEGACY_DIMENSION_KEYS:
+        if key not in raw:
+            continue
+        try:
+            value = float(raw.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0.0
+        # Clamped here as well as at the top, so a wild model answer cannot drag
+        # a good technical score out of range.
+        legacy_values.append(max(0.0, min(10.0, value)))
+    if legacy_values:
+        dims["technical"] = round(
+            (dims["technical"] + sum(legacy_values)) / (len(legacy_values) + 1), 2
+        )
     return dims
 
 

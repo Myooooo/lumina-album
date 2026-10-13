@@ -11,7 +11,9 @@ import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
+from .api_client import LEGACY_DIMENSION_KEYS
 from .config import Config
 from .db import Database
 from .thumbnailer import image_size_on_disk
@@ -21,6 +23,8 @@ logger = logging.getLogger(__name__)
 #: Settings key + version, so each repair runs once per database.
 ORIENTATION_REPAIR_KEY = "orientation_repair"
 ORIENTATION_REPAIR_VERSION = "1"
+DIMENSIONS_REPAIR_KEY = "dimensions_repair"
+DIMENSIONS_REPAIR_VERSION = "1"
 
 _REPAIR_LOCK = threading.Lock()
 _REPAIR_THREADS: set[threading.Thread] = set()
@@ -120,6 +124,59 @@ def needs_orientation_repair(db: Database) -> bool:
     return db.get_meta(ORIENTATION_REPAIR_KEY) != ORIENTATION_REPAIR_VERSION
 
 
+def _clamp(value: Any) -> float:
+    """Coerce a stored dimension score into the 0-10 range."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(10.0, number))
+
+
+def repair_dimension_keys(db: Database) -> dict[str, int]:
+    """Fold the retired "composition" score into "technical" and drop the key.
+
+    "构图" and "技术" were both craft judgements about the frame, and asking the
+    model for the two produced numbers that tracked each other closely. They are
+    one dimension now, so an existing row is merged with the same rule the
+    analysis path uses: the average of the two, so a photo's technical score
+    does not jump to an unrelated value the moment it is next viewed.
+
+    Rows that never had a composition score are left exactly as they are - in
+    particular a wholly empty object stays empty, which the UI reads as "not
+    scored yet".
+    """
+    report = {"scanned": 0, "merged": 0}
+    updates: list[tuple[int, dict[str, Any]]] = []
+    for photo_id, dims in db.rows_with_dimensions():
+        report["scanned"] += 1
+        retired = [key for key in LEGACY_DIMENSION_KEYS if key in dims]
+        if not retired:
+            continue
+        merged = dict(dims)
+        values = [_clamp(merged.pop(key)) for key in retired]
+        try:
+            technical = float(merged.get("technical") or 0)
+        except (TypeError, ValueError):
+            technical = 0.0
+        # The mean of what used to be separate numbers, so a photo's score does
+        # not jump the moment the two rows become one.
+        merged["technical"] = round(
+            (max(0.0, min(10.0, technical)) + sum(values)) / (len(values) + 1), 2
+        )
+        updates.append((photo_id, merged))
+
+    if updates:
+        db.rewrite_dimensions(updates)
+        report["merged"] = len(updates)
+    return report
+
+
+def needs_dimensions_repair(db: Database) -> bool:
+    """True when this database still has the retired dimension key."""
+    return db.get_meta(DIMENSIONS_REPAIR_KEY) != DIMENSIONS_REPAIR_VERSION
+
+
 def run_startup_repairs(db: Database, config: Config) -> dict[str, object]:
     """Run every pending one-off repair, once per database."""
     result: dict[str, object] = {}
@@ -128,4 +185,9 @@ def run_startup_repairs(db: Database, config: Config) -> dict[str, object]:
         db.set_meta(ORIENTATION_REPAIR_KEY, ORIENTATION_REPAIR_VERSION)
         result["orientation"] = report
         logger.info("orientation repair: %s", report)
+    if needs_dimensions_repair(db):
+        report = repair_dimension_keys(db)
+        db.set_meta(DIMENSIONS_REPAIR_KEY, DIMENSIONS_REPAIR_VERSION)
+        result["dimensions"] = report
+        logger.info("dimensions repair: %s", report)
     return result

@@ -29,16 +29,106 @@ function extract(name) {
   throw new Error(`unbalanced braces in ${name}`);
 }
 
+/** Lift a top-level `const NAME = ...;` declaration. */
+function extractConst(name) {
+  const match = new RegExp(`^const ${name} = [^;]+;`, "m").exec(src);
+  if (!match) throw new Error(`static/app.js has no const ${name}`);
+  return match[0];
+}
+
 const PHASE_LABELS = { plan: "正在比对", copy: "正在拷贝", index: "正在索引", analyze: "正在解读" };
 
-const helpers = new Function(
+/* --------------------------------------------------------------- harness ---
+   ``updateEta`` reads the module-level ``state`` and calls ``performance.now``
+   and ``paintEta``. All three are supplied here so the tests can drive a fake
+   clock and observe exactly what the pill was asked to display.
+   ------------------------------------------------------------------------- */
+const etaHarness = new Function(
   "PHASE_LABELS",
+  "clock",
   `${extract("phaseLabel")}
    ${extract("progressLabel")}
    ${extract("jobSummaryText")}
+   ${extractConst("ETA_RATE_ALPHA")}
+   ${extractConst("ETA_OVERALL_WEIGHT")}
+   ${extractConst("ETA_DISPLAY_ALPHA")}
+   ${extractConst("ETA_MIN_SAMPLE_SECONDS")}
    ${extract("formatEta")}
-   return { phaseLabel, progressLabel, jobSummaryText, formatEta };`
-)(PHASE_LABELS);
+   ${extract("seedEta")}
+   ${extract("smoothEta")}
+   ${extract("updateEta")}
+
+   let state = { eta: null };
+   const painted = [];
+   // Same contract as the real one, without touching the DOM.
+   function paintEta(seconds) {
+     const value = seconds === 0 ? 0 : seconds;
+     const text = value === 0 ? "即将完成" : formatEta(value);
+     if (state.eta) {
+       state.eta.shown = text || null;
+       if (Number.isFinite(value)) state.eta.shownSeconds = value;
+     }
+     painted.push(text || null);
+   }
+   return {
+     phaseLabel, progressLabel, jobSummaryText, formatEta, updateEta, seedEta, smoothEta,
+     constants: { ETA_RATE_ALPHA, ETA_OVERALL_WEIGHT, ETA_DISPLAY_ALPHA, ETA_MIN_SAMPLE_SECONDS },
+     eta: () => state.eta,
+     painted: () => painted.slice(),
+     lastPainted: () => painted[painted.length - 1],
+     reset: () => { state = { eta: null }; painted.length = 0; },
+   };`
+)(PHASE_LABELS, () => Date.now());
+
+// A controllable clock, so the ETA maths is deterministic.
+const clock = (() => {
+  let value = 1000;
+  return {
+    now: () => value,
+    set: (next) => {
+      value = next;
+    },
+    advance: (ms) => {
+      value += ms;
+    },
+  };
+})();
+
+const helpers = new Function(
+  "PHASE_LABELS",
+  "performance",
+  `${extract("phaseLabel")}
+   ${extract("progressLabel")}
+   ${extract("jobSummaryText")}
+   ${extractConst("ETA_RATE_ALPHA")}
+   ${extractConst("ETA_OVERALL_WEIGHT")}
+   ${extractConst("ETA_DISPLAY_ALPHA")}
+   ${extractConst("ETA_MIN_SAMPLE_SECONDS")}
+   ${extract("formatEta")}
+   ${extract("seedEta")}
+   ${extract("smoothEta")}
+   ${extract("updateEta")}
+
+   let state = { eta: null };
+   const painted = [];
+   function paintEta(seconds) {
+     const value = seconds === 0 ? 0 : seconds;
+     const text = value === 0 ? "即将完成" : formatEta(value);
+     if (state.eta) {
+       state.eta.shown = text || null;
+       if (Number.isFinite(value)) state.eta.shownSeconds = value;
+     }
+     painted.push(text || null);
+   }
+   return {
+     phaseLabel, progressLabel, jobSummaryText, formatEta, updateEta,
+     constants: { ETA_RATE_ALPHA, ETA_OVERALL_WEIGHT, ETA_DISPLAY_ALPHA, ETA_MIN_SAMPLE_SECONDS },
+     eta: () => state.eta,
+     painted: () => painted.slice(),
+     lastPainted: () => painted[painted.length - 1],
+     reset: () => { state = { eta: null }; painted.length = 0; },
+   };`
+)(PHASE_LABELS, clock);
 
 // ``nextPreviewAfterRemoval`` reads the module-level ``state``; bind a stub.
 const nextPreviewAfterRemoval = new Function(
@@ -50,12 +140,26 @@ const next = (ids, current, removed) =>
     { photos: ids.map((id) => ({ id })), currentPreviewId: current }
   )(removed);
 
+// ``folderHistoryEntries`` also reads ``state``; bind a stub with a history.
+const folderHistoryEntries = new Function(
+  "state",
+  "folderPathKey",
+  `${extract("folderPathKey")}
+   ${extract("folderHistoryEntries")}
+   return folderHistoryEntries;`
+);
+const historyEntries = (indexed, history) =>
+  folderHistoryEntries({ folderHistory: history }, (p) =>
+    String(p).replace(/[\/\\]+$/, "").toLowerCase()
+  )(indexed);
+
 let failures = 0;
 let checks = 0;
 
 function check(label, actual, expected) {
   checks += 1;
-  if (actual === expected) return;
+  const same = JSON.stringify(actual) === JSON.stringify(expected);
+  if (same) return;
   failures += 1;
   console.log(`  FAIL ${label}`);
   console.log(`       got:  ${JSON.stringify(actual)}`);
@@ -80,7 +184,94 @@ check("exactly an hour", helpers.formatEta(3600), "剩 1 小时");
 check("hours and minutes", helpers.formatEta(3900), "剩 1 小时 5 分");
 check("negative clamps", helpers.formatEta(-9), "即将完成");
 
-/* ------------------------------------------------------------ progressLabel */
+/* ------------------------------------------------------------------- ETA -- */
+section("remaining-time estimate");
+
+// A steady job: 5 files every second, 100 in total.
+helpers.reset();
+clock.set(1000);
+helpers.updateEta(10, 100, 2); // the server says 2s have passed
+check("the first estimate is seeded from the server's elapsed time", helpers.eta().rate, 5);
+check("so an estimate is available immediately", helpers.lastPainted(), "剩 18 秒");
+
+clock.advance(1000);
+helpers.updateEta(15, 100, 3);
+clock.advance(1000);
+helpers.updateEta(20, 100, 4);
+check("a steady job keeps a steady estimate", helpers.lastPainted(), "剩 17 秒");
+
+// One slow tick: three seconds pass and a single file is processed. The instant
+// rate collapses from 5/s to 0.33/s. The old implementation followed it and the
+// estimate leapt to well over a minute.
+const beforeSlow = helpers.eta().shownSeconds;
+clock.advance(3000);
+helpers.updateEta(21, 100, 7);
+const afterSlow = helpers.eta().shownSeconds;
+check(
+  "one slow tick barely moves the estimate",
+  Math.abs(afterSlow - beforeSlow) <= 3,
+  true
+);
+check(
+  "the displayed estimate stays near the whole-run average",
+  afterSlow > 15 && afterSlow < 30,
+  true
+);
+
+// ...and it recovers once the job is moving again, without overshooting.
+clock.advance(1000);
+helpers.updateEta(26, 100, 8);
+const recovered = helpers.eta().shownSeconds;
+check("the estimate recovers after the slow patch", recovered > 15 && recovered < 30, true);
+check(
+  "and never counts back up sharply",
+  Math.abs(recovered - afterSlow) <= 3,
+  true
+);
+
+// Jitter: alternating fast and slow ticks must not make the pill flap.
+helpers.reset();
+clock.set(1000);
+helpers.updateEta(10, 100, 2);
+const samples = [];
+for (let tick = 0; tick < 8; tick += 1) {
+  clock.advance(1000);
+  const step = tick % 2 === 0 ? 8 : 2;
+  const processed = helpers.eta().processed + step;
+  helpers.updateEta(processed, 100, 2 + tick + 1);
+  samples.push(helpers.eta().shownSeconds);
+}
+const swing = Math.max(...samples) - Math.min(...samples);
+check("alternating fast/slow ticks stay within a narrow band", swing <= 12, true);
+
+helpers.reset();
+clock.set(5000);
+helpers.updateEta(50, 100, 10);
+clock.advance(1000);
+helpers.updateEta(0, 100, 0);
+check("progress moving backwards resets rather than going negative", helpers.lastPainted(), null);
+
+helpers.reset();
+clock.set(9000);
+helpers.updateEta(100, 100, 10);
+check("a finished job says so", helpers.lastPainted(), "即将完成");
+
+helpers.reset();
+clock.set(1000);
+helpers.updateEta(0, 100, 0);
+check("no progress yet means no estimate", helpers.lastPainted(), null);
+
+/* ------------------------------------------------- refresh keeps the estimate */
+section("a page refresh keeps the estimate");
+// Refreshing throws away the in-memory rate; the server's elapsed time is what
+// lets the very first poll show a sensible number straight away.
+helpers.reset();
+clock.set(60000);
+helpers.updateEta(30, 120, 15);
+check("first poll after a refresh still has an estimate", helpers.lastPainted(), "剩 45 秒");
+check("and it matches the whole-run speed", Math.round(helpers.eta().rate), 2);
+
+/* ------------------------------------------------------------------- labels */
 section("progressLabel");
 check(
   "the bin sweep counts photos",
@@ -227,6 +418,42 @@ check("no dialog open stays closed", next([1, 2], null, [1]), null);
 check("nothing removed keeps the position", next([1, 2], 1, []), 1);
 check("the only photo closes it", next([9], 9, [9]), null);
 check("removing earlier photos keeps the position", next([1, 2, 3], 3, [1, 2]), 3);
+
+/* -------------------------------------------------- folderHistoryEntries */
+section("folderHistoryEntries");
+const tagsOf = (entries) => entries.map((e) => [...e.tags].join("+"));
+
+check(
+  "only the most recent folder is tagged 最近",
+  tagsOf(historyEntries(["D:/a", "D:/b", "D:/c"], ["D:/c", "D:/b", "D:/a"])),
+  ["最近+已索引", "已索引", "已索引"]
+);
+check(
+  "the most recent folder comes first",
+  historyEntries(["D:/a", "D:/b"], ["D:/b"]).map((e) => e.path),
+  ["D:/b", "D:/a"]
+);
+check(
+  "a folder that is both keeps both tags",
+  tagsOf(historyEntries(["D:/a", "D:/b"], ["D:/a"])),
+  ["最近+已索引", "已索引"]
+);
+check(
+  "an indexed folder with no history still shows",
+  tagsOf(historyEntries(["D:/only"], [])),
+  ["已索引"]
+);
+check(
+  "history entries that are not indexed still show",
+  tagsOf(historyEntries([], ["D:/gone"])),
+  ["最近"]
+);
+check(
+  "case and a trailing separator are the same folder",
+  tagsOf(historyEntries(["D:/Photos", "d:/photos/"], ["D:/PHOTOS"])),
+  ["最近+已索引"]
+);
+check("an empty list stays empty", historyEntries([], []), []);
 
 console.log(
   failures
