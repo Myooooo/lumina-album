@@ -332,11 +332,36 @@ svg {
 
 .progress-text {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+/* The label is the part that gets long (it ends in a file name). */
+.progress-text > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Remaining time, kept on one line so it never wraps under the label. */
+.progress-eta {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--primary-dark);
+  background: var(--primary-light);
+  border-radius: 99px;
+  padding: 1px 9px;
+  animation: etaIn .28s ease both;
+}
+
+@keyframes etaIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .progress-bar {
@@ -1815,13 +1840,14 @@ select {
 .dir-actions { text-align: right; margin-top: 14px; }
 
 /* ---------- Folder History Dropdown ---------- */
-/* Anchored to the input wrapper, so it drops out of the field's right edge. */
+/* Anchored to the input wrapper, so it is exactly as wide as the path field
+   itself - a dropdown that hangs out past its own field reads as a separate
+   floating panel. Long paths are truncated inside, never by widening this. */
 .folder-history {
   position: absolute;
   top: calc(100% + 8px);
+  left: 0;
   right: 0;
-  min-width: 320px;
-  max-width: min(620px, 84vw);
   z-index: 45;
   max-height: 300px;
   overflow: auto;
@@ -1879,10 +1905,14 @@ select {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-.folder-history-item svg { width: 14px; height: 14px; color: var(--muted); }
+.folder-history-item svg { width: 14px; height: 14px; color: var(--muted); flex-shrink: 0; }
 .folder-history-item .history-name {
+  /* ``min-width: 0`` is what actually lets the ellipsis kick in inside a flex
+     row; without it a long path stretches the whole dropdown. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .folder-history-item .history-tag {
   margin-left: auto;
@@ -2232,7 +2262,6 @@ select {
   align-items: center;
   width: 100%;
 }
-.remove-folder-btn { margin-right: auto; }
 
 /* The edit dialog holds a handful of short fields, so it stays compact. */
 #editModal .modal-content {

@@ -40,7 +40,10 @@
       <button id="cardBannerHideBtn" class="btn small icon-only" title="稍后再说"><span class="btn-icon" data-icon="close"></span></button>
     </div>
     <div id="scanProgress" class="scan-progress hidden">
-      <div class="progress-text" id="progressText">准备中…</div>
+      <div class="progress-text">
+        <span id="progressText">准备中…</span>
+        <span id="progressEta" class="progress-eta hidden"></span>
+      </div>
       <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
       <button id="cancelScanBtn" class="btn small"><span class="btn-icon" data-icon="close"></span>取消</button>
     </div>
@@ -340,6 +343,7 @@
               <select id="setGeocodingProvider">
                 <option value="nominatim">Nominatim（免费，无需 Key）</option>
                 <option value="amap">高德地图 API</option>
+                <option value="none">不使用（直接显示坐标）</option>
               </select>
             </label>
             <label>地理编码 API Key

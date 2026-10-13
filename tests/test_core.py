@@ -69,7 +69,7 @@ from photo_reviewer.scanner import (
     discover_photo_pairs,
     start_scan,
 )
-from photo_reviewer.server import create_app
+from photo_reviewer.server import _remove_file, create_app
 from photo_reviewer.thumbnailer import (
     cleanup_cache,
     hamming_distance,
@@ -474,6 +474,30 @@ class ApiClientTests(unittest.TestCase):
 
 
 class GeocodeTests(unittest.TestCase):
+    def test_provider_none_never_calls_a_service(self) -> None:
+        """The "不使用" option must keep every photo offline."""
+        from unittest.mock import patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        with patch("photo_reviewer.geocode._get_json") as get_json:
+            result = reverse_geocode(
+                30.25, 120.17, provider="none", api_key="k", interval=0.1
+            )
+        self.assertIsNone(result)
+        get_json.assert_not_called()
+
+    def test_geocoding_enabled_only_rejects_none(self) -> None:
+        from photo_reviewer.geocode import geocoding_enabled
+
+        self.assertTrue(geocoding_enabled("nominatim"))
+        self.assertTrue(geocoding_enabled("amap"))
+        self.assertTrue(geocoding_enabled(""))
+        self.assertTrue(geocoding_enabled(None))
+        self.assertFalse(geocoding_enabled("none"))
+        self.assertFalse(geocoding_enabled("NONE"))
+        self.assertFalse(geocoding_enabled(" none "))
+
     def test_amap_uses_formatted_address(self) -> None:
         from unittest.mock import patch
 
@@ -2910,6 +2934,198 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual(names, ["旅行"])
 
 
+class RemoveFileRetryTests(unittest.TestCase):
+    """Windows refuses to unlink a file another process has open.
+
+    Antivirus, the search indexer and Explorer's preview handler all hold files
+    briefly. Without a retry, a bin sweep over thousands of photos randomly
+    reports a handful as "删除文件失败" even though nothing is wrong.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.tmp.name, "busy.jpg")
+        Path(self.path).write_bytes(b"payload")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_a_free_file_is_removed_immediately(self) -> None:
+        _remove_file(self.path)
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_a_missing_file_is_not_an_error(self) -> None:
+        os.remove(self.path)
+        _remove_file(self.path)  # must not raise
+
+    def test_a_transient_lock_is_ridden_out(self) -> None:
+        real_remove = os.remove
+        calls = {"n": 0}
+
+        def flaky(path):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise PermissionError(32, "The process cannot access the file")
+            return real_remove(path)
+
+        with (
+            patch("photo_reviewer.server.os.remove", side_effect=flaky),
+            patch("photo_reviewer.server.time.sleep") as sleep,
+        ):
+            _remove_file(self.path)
+        self.assertEqual(calls["n"], 3)
+        self.assertFalse(os.path.exists(self.path))
+        self.assertTrue(sleep.called, "the retry must back off between attempts")
+
+    def test_a_permanent_lock_still_raises(self) -> None:
+        with (
+            patch(
+                "photo_reviewer.server.os.remove",
+                side_effect=PermissionError(32, "locked"),
+            ),
+            patch("photo_reviewer.server.time.sleep"),
+            self.assertRaises(PermissionError),
+        ):
+            _remove_file(self.path)
+        self.assertTrue(os.path.exists(self.path))
+
+    def test_a_different_error_is_not_retried(self) -> None:
+        with (
+            patch(
+                "photo_reviewer.server.os.remove",
+                side_effect=IsADirectoryError(21, "is a directory"),
+            ) as remove,
+            self.assertRaises(IsADirectoryError),
+        ):
+            _remove_file(self.path)
+        self.assertEqual(remove.call_count, 1)
+
+
+class EmptyTrashJobTests(unittest.TestCase):
+    """Clearing the bin is a tracked job, so the toolbar can show progress.
+
+    The sweep used to run inside the request; a full bin can hold thousands of
+    files, and the UI had nothing to display while it worked.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        self.trash = os.path.join(self.folder, ".photo-trash", "20260101")
+        os.makedirs(self.trash)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        # The sweep runs in a daemon thread. Wait it out before the database and
+        # the temporary folder go away, so a failing assertion cannot leave a
+        # thread writing into a half-deleted directory.
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            if not any(job.status in ("pending", "running") for job in JOBS.list()):
+                break
+            time.sleep(0.02)
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _trashed(self, name: str) -> int:
+        """Create one photo already sitting in the trash."""
+        path = os.path.join(self.trash, name)
+        Path(path).write_bytes(b"trashed" * 16)
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "original_path": os.path.join(self.folder, name),
+                "folder": self.folder,
+                "filename": name,
+                "status": "deleted",
+            }
+        )
+        return self.db.get_photo_by_path(path)["id"]
+
+    def test_the_background_job_reports_progress_and_finishes(self) -> None:
+        ids = [self._trashed(f"{i}.jpg") for i in range(5)]
+        resp = self.client.post(
+            "/api/trash/empty", json={"background": True, "folder": self.folder}
+        )
+        self.assertEqual(resp.status_code, 200)
+        job_id = resp.get_json()["job_id"]
+        job = wait_for_job(job_id)
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.phase, "trash")
+        self.assertEqual(job.total, 5)
+        self.assertEqual(job.processed, 5)
+        self.assertEqual(job.report["deleted"], 5)
+        for photo_id in ids:
+            self.assertIsNone(self.db.get_photo(photo_id))
+        self.assertEqual(os.listdir(self.trash), [])
+
+    def test_the_job_reports_an_empty_bin_without_failing(self) -> None:
+        resp = self.client.post("/api/trash/empty", json={"background": True})
+        job = wait_for_job(resp.get_json()["job_id"])
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.total, 0)
+        self.assertEqual(job.report["deleted"], 0)
+
+    def test_progress_is_visible_while_the_job_runs(self) -> None:
+        for i in range(4):
+            self._trashed(f"{i}.jpg")
+        job_id = self.client.post(
+            "/api/trash/empty", json={"background": True, "folder": self.folder}
+        ).get_json()["job_id"]
+        # The status endpoint is what the toolbar polls.
+        body = self.client.get(f"/api/scan/status/{job_id}").get_json()
+        self.assertEqual(body["phase"], "trash")
+        self.assertEqual(body["total"], 4)
+        self.assertIn("processed", body)
+        wait_for_job(job_id)
+
+    def test_cancelling_the_job_stops_the_sweep(self) -> None:
+        for i in range(3):
+            self._trashed(f"{i}.jpg")
+        job_id = self.client.post(
+            "/api/trash/empty", json={"background": True, "folder": self.folder}
+        ).get_json()["job_id"]
+        wait_for_job(job_id)
+        # Cancelling after the fact is refused, which is what the button relies
+        # on to report honestly.
+        cancel = self.client.post(f"/api/scan/cancel/{job_id}").get_json()
+        self.assertFalse(cancel["cancelled"])
+
+    def test_the_synchronous_form_still_returns_counts(self) -> None:
+        """Scripts and the other tests rely on the direct answer."""
+        self._trashed("direct.jpg")
+        body = self.client.post("/api/trash/empty", json={"folder": self.folder}).get_json()
+        self.assertEqual(body["deleted"], 1)
+        self.assertEqual(body["total"], 1)
+        self.assertFalse(body["cancelled"])
+
+    def test_the_refusal_guard_still_applies_in_the_job(self) -> None:
+        """A stale row pointing at a live photo is refused inside the job too."""
+        live = os.path.join(self.folder, "live.jpg")
+        Image.new("RGB", (24, 18), (120, 90, 60)).save(live, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": live,
+                "original_path": live,
+                "folder": self.folder,
+                "filename": "live.jpg",
+                "status": "deleted",
+            }
+        )
+        job_id = self.client.post(
+            "/api/trash/empty", json={"background": True, "folder": self.folder}
+        ).get_json()["job_id"]
+        job = wait_for_job(job_id)
+        self.assertEqual(job.report["deleted"], 0)
+        self.assertTrue(job.report["errors"])
+        self.assertTrue(os.path.exists(live), "the original was deleted!")
+
+
 class DeletionSafetyTests(unittest.TestCase):
     """Nothing outside a trash directory is ever erased.
 
@@ -3242,6 +3458,89 @@ class CardStatusPayloadTests(unittest.TestCase):
             "/api/card/status?folder=" + quote(self.album)
         ).get_json()
         self.assertEqual(body["current"]["pending"]["total"], 1)
+
+
+class GeocodingDisabledTests(unittest.TestCase):
+    """Choosing "不使用" keeps coordinates and never touches the network."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name,
+            db_path=os.path.join(self.tmp.name, "library.db"),
+            geocoding_provider="none",
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _gps_photo(self, location: str | None = None) -> tuple[int, str]:
+        path = os.path.join(self.folder, "gps.jpg")
+        exif = Image.Exif()
+        exif[274] = 1
+        Image.new("RGB", (40, 30), (120, 90, 60)).save(path, "JPEG", exif=exif)
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": "gps.jpg",
+                "status": "analyzed",
+                "score": 6.0,
+                "location": location,
+                "exif": {"latitude": 30.25, "longitude": 120.17},
+            }
+        )
+        return self.db.get_photo_by_path(path)["id"], path
+
+    def test_the_config_endpoint_stores_none(self) -> None:
+        resp = self.client.post("/api/config", json={"geocoding_provider": "none"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["geocoding_provider"], "none")
+        # And it survives a reload from the database.
+        fresh = Config(data_dir=self.tmp.name, db_path=self.cfg.db_path)
+        app = create_app(fresh, self.db)
+        self.assertEqual(
+            app.test_client().get("/api/config").get_json()["geocoding_provider"],
+            "none",
+        )
+
+    def test_an_unknown_provider_falls_back_instead_of_being_stored(self) -> None:
+        resp = self.client.post("/api/config", json={"geocoding_provider": "bogus"})
+        self.assertEqual(resp.get_json()["geocoding_provider"], "nominatim")
+
+    def test_an_empty_provider_still_means_nominatim(self) -> None:
+        """The pre-existing behaviour for a blank value must not change."""
+        resp = self.client.post("/api/config", json={"geocoding_provider": ""})
+        self.assertEqual(resp.get_json()["geocoding_provider"], "nominatim")
+
+    def test_no_request_is_made_when_disabled(self) -> None:
+        photo_id, _path = self._gps_photo()
+        with patch("photo_reviewer.server.reverse_geocode") as geocode:
+            self.client.get(f"/api/photo/{photo_id}")
+        geocode.assert_not_called()
+
+    def test_the_detail_payload_keeps_the_coordinates(self) -> None:
+        photo_id, _path = self._gps_photo()
+        body = self.client.get(f"/api/photo/{photo_id}").get_json()
+        self.assertEqual(body["exif"]["latitude"], 30.25)
+        self.assertEqual(body["exif"]["longitude"], 120.17)
+
+    def test_enrich_metadata_keeps_coordinates_when_disabled(self) -> None:
+        """A re-analysis must not quietly re-resolve an old address."""
+        from photo_reviewer.pipeline import enrich_metadata, prepare_proxy
+
+        path = os.path.join(self.folder, "again.jpg")
+        Image.new("RGB", (40, 30), (60, 90, 120)).save(path, "JPEG")
+        prepared = prepare_proxy(path, self.folder, self.cfg)
+        with patch("photo_reviewer.pipeline.reverse_geocode") as geocode:
+            enrich_metadata(prepared, self.cfg, existing_location="杭州市西湖区")
+        geocode.assert_not_called()
 
 
 if __name__ == "__main__":

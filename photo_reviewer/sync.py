@@ -96,7 +96,6 @@ def start_import(data: dict, db: Database, config: Config, plan=None) -> ScanJob
     job = JOBS.create(plan.target, False)
     job.phase = "copy"
     job.total = len(plan.copies)
-    job.detail = f"{options['mode']} / {options['raw_policy']} / {options['after']}"
     thread = threading.Thread(
         target=_import_worker,
         args=(job.id, plan, options, db, config),

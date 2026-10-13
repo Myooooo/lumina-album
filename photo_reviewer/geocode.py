@@ -16,6 +16,18 @@ import requests
 _EE = 0.00669342162296594323
 _A = 6378245.0
 
+#: Provider value that turns geocoding off entirely: coordinates are shown as
+#: they are and nothing is ever sent over the network.
+PROVIDER_NONE = "none"
+
+#: Every provider the settings dialog may store.
+PROVIDERS = ("nominatim", "amap", PROVIDER_NONE)
+
+
+def geocoding_enabled(provider: str | None) -> bool:
+    """False when the user asked for no reverse geocoding at all."""
+    return str(provider or "").strip().lower() != PROVIDER_NONE
+
 
 def _out_of_china(lat: float, lon: float) -> bool:
     return lon < 72.004 or lon > 137.8347 or lat < 0.8293 or lat > 55.8271
@@ -144,7 +156,12 @@ def reverse_geocode(
     an API key is provided, uses AMap (高德) reverse geocoding instead.
     All requests pass through a serialized queue with ``interval`` seconds
     between two requests.
+
+    Returns ``None`` straight away when the provider is ``none``: the caller
+    then keeps the raw coordinates, which is what "不使用" means to the user.
     """
+    if not geocoding_enabled(provider):
+        return None
     _wait_for_queue_slot(interval)
     if provider == "amap" and api_key:
         data = _get_json(

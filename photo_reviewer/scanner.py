@@ -15,7 +15,7 @@ from .cache import cleanup_folder_cache
 from .config import Config
 from .db import Database
 from .exif import extract_exif
-from .geocode import reverse_geocode
+from .geocode import geocoding_enabled, reverse_geocode
 from .paths import canonical_path
 from .pipeline import (
     analyze_prepared,
@@ -84,9 +84,6 @@ class ScanJob:
     phase: str = "index"
     error: str | None = None
     cancelled: bool = False
-    # Extra context for import jobs: how many files were copied and what the
-    # user asked to happen afterwards.
-    detail: str = ""
     report: dict | None = None
 
 
@@ -334,6 +331,10 @@ def _resolve_location(
 ) -> str | None:
     """Resolve coordinates to a place name, preserving an older address on failure."""
     if exif.get("latitude") is not None and exif.get("longitude") is not None:
+        if not geocoding_enabled(config.geocoding_provider):
+            # No reverse geocoding: keep the raw coordinates rather than a
+            # previously resolved address, so the setting is visible right away.
+            return location or exif.get("location")
         place = reverse_geocode(
             exif["latitude"],
             exif["longitude"],

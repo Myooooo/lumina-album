@@ -9,7 +9,9 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -42,7 +44,8 @@ from .cards import (
 from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, Config
 from .db import Database, sort_photos
 from .exif import extract_exif
-from .geocode import reverse_geocode
+from .geocode import PROVIDERS as GEOCODING_PROVIDERS
+from .geocode import geocoding_enabled, reverse_geocode
 from .importer import ImportError_
 from .paths import canonical_folder, canonical_path, is_in_named_dir, same_path
 from .repair import (
@@ -327,9 +330,41 @@ def _remove_photo_cache(photo: dict[str, Any]) -> None:
         path = photo.get(key)
         if path and os.path.exists(path):
             try:
-                os.remove(path)
+                _remove_file(path)
             except OSError:
                 logger.debug("photo cache file is already gone: %s", path)
+
+
+#: How long to keep trying when Windows says a file is busy. Antivirus, the
+#: search indexer and Explorer's preview handler all open files briefly, and a
+#: delete that lands in that window fails with WinError 32 rather than because
+#: anything is actually wrong.
+_REMOVE_ATTEMPTS = 4
+_REMOVE_BACKOFF = 0.08
+
+
+def _remove_file(path: str) -> None:
+    """Delete ``path``, retrying briefly while another process holds it open.
+
+    Windows refuses to unlink an open file. A thumbnail sweep can hit that on a
+    handful of files out of thousands, and without a retry those photos stay in
+    the trash with an error the user can do nothing about - the lock is gone a
+    fraction of a second later. Anything other than "in use" fails immediately,
+    and the last attempt's error is what the caller reports.
+    """
+    delay = _REMOVE_BACKOFF
+    for attempt in range(_REMOVE_ATTEMPTS):
+        try:
+            os.remove(path)
+            return
+        except FileNotFoundError:
+            # Someone else removed it first; the goal is met either way.
+            return
+        except PermissionError:
+            if attempt == _REMOVE_ATTEMPTS - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def _trash_only(path: str, cfg: Config) -> bool:
@@ -350,6 +385,154 @@ def _trash_only(path: str, cfg: Config) -> bool:
         # removed by the caller.
         return True
     return is_in_named_dir(path, cfg.trash_dir_name)
+
+
+def _empty_trash(
+    database: Database,
+    cfg: Config,
+    folder: str | None,
+    delete_raw: bool,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    """Erase every trashed photo, returning the counts.
+
+    Split out of the route so the background job and the synchronous call share
+    one implementation - in particular the ``_trash_only`` guard, which must not
+    be duplicated. ``on_progress(done, total, name)`` is called before each photo
+    so the toolbar can show how far along the sweep is; ``should_cancel`` is
+    polled between photos, so the toolbar's cancel button works here too.
+    """
+    photos = database.list_photos(
+        folder=folder,
+        status="deleted",
+        exclude_deleted=False,
+        sort="filename",
+        limit=100000,
+    )
+    total = len(photos)
+    deleted = 0
+    raw_deleted = 0
+    card_removed = 0
+    card_deferred = 0
+    cancelled = False
+    errors = []
+    touched_folders = set()
+    for index, photo in enumerate(photos, start=1):
+        if should_cancel and should_cancel():
+            cancelled = True
+            break
+        if on_progress:
+            on_progress(index - 1, total, photo.get("filename") or "")
+        candidates = []
+        if photo.get("path"):
+            candidates.append(photo["path"])
+        original = photo.get("original_path")
+        if original and original not in candidates:
+            candidates.append(original)
+        if delete_raw:
+            raw_candidate = _trashed_raw_candidate(photo)
+            if raw_candidate:
+                candidates.append(raw_candidate)
+        failed = False
+        for candidate in candidates:
+            if not candidate or not os.path.exists(candidate):
+                continue
+            # Only files the user already parked in the trash may be erased;
+            # anything else means the row is stale and the original is still
+            # live, which emptying the bin must never touch.
+            if not _trash_only(candidate, cfg):
+                errors.append(
+                    {
+                        "id": photo["id"],
+                        "error": "该记录指向的不是回收站文件，已跳过以免误删原图",
+                    }
+                )
+                failed = True
+                break
+            try:
+                _remove_file(candidate)
+                if delete_raw and _is_raw_file(candidate):
+                    raw_deleted += 1
+            except OSError as exc:
+                errors.append({"id": photo["id"], "error": f"删除文件失败: {exc}"})
+                failed = True
+                break
+        if failed:
+            continue
+        # Whatever copy of this photo the card is still holding goes too.
+        try:
+            card_result = purge_for_photo(
+                database, target_for(database, photo.get("folder") or ""), photo["id"]
+            )
+            card_removed += card_result["purged"]
+            card_deferred += card_result["deferred"]
+        except (CardError, OSError):
+            logger.warning("card purge failed for photo %s", photo["id"], exc_info=True)
+        _remove_photo_cache(photo)
+        database.delete_rows([photo["id"]])
+        deleted += 1
+        touched_folders.add(
+            photo.get("folder") or os.path.dirname(photo.get("path") or "")
+        )
+    for touched in touched_folders:
+        try:
+            cleanup_folder_cache(touched, database, cfg.cache_dir_name)
+        except (OSError, sqlite3.Error):
+            logger.warning("cache cleanup failed for %s", touched, exc_info=True)
+    if on_progress:
+        on_progress(deleted if cancelled else total, total, "")
+    return {
+        "deleted": deleted,
+        "raw_deleted": raw_deleted,
+        "card_removed": card_removed,
+        "card_deferred": card_deferred,
+        "errors": errors,
+        "total": total,
+        "cancelled": cancelled,
+    }
+
+
+def _empty_trash_worker(
+    job_id: str,
+    database: Database,
+    cfg: Config,
+    folder: str | None,
+    delete_raw: bool,
+) -> None:
+    """Run ``_empty_trash`` as a tracked job so the UI can show progress."""
+    job = JOBS.get(job_id)
+    if not job:
+        return
+    try:
+        # The route already counted the photos, so the bar is honest from the
+        # first tick instead of jumping once the listing returns.
+        JOBS.update(job_id, status="running", phase="trash", processed=0)
+        result = _empty_trash(
+            database,
+            cfg,
+            folder,
+            delete_raw,
+            on_progress=lambda done, _total, name: JOBS.update(
+                job_id, processed=done, current=name
+            ),
+            should_cancel=lambda: bool(
+                JOBS.get(job_id) and JOBS.get(job_id).cancelled
+            ),
+        )
+        if result["cancelled"]:
+            JOBS.update(job_id, status="cancelled", report=result)
+            return
+        JOBS.update(
+            job_id,
+            status="completed",
+            processed=result["total"],
+            current="回收站已清空",
+            report=result,
+        )
+    except Exception as exc:
+        logger.warning("emptying the trash failed", exc_info=True)
+        JOBS.update(job_id, status="error", error=str(exc))
 
 
 def _card_files(photo: dict[str, Any], raw_path: str | None) -> list[dict[str, Any]]:
@@ -512,6 +695,7 @@ def _ensure_exif(
     if (
         resolve_location
         and cfg
+        and geocoding_enabled(cfg.geocoding_provider)
         and photo.get("location")
         and exif.get("latitude") is not None
         and exif.get("longitude") is not None
@@ -804,9 +988,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if "system_prompt" in data:
             staged["system_prompt"] = strip_json_format(str(data["system_prompt"]))
         if "geocoding_provider" in data:
-            staged["geocoding_provider"] = (
-                str(data["geocoding_provider"]).strip() or "nominatim"
-            )
+            raw_provider = str(data["geocoding_provider"]).strip().lower()
+            if raw_provider not in GEOCODING_PROVIDERS:
+                # Anything unrecognised falls back to the free provider, which
+                # is what ``reverse_geocode`` itself does - an empty value used
+                # to mean "nominatim" and must keep meaning that.
+                logger.debug("unknown geocoding provider %r, using nominatim", raw_provider)
+                raw_provider = "nominatim"
+            staged["geocoding_provider"] = raw_provider
         if "geocoding_api_key" in data:
             staged["geocoding_api_key"] = str(data["geocoding_api_key"])
 
@@ -1052,7 +1241,6 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 "processed": job.processed,
                 "current": job.current,
                 "phase": job.phase,
-                "detail": job.detail,
                 "report": job.report,
                 "error": job.error,
                 "cancelled": job.cancelled,
@@ -1518,7 +1706,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     )
                     continue
                 try:
-                    os.remove(path)
+                    _remove_file(path)
                     file_removed = True
                 except OSError as exc:
                     errors.append({"id": pid, "error": f"删除文件失败: {exc}"})
@@ -1529,7 +1717,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 sibling = _trashed_raw_candidate(photo)
                 if sibling and _trash_only(sibling, cfg):
                     try:
-                        os.remove(sibling)
+                        _remove_file(sibling)
                         raw_removed += 1
                     except OSError:
                         logger.debug("raw sibling already gone: %s", sibling)
@@ -1639,91 +1827,40 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         ``delete_raw`` (default on) also removes the raw sibling that was moved
         to the trash together with each photo, so emptying the bin does not
         leave orphaned raw files behind.
+
+        ``background`` (used by the UI) runs the sweep as a tracked job and
+        returns its id, so the toolbar can show a progress bar. The synchronous
+        form is kept for scripts and tests, which want the counts directly.
         """
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip() or None
         delete_raw = _as_bool(data.get("delete_raw", True), default=True)
+        background = _as_bool(data.get("background", False), default=False)
         if folder:
             folder = canonical_path(folder)
-        photos = database.list_photos(
-            folder=folder,
-            status="deleted",
-            exclude_deleted=False,
-            sort="filename",
-            limit=100000,
-        )
-        deleted = 0
-        raw_deleted = 0
-        card_removed = 0
-        card_deferred = 0
-        errors = []
-        touched_folders = set()
-        for photo in photos:
-            candidates = []
-            if photo.get("path"):
-                candidates.append(photo["path"])
-            original = photo.get("original_path")
-            if original and original not in candidates:
-                candidates.append(original)
-            if delete_raw:
-                raw_candidate = _trashed_raw_candidate(photo)
-                if raw_candidate:
-                    candidates.append(raw_candidate)
-            failed = False
-            for candidate in candidates:
-                if not candidate or not os.path.exists(candidate):
-                    continue
-                # Only files the user already parked in the trash may be erased;
-                # anything else means the row is stale and the original is still
-                # live, which emptying the bin must never touch.
-                if not _trash_only(candidate, cfg):
-                    errors.append(
-                        {
-                            "id": photo["id"],
-                            "error": "该记录指向的不是回收站文件，已跳过以免误删原图",
-                        }
-                    )
-                    failed = True
-                    break
-                try:
-                    os.remove(candidate)
-                    if delete_raw and _is_raw_file(candidate):
-                        raw_deleted += 1
-                except OSError as exc:
-                    errors.append({"id": photo["id"], "error": f"删除文件失败: {exc}"})
-                    failed = True
-                    break
-            if failed:
-                continue
-            # Whatever copy of this photo the card is still holding goes too.
-            try:
-                card_result = purge_for_photo(
-                    database, target_for(database, photo.get("folder") or ""), photo["id"]
-                )
-                card_removed += card_result["purged"]
-                card_deferred += card_result["deferred"]
-            except (CardError, OSError):
-                logger.warning("card purge failed for photo %s", photo["id"], exc_info=True)
-            _remove_photo_cache(photo)
-            database.delete_rows([photo["id"]])
-            deleted += 1
-            touched_folders.add(
-                photo.get("folder") or os.path.dirname(photo.get("path") or "")
+
+        if background:
+            # Count before starting the thread: the progress bar needs a total
+            # from the very first tick, and a caller that polls immediately
+            # should not see "0/0" and conclude there is nothing to do.
+            pending = database.list_photos(
+                folder=folder,
+                status="deleted",
+                exclude_deleted=False,
+                limit=100000,
             )
-        for touched in touched_folders:
-            try:
-                cleanup_folder_cache(touched, database, cfg.cache_dir_name)
-            except (OSError, sqlite3.Error):
-                logger.warning("cache cleanup failed for %s", touched, exc_info=True)
-        return jsonify(
-            {
-                "deleted": deleted,
-                "raw_deleted": raw_deleted,
-                "card_removed": card_removed,
-                "card_deferred": card_deferred,
-                "errors": errors,
-            }
-        )
+            job = JOBS.create(folder or "", False)
+            job.phase = "trash"
+            job.total = len(pending)
+            thread = threading.Thread(
+                target=_empty_trash_worker,
+                args=(job.id, database, cfg, folder, delete_raw),
+                daemon=True,
+            )
+            thread.start()
+            return jsonify({"job_id": job.id, "status": job.status, "total": job.total})
+
+        return jsonify(_empty_trash(database, cfg, folder, delete_raw))
 
     @app.post("/api/cache/clean")
     def api_cache_clean():

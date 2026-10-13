@@ -16,6 +16,8 @@ const state = {
   previewNavToken: 0,
   pollingTimer: null,
   pollTick: 0,
+  //: Speed estimate for the running job (see updateEta).
+  eta: null,
   photoSignature: "",
   pageSize: 100,
   offset: 0,
@@ -883,14 +885,120 @@ function showProgress(text) {
   $("progressText").textContent = text;
   $("progressFill").style.width = "0%";
   state.pollTick = 0;
+  // A new job must not inherit the previous run's speed estimate.
+  state.eta = null;
 }
 
 function hideProgress() {
   $("scanProgress").classList.add("hidden");
+  $("progressEta").classList.add("hidden");
+  state.eta = null;
   state.currentJobId = null;
   if (state.pollingTimer) {
     clearTimeout(state.pollingTimer);
     state.pollingTimer = null;
+  }
+}
+
+/* ==========================================================================
+   Progress + remaining-time estimate
+   ========================================================================== */
+
+/**
+ * Track how fast a job is moving and estimate what is left.
+ *
+ * The rate is smoothed with an exponential moving average rather than measured
+ * from the start: copy speed varies with file size, and a plain average would
+ * keep quoting the first few seconds for the rest of the run. Progress only
+ * advances, so the estimate never counts back up.
+ */
+function updateEta(processed, total) {
+  const now = performance.now();
+  const previous = state.eta;
+
+  if (!previous || processed < previous.processed) {
+    state.eta = {
+      processed,
+      total,
+      at: now,
+      rate: 0,
+      shown: previous ? previous.shown : null,
+    };
+    paintEta(null);
+    return;
+  }
+
+  const elapsed = (now - previous.at) / 1000;
+  const delta = processed - previous.processed;
+  let rate = previous.rate;
+  if (elapsed >= 0.4 && delta > 0) {
+    const instant = delta / elapsed;
+    // Seed with the first sample, then ease towards it.
+    rate = rate > 0 ? rate * 0.65 + instant * 0.35 : instant;
+  }
+  state.eta = { processed, total, at: now, rate, shown: previous.shown };
+
+  if (!rate || !total || processed <= 0 || processed >= total) {
+    paintEta(processed >= total ? 0 : null);
+    return;
+  }
+  paintEta(Math.round((total - processed) / rate));
+}
+
+/** How a duration reads at a glance: "剩 12 秒" / "剩 3 分 20 秒" / "剩 1 小时 5 分". */
+function formatEta(seconds) {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "";
+  const total = Math.max(0, Math.round(seconds));
+  if (total < 5) return "即将完成";
+  if (total < 60) return `剩 ${total} 秒`;
+  if (total < 3600) {
+    const minutes = Math.floor(total / 60);
+    const rest = total % 60;
+    return rest ? `剩 ${minutes} 分 ${rest} 秒` : `剩 ${minutes} 分`;
+  }
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.round((total % 3600) / 60);
+  return minutes ? `剩 ${hours} 小时 ${minutes} 分` : `剩 ${hours} 小时`;
+}
+
+/** Paint (or hide) the ETA pill next to the progress label. */
+function paintEta(seconds) {
+  const el = $("progressEta");
+  if (!el) return;
+  const text =
+    seconds === 0 ? "即将完成" : formatEta(seconds);
+  if (!text) {
+    el.classList.add("hidden");
+    el.textContent = "";
+    if (state.eta) state.eta.shown = null;
+    return;
+  }
+  if (state.eta && state.eta.shown === text) return;
+  if (state.eta) state.eta.shown = text;
+  el.textContent = text;
+  // Replay the entrance so the pill reads as "live" rather than static.
+  el.classList.remove("hidden");
+  el.style.animation = "none";
+  void el.offsetWidth;
+  el.style.animation = "";
+}
+
+/**
+ * Drive the toolbar progress bar from a job payload.
+ *
+ * Shared by the scan poller and the one-shot jobs (emptying the bin, a card
+ * sync), so every progress bar in the app reports the same way.
+ */
+function paintJobProgress(job) {
+  const total = Number(job.total) || 0;
+  const processed = Number(job.processed) || 0;
+  const pct = total ? Math.round((processed / total) * 100) : 0;
+  $("progressFill").style.width = pct + "%";
+  if (job.status === "completed") {
+    // Nothing left to wait for; the summary line replaces the estimate.
+    paintEta(0);
+  } else {
+    updateEta(processed, total);
   }
 }
 
@@ -899,12 +1007,20 @@ function pollScan() {
   api(`/api/scan/status/${state.currentJobId}`)
     .then((job) => {
       if (job.status === "completed" || job.status === "cancelled" || job.status === "error") {
-        const pct = job.total ? Math.round((job.processed / job.total) * 100) : 100;
-        $("progressFill").style.width = pct + "%";
+        paintJobProgress(job);
         $("progressText").textContent = jobSummaryText(job);
         setTimeout(hideProgress, job.report ? 6000 : 1500);
         state.currentJobId = null;
-        loadPhotos();
+        loadPhotos().then(() => {
+          // The photos that were on screen may be gone now; whichever view is
+          // open has to follow. loadPhotos already re-reads the gallery, so this
+          // only has to handle the dialog.
+          if (!$("previewModal").classList.contains("hidden")) {
+            const still = state.photos.some((p) => p.id === state.currentPreviewId);
+            if (!still) closeModal("previewModal");
+            else updatePreview({ skipImage: true });
+          }
+        });
         // An import is what turns this folder into a camera album, and it may
         // have arrived on a card that already has deletions queued.
         const imported = job.report && job.report.card_album;
@@ -913,9 +1029,8 @@ function pollScan() {
         });
         return;
       }
-      const pct = job.total ? Math.round((job.processed / job.total) * 100) : 0;
-      $("progressFill").style.width = pct + "%";
-      $("progressText").textContent = `${phaseLabel(job.phase)} ${job.processed}/${job.total}${job.current ? "：" + job.current : ""}`;
+      paintJobProgress(job);
+      $("progressText").textContent = progressLabel(job);
       state.pollTick += 1;
       loadStats();
       if (state.pollTick % 4 === 0 && !$("searchInput").value.trim()) {
@@ -925,8 +1040,27 @@ function pollScan() {
     })
     .catch((e) => {
       $("progressText").textContent = "读取进度失败：" + e.message;
+      paintEta(null);
       setTimeout(hideProgress, 2000);
     });
+}
+
+/**
+ * One-line description of where a job is.
+ *
+ * ``phase`` covers the scan/import pipeline; the "trash" phase is the bin sweep,
+ * which counts photos rather than files and reads better on its own.
+ */
+function progressLabel(job) {
+  if (job.phase === "trash") {
+    const total = Number(job.total) || 0;
+    if (!total) return "正在清空回收站…";
+    const name = job.current ? `：${job.current}` : "";
+    return `正在清空回收站 ${job.processed}/${total}${name}`;
+  }
+  const total = Number(job.total) || 0;
+  if (!total) return `${phaseLabel(job.phase)}…`;
+  return `${phaseLabel(job.phase)} ${job.processed}/${total}${job.current ? "：" + job.current : ""}`;
 }
 
 const PHASE_LABELS = {
@@ -940,23 +1074,76 @@ function phaseLabel(phase) {
   return PHASE_LABELS[phase] || "整理照片";
 }
 
-/** Build the end-of-job message, including the import report when present. */
+/**
+ * Build the end-of-job message.
+ *
+ * Import jobs carry a report and get a summary of what actually changed; scan
+ * jobs get a plain processed/total line.
+ *
+ * Three things used to read badly here. Zero counters were printed as
+ * "覆盖 0" on every run. The follow-up was spelled by stripping "正在" off a
+ * phase label, which produced "已索引" with no hint of what that meant. And a
+ * cancelled import was announced as "导入完成". Zero counters are now dropped,
+ * the follow-up says what actually happened to the photos, and the job's own
+ * status drives the opening words.
+ */
 function jobSummaryText(job) {
   if (job.status === "error") return "任务出错：" + (job.error || "");
-  if (job.status === "cancelled") return `${phaseLabel(job.phase)}已取消`;
+
   const report = job.report;
-  if (report && typeof report === "object" && "copied" in report) {
-    const failed = (report.failed || []).length;
-    const parts = [
-      `导入完成：新增 ${report.new_count ?? 0}`,
-      `覆盖 ${report.overwrite_count ?? 0}`,
-      `跳过 ${report.skip_count ?? 0}`,
-    ];
-    if (failed) parts.push(`失败 ${failed}`);
-    const tail = job.phase === "copy" ? "" : `，已${phaseLabel(job.phase).replace("正在", "")}`;
-    return parts.join("，") + tail;
+  const isImport = report && typeof report === "object" && "copied" in report;
+
+  if (isImport) {
+    const cancelled = job.status === "cancelled" || report.cancelled;
+    if (cancelled) {
+      return report.copied
+        ? `导入已取消：已拷贝 ${report.copied} 个文件`
+        : "导入已取消：还没有拷贝文件";
+    }
+
+    const copied = Number(report.copied) > 0;
+    const skipped = Number(report.skip_count) > 0 ? Number(report.skip_count) : 0;
+    // "跳过" describes work that did not need doing, so it only belongs next to
+    // a real result; on its own the line reads as if nothing happened at all.
+    const counts = [
+      ["新增", report.new_count],
+      ["覆盖", report.overwrite_count],
+    ]
+      .filter(([, value]) => Number(value) > 0)
+      .map(([label, value]) => `${label} ${value}`);
+    if (copied && skipped) counts.push(`跳过 ${skipped}`);
+
+    const head = counts.length
+      ? `导入完成：${counts.join("，")}`
+      : skipped
+        ? `导入完成：所有文件都已是最新（跳过 ${skipped}）`
+        : "导入完成：所有文件都已是最新";
+    // What happened *after* the copy matters: an import that stopped at
+    // "建索引" leaves the photos unscored, and the user should see that here
+    // rather than wonder why nothing has a score yet.
+    const followUp = {
+      index: "已建立索引，尚未调用模型",
+      analyze: "已索引并完成模型解读",
+    }[job.phase];
+    const failure = (report.failed || []).length
+      ? `，${report.failed.length} 个文件失败`
+      : "";
+    const tail = followUp ? `，${followUp}` : "";
+    return `${head}${failure}${tail}`;
   }
-  return `整理完成：${job.processed}/${job.total}`;
+
+  if (job.phase === "trash") {
+    const removed = report && report.deleted;
+    if (job.status === "cancelled") return "清空回收站已取消";
+    const raw = report && report.raw_deleted ? `，含 ${report.raw_deleted} 个 RAW` : "";
+    return removed
+      ? `回收站已清空，共移除 ${removed} 张照片${raw}`
+      : "回收站已经是空的";
+  }
+
+  if (job.status === "cancelled") return `${phaseLabel(job.phase)}已取消`;
+  if (!job.total) return "整理完成：没有需要处理的照片";
+  return `整理完成：共处理 ${job.processed}/${job.total}`;
 }
 
 async function deletePhotos(ids) {
@@ -996,6 +1183,9 @@ async function deletePhotos(ids) {
   const confirmed = typeof answer === "object" ? answer.confirmed : answer;
   if (!confirmed) return;
   const syncCard = typeof answer === "object" ? answer.checked : false;
+  // Decide where the detail dialog goes *before* the photos are filtered:
+  // the "next photo" is the one that followed the current one in the album.
+  const previewNext = nextPreviewAfterRemoval(ids);
   try {
     const data = await api("/api/delete", {
       method: "POST",
@@ -1009,11 +1199,7 @@ async function deletePhotos(ids) {
     state.selected.clear();
     rerenderLoadedGallery();
     loadStats();
-    if (state.currentPreviewId) {
-      const p = state.photos.find((x) => x.id === state.currentPreviewId);
-      if (!p) closeModal("previewModal");
-      else updatePreview({ skipImage: true });
-    }
+    applyPreviewAfterRemoval(previewNext);
     await refreshCardStatus();
   } catch (e) {
     showToast("暂时收起失败：" + e.message, "error");
@@ -1044,6 +1230,7 @@ async function permanentDeletePhotos(ids) {
   const confirmed = typeof answer === "object" ? answer.confirmed : answer;
   if (!confirmed) return;
   const deleteRaw = typeof answer === "object" ? answer.checked : true;
+  const previewNext = nextPreviewAfterRemoval(ids);
   try {
     const data = await api("/api/delete/permanent", {
       method: "POST",
@@ -1059,11 +1246,7 @@ async function permanentDeletePhotos(ids) {
     state.selected.clear();
     rerenderLoadedGallery();
     loadStats();
-    if (state.currentPreviewId) {
-      const p = state.photos.find((x) => x.id === state.currentPreviewId);
-      if (!p) closeModal("previewModal");
-      else updatePreview({ skipImage: true });
-    }
+    applyPreviewAfterRemoval(previewNext);
   } catch (e) {
     showToast("彻底移除失败：" + e.message, "error");
   }
@@ -1080,6 +1263,7 @@ async function restorePhotos(ids) {
   // Restoring only touches the card when a deletion actually reached it; a
   // card that is away queues the undo for its next connection.
   const syncCard = !!(card && card.usable);
+  const previewNext = nextPreviewAfterRemoval(ids);
   try {
     const data = await api("/api/restore", {
       method: "POST",
@@ -1093,11 +1277,7 @@ async function restorePhotos(ids) {
     state.selected.clear();
     rerenderLoadedGallery();
     loadStats();
-    if (state.currentPreviewId) {
-      const p = state.photos.find((x) => x.id === state.currentPreviewId);
-      if (!p) closeModal("previewModal");
-      else updatePreview({ skipImage: true });
-    }
+    applyPreviewAfterRemoval(previewNext);
     await refreshCardStatus();
   } catch (e) {
     showToast("恢复失败：" + e.message, "error");
@@ -1164,6 +1344,57 @@ function visiblePhotoOrder() {
   return [...document.querySelectorAll(".polaroid-card")]
     .map((card) => Number(card.dataset.id))
     .filter((id) => Number.isFinite(id));
+}
+
+/**
+ * Which photo should be open once ``removedIds`` leave the album.
+ *
+ * Returns the id to keep showing, or ``null`` when the dialog should close.
+ * Called *before* ``state.photos`` is filtered, because that list is what says
+ * what came after the photo on screen.
+ *
+ * Only the next photo counts - the album's order is meaningful, and jumping
+ * backwards would be disorienting. Deleting the last photo therefore closes the
+ * dialog, which is also what the user asked for.
+ */
+function nextPreviewAfterRemoval(removedIds) {
+  const currentId = state.currentPreviewId;
+  if (!currentId) return null;
+  const removed = new Set(removedIds);
+  if (!removed.has(currentId)) return currentId;
+  const order = state.photos.map((p) => p.id);
+  const index = order.indexOf(currentId);
+  for (let i = index + 1; i < order.length; i += 1) {
+    if (!removed.has(order[i])) return order[i];
+  }
+  return null;
+}
+
+/**
+ * Move the open detail dialog onto ``nextId`` (or close it).
+ *
+ * Runs after the gallery has been re-rendered, so ``state.photos`` already
+ * reflects the removal and ``updatePreview`` can find the new photo.
+ */
+function applyPreviewAfterRemoval(nextId) {
+  if (!state.currentPreviewId) return;
+  if (nextId === null || nextId === undefined) {
+    closeModal("previewModal");
+    return;
+  }
+  if (nextId === state.currentPreviewId) {
+    updatePreview({ skipImage: true });
+    return;
+  }
+  state.currentPreviewId = nextId;
+  state.previewNavToken += 1;
+  const img = $("previewImage");
+  img.classList.remove("preview-switch-left", "preview-switch-right");
+  img.src = `/api/proxy/${nextId}`;
+  // Force a reflow so the slide-in animation replays for the new photo.
+  void img.offsetWidth;
+  img.classList.add("preview-switch-right");
+  updatePreview({ skipImage: true });
 }
 
 async function navigatePreview(delta) {
@@ -1963,25 +2194,20 @@ async function emptyTrash() {
   if (!confirmed) return;
   const deleteRaw = typeof answer === "object" ? answer.checked : true;
   try {
+    // The sweep runs as a tracked job so it gets the same progress bar as a
+    // scan; a full bin can hold thousands of files and used to freeze the UI.
     const data = await api("/api/trash/empty", {
       method: "POST",
       body: JSON.stringify({
         folder: state.folder || undefined,
         delete_raw: deleteRaw,
+        background: true,
       }),
     });
     state.selected.clear();
-    await loadPhotos();
-    if (state.currentPreviewId) {
-      const still = state.photos.some((p) => p.id === state.currentPreviewId);
-      if (!still) closeModal("previewModal");
-      else updatePreview({ skipImage: true });
-    }
-    const rawNote = data.raw_deleted ? `，含 ${data.raw_deleted} 个 RAW 文件` : "";
-    showToast(
-      `回收站已清空，共移除 ${data.deleted || 0} 张照片${rawNote}。`,
-      "success"
-    );
+    state.currentJobId = data.job_id;
+    showProgress("正在清空回收站…");
+    pollScan();
   } catch (e) {
     showToast("清空回收站失败：" + e.message, "error");
   }

@@ -17,7 +17,7 @@ from .api_client import analyze_image, build_analysis_context
 from .cache import ensure_cache_dirs
 from .config import Config
 from .exif import extract_exif
-from .geocode import reverse_geocode
+from .geocode import geocoding_enabled, reverse_geocode
 from .thumbnailer import RAW_EXTENSIONS, make_proxy
 
 
@@ -153,6 +153,14 @@ def enrich_metadata(
     is kept instead of being overwritten by raw coordinates.
     """
     location, exif = extract_exif(prepared.image_path)
+    has_gps = exif.get("latitude") is not None and exif.get("longitude") is not None
+    if not geocoding_enabled(config.geocoding_provider) and has_gps:
+        # The user asked for no reverse geocoding: show the coordinates as they
+        # are. An address resolved by an earlier run is deliberately not reused
+        # here - "不使用" should be visible immediately, not only for new photos.
+        prepared.exif = exif or {}
+        prepared.location = location or exif.get("location")
+        return prepared
     if already_geocoded:
         # Indexing already resolved this location; avoid a duplicate request.
         # ``extract_exif`` only ever returns raw coordinates, so the resolved
