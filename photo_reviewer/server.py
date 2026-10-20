@@ -16,8 +16,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, jsonify, request, send_file, url_for
 
+from . import video
 from .api_client import (
     DIMENSION_KEYS,
     LEGACY_DIMENSION_KEYS,
@@ -61,6 +62,8 @@ from .scanner import (
     reanalyze_photo,
     start_rebuild_index,
     start_scan,
+    start_video_job,
+    video_job_for,
 )
 from .sync import build_plan, start_import
 from .thumbnailer import make_proxy
@@ -122,6 +125,12 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         # changes the hash and therefore the URL. A 16-char string is far
         # cheaper than revalidating thousands of images.
         "thumb_version": photo.get("phash") or "",
+        # A video card is drawn differently from a photo card, and its duration
+        # is on the card itself, so both travel with the row.
+        "media_kind": photo.get("media_kind") or "photo",
+        "duration_ms": photo.get("duration_ms"),
+        #: True when the still carries a short video (motion photo / Live Photo).
+        "has_live": bool(photo.get("live_path")),
     }
     if detail:
         payload.update(
@@ -1525,6 +1534,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             return jsonify({"error": "照片不存在"}), 404
         photo = _ensure_exif(photo, database, cfg)
         raw_path = photo.get("raw_path")
+        is_video = (photo.get("media_kind") or "photo") == "video"
         return jsonify(
             {
                 "id": photo["id"],
@@ -1534,6 +1544,15 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 "height": photo.get("height"),
                 "size": photo.get("size"),
                 "location": photo.get("location"),
+                "media_kind": photo.get("media_kind") or "photo",
+                "duration_ms": photo.get("duration_ms"),
+                "video_info": photo.get("video_info") or {} if is_video else {},
+                "has_live": bool(photo.get("live_path")),
+                "clip_url": (
+                    url_for("api_video_clip", photo_id=photo["id"]) if is_video else None
+                ),
+                "play_state": photo.get("play_state") or "",
+                "ffmpeg": video.tools_available(cfg.ffmpeg_path or None),
             }
         )
 
@@ -1629,6 +1648,161 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if not path or not os.path.exists(path):
             return jsonify({"error": "原图不存在"}), 404
         return send_file(path, conditional=True)
+
+    # ------------------------------------------------------------------
+    # Video
+    #
+    # Three URLs, one for each thing the UI shows: the five-second preview the
+    # detail dialog loops, the original file played full screen, and a
+    # browser-safe copy for the containers a browser refuses. Range requests are
+    # handled by ``send_file`` itself, which is what makes seeking work without
+    # any hand-written byte-range code.
+    # ------------------------------------------------------------------
+
+    @app.get("/api/video/status")
+    def api_video_status():
+        """Whether the video pipeline can run on this machine.
+
+        The settings dialog shows this: ffmpeg is a system dependency, so the
+        user has to be told "not found" somewhere visible rather than discovering
+        it when a card has no picture.
+        """
+        available = video.tools_available(cfg.ffmpeg_path or None)
+        return jsonify(
+            {
+                "available": available,
+                "version": video.tools_version(cfg.ffmpeg_path or None) if available else "",
+                "extensions": list(cfg.video_extensions),
+            }
+        )
+
+    def _video_row(photo_id: int):
+        photo = database.get_photo(photo_id)
+        if not photo or (photo.get("media_kind") or "photo") != "video":
+            return None
+        return photo
+
+    def _video_cache_dir(photo: dict[str, Any]) -> str:
+        folder = photo.get("folder") or os.path.dirname(photo["path"])
+        return str(ensure_cache_dirs(folder, cfg.cache_dir_name))
+
+    def _cache_key(photo: dict[str, Any]) -> str:
+        return video.video_cache_key(photo["path"])
+
+    def _stream_response(path: str, mimetype: str):
+        """Send a media file with the headers a ``<video>`` element expects."""
+        response = send_file(
+            path,
+            mimetype=mimetype,
+            conditional=True,
+            max_age=_IMMUTABLE_IMAGE_MAX_AGE,
+        )
+        # Werkzeug answers Range requests but does not advertise it on every
+        # response; players use the header to decide whether seeking is possible.
+        response.headers["Accept-Ranges"] = "bytes"
+        return response
+
+    def _guess_mimetype(path: str) -> str:
+        ext = Path(path).suffix.lower()
+        return {
+            ".mp4": "video/mp4",
+            ".m4v": "video/mp4",
+            ".mov": "video/quicktime",
+            ".qt": "video/quicktime",
+            ".webm": "video/webm",
+            ".mkv": "video/x-matroska",
+            ".avi": "video/x-msvideo",
+            ".ts": "video/mp2t",
+            ".mts": "video/mp2t",
+            ".m2ts": "video/mp2t",
+            ".3gp": "video/3gpp",
+            ".ogv": "video/ogg",
+            ".wmv": "video/x-ms-wmv",
+        }.get(ext, "video/mp4")
+
+    @app.get("/api/video/<int:photo_id>/clip")
+    def api_video_clip(photo_id: int):
+        """The short preview the detail dialog loops.
+
+        Generated on first open (~200 ms) and cached next to the poster. The
+        dialog paints the poster immediately and cross-fades to this once it can
+        play, so the delay is invisible.
+        """
+        photo = _video_row(photo_id)
+        if not photo:
+            return jsonify({"error": "视频不存在"}), 404
+        clip_path = photo.get("clip_path")
+        if not clip_path or not os.path.exists(clip_path):
+            if not video.tools_available(cfg.ffmpeg_path or None):
+                return jsonify({"error": "未安装 ffmpeg，无法生成预览"}), 503
+            cache_dir = _video_cache_dir(photo)
+            clip_path = os.path.join(cache_dir, f"{_cache_key(photo)}_clip.mp4")
+            info = video.probe(photo["path"], cfg.ffmpeg_path or None)
+            if not video.make_clip(
+                photo["path"],
+                clip_path,
+                info,
+                seconds=cfg.video_clip_seconds,
+                max_edge=cfg.video_clip_max_edge,
+                crf=cfg.video_clip_crf,
+                include_audio=cfg.video_clip_audio,
+                override_dir=cfg.ffmpeg_path or None,
+            ):
+                return jsonify({"error": "无法生成视频预览"}), 500
+            database.set_video_paths(photo_id, clip_path=clip_path)
+        return _stream_response(clip_path, "video/mp4")
+
+    @app.get("/api/video/<int:photo_id>/stream")
+    def api_video_stream(photo_id: int):
+        """The original file, byte ranges included.
+
+        This is what the full-screen player uses: no transcoding, full quality,
+        and the browser's own seek handling.
+        """
+        photo = _video_row(photo_id)
+        if not photo:
+            return jsonify({"error": "视频不存在"}), 404
+        path = photo.get("path")
+        if not path or not os.path.exists(path):
+            return jsonify({"error": "视频文件不存在"}), 404
+        return _stream_response(path, _guess_mimetype(path))
+
+    @app.get("/api/video/<int:photo_id>/playable")
+    def api_video_playable(photo_id: int):
+        """A copy every desktop browser can decode.
+
+        Tried only after the original failed to play, which is the client's cue
+        that the codec or the container is the problem. A stream copy is enough
+        for the common case (MKV/MTS carrying H.264); a genuine transcode runs
+        as a tracked job so the toolbar can show its progress.
+
+        Returns 200 with the file when it is ready, 202 with a job id while it is
+        being prepared, and 503 when ffmpeg is missing.
+        """
+        photo = _video_row(photo_id)
+        if not photo:
+            return jsonify({"error": "视频不存在"}), 404
+        play_path = photo.get("play_path")
+        if play_path and os.path.exists(play_path):
+            return _stream_response(play_path, "video/mp4")
+        if not video.tools_available(cfg.ffmpeg_path or None):
+            return jsonify({"error": "未安装 ffmpeg，无法转换此视频"}), 503
+        running = video_job_for(photo_id)
+        if running:
+            return jsonify({"job_id": running.id, "state": "running"}), 202
+        job = start_video_job(photo_id, database, cfg)
+        return jsonify({"job_id": job.id, "state": job.status}), 202
+
+    @app.get("/api/photo/<int:photo_id>/live")
+    def api_live_video(photo_id: int):
+        """The moving part of a motion photo or Live Photo."""
+        photo = database.get_photo(photo_id)
+        if not photo:
+            return jsonify({"error": "照片不存在"}), 404
+        live_path = photo.get("live_path")
+        if not live_path or not os.path.exists(live_path):
+            return jsonify({"error": "这张照片没有实况视频"}), 404
+        return _stream_response(live_path, _guess_mimetype(live_path))
 
     @app.post("/api/delete")
     def api_delete():

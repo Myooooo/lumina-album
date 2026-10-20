@@ -13,12 +13,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import livephoto, video
 from .api_client import analyze_image, build_analysis_context
 from .cache import ensure_cache_dirs
 from .config import Config
 from .exif import extract_exif
 from .geocode import geocoding_enabled, reverse_geocode
 from .thumbnailer import RAW_EXTENSIONS, make_proxy
+from .video import video_cache_key
 
 
 class AnalysisGate:
@@ -61,6 +63,13 @@ PRESERVED_FIELDS = (
     "analyzed_at",
     "favorite",
     "error",
+    # Derived video files outlive a re-index: regenerating a 40 MB remux just
+    # because the row was rewritten would be wasteful, and the cache key
+    # already pins them to the file's mtime and size.
+    "clip_path",
+    "play_path",
+    "play_state",
+    "live_path",
 )
 
 
@@ -83,6 +92,14 @@ class PreparedPhoto:
     raw_path: str | None = None
     #: True when ``image_path`` itself is the raw file (no JPEG counterpart).
     is_raw: bool = False
+    #: ``photo`` or ``video``.
+    media_kind: str = "photo"
+    #: Runtime in milliseconds, for videos.
+    duration_ms: int | None = None
+    #: Codec/bitrate/container details, for videos.
+    video_info: dict = field(default_factory=dict)
+    #: The video hidden inside a motion photo, or the MOV beside a Live Photo.
+    live_path: str | None = None
 
 
 def prepare_proxy(
@@ -118,6 +135,111 @@ def prepare_proxy(
         raw_path=os.path.abspath(raw_path) if raw_path else None,
         is_raw=Path(image_path).suffix.lower() in RAW_EXTENSIONS,
     )
+
+
+def attach_live_video(
+    prepared: PreparedPhoto, config: Config
+) -> PreparedPhoto:
+    """Find the video a still carries, and cache it next to the proxies.
+
+    Returns the same object with ``live_path`` filled in when the still is a
+    motion photo (the video is inside the JPEG/HEIC) or half of a Live Photo
+    pair (a same-named MOV sits beside it). A plain photo is returned untouched,
+    so this is safe to call for every still.
+    """
+    try:
+        source = livephoto.detect(prepared.image_path)
+    except OSError:
+        return prepared
+    if not source:
+        return prepared
+
+    if source.embedded:
+        cache_dir = ensure_cache_dirs(prepared.folder, config.cache_dir_name)
+        base = video_cache_key(prepared.image_path)
+        dest = os.path.join(str(cache_dir), f"{base}_motion.mp4")
+        if not os.path.exists(dest) and not livephoto.extract_embedded(
+            prepared.image_path, source, dest
+        ):
+            return prepared
+        prepared.live_path = dest
+    elif source.video_path:
+        # An iPhone pair: nothing to extract, the file already exists.
+        prepared.live_path = os.path.abspath(source.video_path)
+    return prepared
+
+
+def prepare_video(image_path: str, folder: str, config: Config) -> PreparedPhoto:
+    """Index one video: probe it, grab a poster, and remember what it is.
+
+    A video is analysed by nobody - it goes straight to "已收录" with no score -
+    but the gallery still needs a picture, so the poster frame is written as an
+    ordinary thumbnail. Everything downstream (the grid, the culling, the
+    thumbnail endpoint) then treats a video exactly like a photo.
+
+    When ffmpeg is missing the row is still created: the card shows a
+    placeholder and the detail dialog explains how to fix it, which beats
+    silently skipping the user's videos.
+    """
+    image_path = os.path.abspath(image_path)
+    folder = os.path.abspath(folder)
+    cache_dir = ensure_cache_dirs(folder, config.cache_dir_name)
+    info = video.probe(image_path, config.ffmpeg_path or None)
+    base = video_cache_key(image_path)
+
+    thumb_path = os.path.join(str(cache_dir), f"{base}_thumb.jpg")
+    proxy_path = os.path.join(str(cache_dir), f"{base}_proxy.jpg")
+    made = False
+    if not os.path.exists(proxy_path):
+        made = video.make_poster(
+            image_path,
+            proxy_path,
+            video.poster_seek(info, config.video_poster_ratio),
+            max_edge=config.proxy_max_edge,
+            quality=max(2, min(8, 31 - config.proxy_quality // 5)),
+            override_dir=config.ffmpeg_path or None,
+        )
+    if made and not os.path.exists(thumb_path):
+        video.make_poster(
+            image_path,
+            thumb_path,
+            video.poster_seek(info, config.video_poster_ratio),
+            max_edge=config.gallery_thumb_size,
+            quality=6,
+            override_dir=config.ffmpeg_path or None,
+        )
+
+    width = info.width if info else 0
+    height = info.height if info else 0
+    exif: dict = {}
+    if info:
+        if info.capture_time:
+            exif["datetime_original"] = info.capture_time
+        if info.make:
+            exif["make"] = info.make
+        if info.model:
+            exif["model"] = info.model
+        if info.latitude is not None and info.longitude is not None:
+            exif["latitude"] = info.latitude
+            exif["longitude"] = info.longitude
+
+    prepared = PreparedPhoto(
+        image_path=image_path,
+        folder=folder,
+        filename=os.path.basename(image_path),
+        size=os.path.getsize(image_path),
+        width=width,
+        height=height,
+        proxy_path=proxy_path if os.path.exists(proxy_path) else "",
+        thumb_path=thumb_path if os.path.exists(thumb_path) else "",
+        phash="",
+        exif=exif,
+        location=None,
+        media_kind="video",
+        duration_ms=info.duration_ms if info else None,
+        video_info=info.as_dict() if info else {},
+    )
+    return prepared
 
 
 def is_coordinate_location(value) -> bool:
@@ -229,6 +351,10 @@ def base_record(
         "phash": prepared.phash,
         "raw_path": prepared.raw_path,
         "status": status,
+        "media_kind": prepared.media_kind or "photo",
+        "duration_ms": prepared.duration_ms,
+        "video_info": prepared.video_info or {},
+        "live_path": prepared.live_path,
     }
     if existing:
         for key in PRESERVED_FIELDS:

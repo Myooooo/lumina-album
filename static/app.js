@@ -24,6 +24,9 @@ const state = {
   photoById: new Map(),
   //: Ids whose detail payload (EXIF, raw size) has already been fetched.
   detailFetched: new Set(),
+  //: Length of the video preview clip, filled from /api/config so the dialog
+  //: label matches what the server actually produced.
+  videoClipSeconds: 5,
   //: ``id -> position`` in ``state.photos``, for the few callers that splice by
   //: index instead of by row.
   photoIndex: new Map(),
@@ -345,6 +348,108 @@ function fileSizeText(photo) {
   const rawSize = Number(photo.raw_size);
   if (!photo.has_raw || !rawSize) return image;
   return `${image} + ${fmtSize(rawSize)}`;
+}
+
+/**
+ * A running time, as shown on a video card: 00:07 / 01:23 / 1:02:03.
+ *
+ * Returns an empty string when the duration is unknown, so a card whose ffprobe
+ * failed simply does not show a badge instead of showing "00:00".
+ */
+function formatDuration(ms) {
+  const total = Math.round(Number(ms) / 1000);
+  if (!Number.isFinite(total) || total <= 0) return "";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (value) => String(value).padStart(2, "0");
+  if (hours > 0) return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/** Human wording for a size, used by the codec rows. */
+function formatBitrate(bits) {
+  const value = Number(bits);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)} Mbps`;
+  return `${Math.round(value / 1000)} kbps`;
+}
+
+function formatFps(fps) {
+  const value = Number(fps);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const rounded = Math.round(value * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)} fps`;
+}
+
+/**
+ * Duration pill on a video card.
+ *
+ * Sits at the bottom-right of the frame, opposite the RAW badge, and uses the
+ * same frosted-pill language as the rest of the cards.
+ */
+function videoDurationBadge(photo) {
+  const text = formatDuration(photo.duration_ms);
+  if (!text) return "";
+  return `<span class="video-badge" title="时长 ${text}">${ICONS.play || ""}<span>${text}</span></span>`;
+}
+
+/**
+ * The Live Photo mark: concentric rings, the way iOS draws it.
+ *
+ * A motion photo or an iPhone pair is still a photo, so its card keeps the
+ * polaroid look - the badge only says "this one moves".
+ */
+function liveBadgeHtml(photo) {
+  if (!photo.has_live) return "";
+  return `<span class="live-badge" title="实况照片，详情页可以播放">
+    <span class="live-badge-ring"></span><span class="live-badge-dot"></span>
+  </span>`;
+}
+
+/**
+ * The technical rows for a video: runtime, codec, frame rate, bitrates.
+ *
+ * Built as plain rows so they line up with the size and path rows above, and
+ * skipped entirely for anything that is empty - a container that never stored
+ * its bitrate should not print a dash where a number belongs.
+ */
+function videoDetailRows(photo) {
+  if (photo.media_kind !== "video") {
+    if (!photo.has_live) return "";
+    return `
+      <div class="meta-item-row" title="实况视频">
+        ${ICONS.video}
+        <div class="meta-content">这张照片带一段实况短片，点画面下方的「实况」播放</div>
+      </div>
+    `;
+  }
+  const info = photo.video_info || {};
+  const rows = [];
+  // Video rows name what they show. The photo rows above rely on their icons
+  // because "文件大小" is obvious from a scale icon; "编码" and "帧率" are not.
+  const push = (icon, label, value) => {
+    if (!value) return;
+    rows.push(`
+      <div class="meta-item-row" title="${escapeHtml(label)}：${escapeHtml(value)}">
+        ${icon}
+        <div class="meta-content"><span class="meta-label">${escapeHtml(label)}</span>${escapeHtml(value)}</div>
+      </div>
+    `);
+  };
+
+  push(ICONS.hourglass, "时长", formatDuration(photo.duration_ms));
+  push(ICONS.video, "编码", [info.video_codec, info.video_profile].filter(Boolean).join(" · "));
+  push(ICONS.imageSize, "帧率", formatFps(info.fps));
+  push(ICONS.fileSize, "视频码率", formatBitrate(info.video_bitrate));
+  const audio = info.has_audio
+    ? [info.audio_codec, formatBitrate(info.audio_bitrate)].filter(Boolean).join(" · ")
+    : "无音轨";
+  push(ICONS.volume, "音频", audio);
+  if (info.container) {
+    push(ICONS.archive, "封装格式", String(info.container).replace(/^\./, "").toUpperCase());
+  }
+  return rows.join("");
 }
 
 function escapeHtml(s) {
@@ -821,6 +926,7 @@ async function loadYears() {
  */
 function cardHtml(photo) {
   const isDeleted = photo.status === "deleted";
+  const isVideo = photo.media_kind === "video";
   const dims = photo.dimensions || {};
   const tagsHtml = (photo.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
   const rawBadge = rawBadgeHtml(photo, "card");
@@ -850,17 +956,25 @@ function cardHtml(photo) {
       <button class="btn small danger delete-btn" title="暂时收起"><span class="btn-icon">${ICONS.trash}</span></button>
     `;
   }
-  const reanalyzeAction = isDeleted
+  const reanalyzeAction = isDeleted || isVideo
     ? ""
     : `<button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>`;
 
+  // A video card is a strip of film, not a polaroid: dark stock, sprocket holes
+  // down both edges, and a play mark on the frame. It keeps the same box, the
+  // same entrance animation and the same hover lift, so the grid still reads as
+  // one collection - just a different material.
   return `
     <div class="polaroid-inner">
       <div class="polaroid-front">
-        <div class="tape"></div>
+        ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape"></div>'}
         <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
         ${rawBadge}
-        <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" /></div>
+        ${liveBadgeHtml(photo)}
+        <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" />${
+          isVideo ? `<span class="video-play-mark">${ICONS.play || ""}</span>` : ""
+        }</div>
+        ${videoDurationBadge(photo)}
         <div class="polaroid-body">
           ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
           ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
@@ -1058,7 +1172,7 @@ function renderGallery(options = {}) {
   state.photos.slice(startIndex).forEach((photo, offset) => {
     const idx = startIndex + offset;
     const card = document.createElement("div");
-    card.className = "polaroid-card";
+    card.className = photo.media_kind === "video" ? "polaroid-card is-video" : "polaroid-card";
     if (options.animate === false) {
       card.style.animation = "none";
     } else {
@@ -1086,6 +1200,7 @@ function refreshCard(id) {
   const observer = cardObserverInstance();
   const oldImg = card.querySelector(".polaroid-photo");
   if (observer && oldImg) observer.unobserve(oldImg);
+  card.classList.toggle("is-video", photo.media_kind === "video");
   card.innerHTML = cardHtml(photo);
   watchThumb(card);
 }
@@ -2135,6 +2250,8 @@ function openFullscreenViewer() {
   
   const fsModal = $("fullscreenModal");
   const fsImg = $("fsImage");
+  const fsVideo = $("fsVideo");
+  const toolbar = fsModal ? fsModal.querySelector(".fs-viewer-toolbar") : null;
   if (!fsModal || !fsImg) return;
 
   state.fullscreen.scale = 1;
@@ -2142,13 +2259,111 @@ function openFullscreenViewer() {
   state.fullscreen.panY = 0;
   state.fullscreen.isDragging = false;
 
+  const isVideo = photo.media_kind === "video";
+  if (fsVideo) {
+    if (isVideo) {
+      // The original file, with sound on: this is the "watch it properly"
+      // path, and the user asked for it explicitly by clicking.
+      fsImg.classList.add("hidden");
+      fsImg.removeAttribute("src");
+      fsVideo.classList.remove("hidden");
+      fsVideo.muted = false;
+      fsVideo.src = `/api/video/${photo.id}/stream`;
+      fsVideo.load();
+      // The zoom/pan toolbar belongs to the still viewer; the player has its
+      // own controls and the two would fight over the same wheel gestures.
+      if (toolbar) toolbar.classList.add("hidden");
+      showModal(fsModal);
+      attachFullscreenVideoFallback(fsVideo, photo);
+      return;
+    }
+    fsVideo.pause();
+    fsVideo.removeAttribute("src");
+    fsVideo.load();
+    fsVideo.classList.add("hidden");
+  }
+  if (toolbar) toolbar.classList.remove("hidden");
+  fsImg.classList.remove("hidden");
   fsImg.src = `/api/original/${photo.id}`;
   applyFsTransform();
   showModal(fsModal);
 }
 
+/**
+ * Recover when the browser cannot decode the original container.
+ *
+ * The three strategies line up with the server's: most files play as they are,
+ * a stream copy rescues a container the browser refuses, and a real transcode
+ * is the last resort. Asking ``/api/video/<id>/playable`` hides which happened;
+ * the toolbar progress bar shows the wait when a transcode is needed.
+ */
+function attachFullscreenVideoFallback(video, photo) {
+  let tried = false;
+  video.onerror = async () => {
+    if (tried) {
+      showToast("这段视频无法在本机播放。", "error");
+      return;
+    }
+    tried = true;
+    try {
+      const resp = await fetch(`/api/video/${photo.id}/playable`);
+      if (resp.status === 200) {
+        video.src = `/api/video/${photo.id}/playable`;
+        video.load();
+        video.play().catch(() => {});
+        return;
+      }
+      if (resp.status === 202) {
+        const data = await resp.json();
+        showToast("这段视频需要转换才能播放，正在准备…", "info");
+        await waitForVideoJob(data.job_id, photo.id);
+        return;
+      }
+      const body = await resp.json().catch(() => ({}));
+      showToast(body.error || "这段视频无法在本机播放。", "error");
+    } catch (e) {
+      showToast("转换视频失败：" + e.message, "error");
+    }
+  };
+}
+
+/** Follow a transcode job and swap the player over to the result. */
+async function waitForVideoJob(jobId, photoId) {
+  const video = $("fsVideo");
+  for (let attempt = 0; attempt < 600; attempt += 1) {
+    let status;
+    try {
+      status = await api(`/api/scan/status/${jobId}`);
+    } catch (e) {
+      return;
+    }
+    if (status.status === "completed") {
+      state.detailFetched.delete(photoId);
+      if (video) {
+        video.src = `/api/video/${photoId}/playable`;
+        video.load();
+        video.play().catch(() => {});
+      }
+      return;
+    }
+    if (status.status === "error" || status.status === "cancelled") {
+      showToast(status.error || "视频转换失败。", "error");
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 function closeFullscreenViewer() {
   const fsModal = $("fullscreenModal");
+  const fsVideo = $("fsVideo");
+  if (fsVideo) {
+    fsVideo.pause();
+    fsVideo.removeAttribute("src");
+    fsVideo.load();
+    fsVideo.classList.add("hidden");
+    fsVideo.onerror = null;
+  }
   hideModal(fsModal);
   state.fullscreen.scale = 1;
   state.fullscreen.panX = 0;
@@ -2209,6 +2424,12 @@ async function ensurePhotoDetail(id) {
       width: detail.width,
       height: detail.height,
       size: detail.size,
+      media_kind: detail.media_kind || target.media_kind,
+      duration_ms: detail.duration_ms,
+      video_info: detail.video_info || {},
+      has_live: detail.has_live,
+      play_state: detail.play_state,
+      ffmpeg: detail.ffmpeg,
     });
     if (detail.location) target.location = detail.location;
     if (state.currentPreviewId === id) updatePreview({ skipImage: true });
@@ -2218,6 +2439,210 @@ async function ensurePhotoDetail(id) {
     console.warn("读取照片详情失败", e);
   }
 }
+
+/* ==========================================================================
+   Video playback in the detail dialog
+
+   The dialog shows the poster straight away, and swaps in a five-second,
+   silent, looping preview once the browser can actually play it. The preview is
+   deliberately muted: every browser blocks audible autoplay, and a dialog that
+   the user only opened to look at something must not start talking. The speaker
+   button is the opt-in, and its state is remembered for the session.
+
+   A Live Photo is the opposite: the still is the point, so the motion stays put
+   until the little badge is pressed.
+   ========================================================================== */
+
+//: Whether the user asked for sound in the preview clip. Session-wide.
+let previewSoundOn = false;
+
+/** Stop any video that is currently playing and put the element out of the way. */
+function stopPreviewVideo() {
+  const video = $("previewVideo");
+  if (!video) return;
+  video.pause();
+  // Clearing the source releases the decoder; without it every visited video
+  // would keep a pipeline alive until the dialog closed.
+  video.removeAttribute("src");
+  video.load();
+  video.classList.add("hidden");
+  const pause = $("previewVideoPauseBtn");
+  if (pause) pause.classList.add("hidden");
+}
+
+/**
+ * Point the dialog at the right medium for ``photo``.
+ *
+ * ``skipImage`` is the "the row changed, repaint the panel" path used when the
+ * detail payload lands; the video does not need to restart for that.
+ */
+function applyPreviewMedia(photo, options = {}) {
+  const video = $("previewVideo");
+  const soundBtn = $("previewSoundBtn");
+  const liveBtn = $("previewLiveBtn");
+  const tag = $("previewVideoTag");
+  const tagText = $("previewVideoTagText");
+  if (!video) return;
+
+  const isVideo = photo.media_kind === "video";
+  const hasLive = !!photo.has_live;
+
+  // Reset first, then decide: switching from a video to a photo must not leave
+  // the previous clip running underneath.
+  stopPreviewVideo();
+  if (soundBtn) soundBtn.classList.add("hidden");
+  if (liveBtn) liveBtn.classList.add("hidden");
+  if (tag) tag.classList.add("hidden");
+  $("previewImage").classList.toggle("hidden", false);
+
+  if (isVideo) {
+    if (options.skipImage && video.dataset.photoId === String(photo.id) && !video.classList.contains("hidden")) {
+      return;
+    }
+    video.dataset.photoId = String(photo.id);
+    if (tag) {
+      const seconds = Math.round(Number(state.videoClipSeconds) || 5);
+      if (tagText) tagText.textContent = `${seconds} 秒预览`;
+      tag.classList.remove("hidden");
+    }
+    if (soundBtn) {
+      soundBtn.classList.remove("hidden");
+      paintSoundButton();
+    }
+    playPreviewClip(photo);
+    return;
+  }
+
+  delete video.dataset.photoId;
+  if (hasLive && liveBtn) liveBtn.classList.remove("hidden");
+}
+
+/** Load and start the silent preview loop for ``photo``. */
+function playPreviewClip(photo) {
+  const video = $("previewVideo");
+  if (!video) return;
+  const wanted = `/api/video/${photo.id}/clip`;
+  video.dataset.photoId = String(photo.id);
+  video.muted = !previewSoundOn;
+  video.loop = true;
+  video.classList.add("hidden");
+  video.src = wanted;
+  const pause = $("previewVideoPauseBtn");
+  const onReady = () => {
+    if (video.dataset.photoId !== String(photo.id)) return;
+    video.classList.remove("hidden");
+    if (pause) pause.classList.remove("hidden");
+    const played = video.play();
+    if (played && typeof played.catch === "function") {
+      // Autoplay can still be refused (a strict browser profile); the poster
+      // stays visible and the pause button is meaningless, so hide it.
+      played.catch(() => {
+        video.classList.add("hidden");
+        if (pause) pause.classList.add("hidden");
+      });
+    }
+  };
+  video.addEventListener("canplay", onReady, { once: true });
+  video.addEventListener(
+    "error",
+    () => {
+      // Ignore the abort that `stopPreviewVideo` causes when the source is
+      // cleared: that fires on the same element and would hide a perfectly
+      // good clip that is already loading.
+      const current = video.getAttribute("src") || "";
+      if (!current || current !== wanted) return;
+      // No ffmpeg, or a codec ffmpeg could not read: keep the poster.
+      video.classList.add("hidden");
+      if (pause) pause.classList.add("hidden");
+    },
+    { once: true }
+  );
+}
+
+function paintSoundButton() {
+  const btn = $("previewSoundBtn");
+  if (!btn) return;
+  btn.innerHTML = `<span class="btn-icon">${previewSoundOn ? ICONS.volume : ICONS.volumeOff}</span>`;
+  btn.title = previewSoundOn ? "关闭声音" : "打开声音";
+  btn.classList.toggle("is-on", previewSoundOn);
+  const video = $("previewVideo");
+  if (video) video.muted = !previewSoundOn;
+}
+
+function togglePreviewSound() {
+  previewSoundOn = !previewSoundOn;
+  paintSoundButton();
+}
+
+function togglePreviewPause() {
+  const video = $("previewVideo");
+  const btn = $("previewVideoPauseBtn");
+  if (!video || !btn) return;
+  if (video.paused) {
+    video.play();
+    btn.innerHTML = `<span class="btn-icon">${ICONS.pause}</span>`;
+    btn.title = "暂停";
+  } else {
+    video.pause();
+    btn.innerHTML = `<span class="btn-icon">${ICONS.play}</span>`;
+    btn.title = "播放";
+  }
+}
+
+/**
+ * Play or pause the short video a still carries.
+ *
+ * Unlike the looping preview this one is started by a deliberate press, so it
+ * plays with sound - the user asked for it.
+ */
+let livePlaying = false;
+
+function toggleLiveVideo(photo) {
+  const video = $("previewVideo");
+  const liveBtn = $("previewLiveBtn");
+  if (!video || !liveBtn) return;
+  if (livePlaying) {
+    stopPreviewVideo();
+    livePlaying = false;
+    liveBtn.classList.remove("playing");
+    $("previewImage").classList.remove("hidden");
+    return;
+  }
+  livePlaying = true;
+  liveBtn.classList.add("playing");
+  video.dataset.photoId = String(photo.id);
+  video.loop = false;
+  video.muted = false;
+  video.classList.add("hidden");
+  video.src = `/api/photo/${photo.id}/live`;
+  const reveal = () => {
+    video.classList.remove("hidden");
+    video.play().catch(() => {
+      video.classList.add("hidden");
+    });
+  };
+  video.addEventListener("canplay", reveal, { once: true });
+  video.addEventListener(
+    "ended",
+    () => {
+      livePlaying = false;
+      liveBtn.classList.remove("playing");
+      video.classList.add("hidden");
+      $("previewImage").classList.remove("hidden");
+    },
+    { once: true }
+  );
+  video.addEventListener(
+    "error",
+    () => {
+      livePlaying = false;
+      liveBtn.classList.remove("playing");
+      showToast("这段实况视频无法播放。", "error");
+    },
+    { once: true }
+  );
+}
+
 
 /**
  * Close a dialog, playing the reverse of its entrance animation first.
@@ -2257,7 +2682,14 @@ function updatePreview(options = {}) {
   $("previewRestoreBtn").classList.toggle("hidden", !isDeleted);
   $("previewPermanentDeleteBtn").classList.toggle("hidden", !isDeleted);
   // A trashed photo is not analysed again, so the action is not offered either.
-  $("previewReanalyzeBtn").classList.toggle("hidden", isDeleted);
+  // Videos never go through the model, so they do not offer it either.
+  const isVideo = photo.media_kind === "video";
+  $("previewReanalyzeBtn").classList.toggle("hidden", isDeleted || isVideo);
+
+  // Media: a video loops a short silent preview over its poster, a Live Photo
+  // waits for a deliberate press, and a plain photo is just the picture.
+  applyPreviewMedia(photo, options);
+
   
   const favBtn = $("previewFavoriteBtn");
   favBtn.classList.toggle("active", !!photo.favorite);
@@ -2352,6 +2784,7 @@ function updatePreview(options = {}) {
         ${ICONS.fileSize}
         <div class="meta-content">${fileSizeText(photo)}</div>
       </div>
+      ${videoDetailRows(photo)}
       <div class="meta-item-row" title="物理路径">
         ${ICONS.path}
         <div class="meta-content">${pathActionHtml(photo.path, "原图", photo.id)}</div>
@@ -2359,6 +2792,7 @@ function updatePreview(options = {}) {
       ${rawDetailRow(photo)}
     </div>
 
+    ${photo.media_kind === "video" ? "" : `
     <div class="dimension-section">
       <div class="dimension-section-title">
         <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.score} 多维度评分</span>
@@ -2368,6 +2802,7 @@ function updatePreview(options = {}) {
         ${dimensionRows(photo.dimensions || {}, photo.score)}
       </div>
     </div>
+    `}
 
     ${photo.tags && photo.tags.length ? `
       <div class="meta-item-row" title="情感与场景标签">
@@ -2509,6 +2944,32 @@ function onSettingsTabKeydown(e) {
   showSettingsTab(tabs[next].dataset.tab, { focus: true });
 }
 
+/**
+ * Show whether ffmpeg was found.
+ *
+ * It cannot be configured from here (the path belongs to the machine, not the
+ * album), so the row is a status line: the user needs to know why their videos
+ * have no preview before they start hunting through the logs.
+ */
+async function paintFfmpegStatus() {
+  const el = $("setFfmpegStatus");
+  if (!el) return;
+  el.classList.remove("ok", "bad");
+  el.textContent = "正在检测 ffmpeg…";
+  try {
+    const data = await api("/api/video/status");
+    if (data.available) {
+      el.classList.add("ok");
+      el.textContent = `已检测到 ffmpeg：${data.version || "版本未知"}`;
+    } else {
+      el.classList.add("bad");
+      el.textContent = "未检测到 ffmpeg。视频仍然会被索引，但无法生成预览或播放。请安装 ffmpeg 或设置 PHOTO_FFMPEG_PATH。";
+    }
+  } catch (e) {
+    el.textContent = "无法检测 ffmpeg： " + e.message;
+  }
+}
+
 async function openSettings() {
   try {
     await loadPromptPresets();
@@ -2531,6 +2992,14 @@ async function openSettings() {
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
+    $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 5;
+    $("setVideoClipMaxEdge").value = cfg.video_clip_max_edge || 960;
+    $("setVideoClipCrf").value = cfg.video_clip_crf ?? 28;
+    $("setVideoPosterRatio").value = cfg.video_poster_ratio ?? 0.1;
+    $("setVideoClipAudio").checked = cfg.video_clip_audio !== false;
+    $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
+    state.videoClipSeconds = Number(cfg.video_clip_seconds) || 5;
+    paintFfmpegStatus();
     // Always open on the model tab: that is what most visits are for.
     showSettingsTab("model");
     showModal($("settingsModal"));
@@ -2559,6 +3028,12 @@ async function saveSettings() {
     geocoding_api_key: $("setGeocodingApiKey").value,
     geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
     geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
+    video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 5,
+    video_clip_max_edge: parseInt($("setVideoClipMaxEdge").value, 10) || 960,
+    video_clip_crf: parseInt($("setVideoClipCrf").value, 10) || 28,
+    video_poster_ratio: parseFloat($("setVideoPosterRatio").value) || 0.1,
+    video_clip_audio: $("setVideoClipAudio").checked,
+    video_pregenerate: $("setVideoPregenerate").checked,
   };
   try {
     await api("/api/config", {
@@ -3493,6 +3968,20 @@ function init() {
   $("previewReanalyzeBtn").addEventListener("click", () => reanalyze(state.currentPreviewId));
   $("previewFavoriteBtn").addEventListener("click", toggleCurrentPreviewFavorite);
   $("previewImage").addEventListener("click", openFullscreenViewer);
+  $("previewVideo").addEventListener("click", openFullscreenViewer);
+  $("previewSoundBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    togglePreviewSound();
+  });
+  $("previewVideoPauseBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    togglePreviewPause();
+  });
+  $("previewLiveBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const photo = photoById(state.currentPreviewId);
+    if (photo) toggleLiveVideo(photo);
+  });
   $("previewInfo").addEventListener("click", handlePreviewInfoClick);
 
   // Fullscreen Viewer Controls

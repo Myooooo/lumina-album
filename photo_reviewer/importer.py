@@ -61,16 +61,19 @@ class SourceFile:
     size: int
     mtime: float
     is_raw: bool
+    is_video: bool = False
 
 
 @dataclass
 class SourceGroup:
-    """A photo on the card: an image file, a raw file, or both."""
+    """One memory on the card: a still, a raw half, a video, or a combination."""
 
     relative_dir: str
     stem: str
     image: SourceFile | None = None
     raw: SourceFile | None = None
+    #: A video with the same stem as the still - an iPhone Live Photo pair.
+    video: SourceFile | None = None
 
     @property
     def key(self) -> str:
@@ -164,11 +167,13 @@ def scan_source(
     image_extensions,
     raw_extensions,
     skip_names: set[str] | None = None,
+    video_extensions=(),
 ) -> tuple[list[SourceGroup], int]:
     """Walk the card and group its files the way the album indexes them.
 
-    Returns ``(groups, scanned_files)``. ``scanned_files`` counts every image
-    and raw file seen, so the caller can tell the user how much was considered.
+    Returns ``(groups, scanned_files)``. ``scanned_files`` counts every image,
+    raw and video file seen, so the caller can tell the user how much was
+    considered.
     """
     source_root = canonical_path(source_root)
     if not os.path.isdir(source_root):
@@ -176,6 +181,7 @@ def scan_source(
 
     images = {str(e).lower() for e in image_extensions}
     raws = {str(e).lower() for e in raw_extensions}
+    videos = {str(e).lower() for e in (video_extensions or ())}
     skip = set(skip_names or ()) | {".photo-trash", ".photo-review-cache"}
 
     groups: dict[str, SourceGroup] = {}
@@ -193,8 +199,13 @@ def scan_source(
             suffix = Path(name).suffix.lower()
             if suffix in images:
                 is_raw = False
+                is_video = False
             elif suffix in raws:
                 is_raw = True
+                is_video = False
+            elif suffix in videos:
+                is_raw = False
+                is_video = True
             else:
                 continue
             full = os.path.join(root, name)
@@ -211,13 +222,17 @@ def scan_source(
                 size=stat.st_size,
                 mtime=stat.st_mtime,
                 is_raw=is_raw,
+                is_video=is_video,
             )
             stem = Path(name).stem.lower()
             key = os.path.join(relative_dir, stem).lower()
             group = groups.setdefault(
                 key, SourceGroup(relative_dir=relative_dir, stem=Path(name).stem)
             )
-            if is_raw:
+            if is_video:
+                if group.video is None:
+                    group.video = entry
+            elif is_raw:
                 if group.raw is None:
                     group.raw = entry
             elif group.image is None:
@@ -233,7 +248,13 @@ def _selected_files(group: SourceGroup, raw_policy: str) -> list[SourceFile]:
     lone ``.nef`` is never silently dropped when the user asked for images (its
     embedded preview is a perfectly good picture), and a card that only carries
     JPEGs still imports under ``仅RAW``.
+
+    A video is never subject to the raw policy. When it shares its stem with a
+    still it is that photo's Live Photo half and both files travel together;
+    on its own it is simply copied.
     """
+    if group.video is not None:
+        return [f for f in (group.image, group.video) if f is not None]
     if raw_policy == RAW_POLICY_RAW_ONLY:
         chosen = [group.raw] if group.raw else [group.image]
     elif raw_policy == RAW_POLICY_BOTH:
@@ -271,7 +292,11 @@ def plan_import(
         raise ImportError_("目标文件夹位于来源文件夹内部，请换一个目标目录")
 
     groups, scanned = scan_source(
-        source, config.image_extensions, config.raw_extensions, {config.cache_dir_name}
+        source,
+        config.image_extensions,
+        config.raw_extensions,
+        {config.cache_dir_name},
+        video_extensions=config.video_extensions,
     )
 
     plan = ImportPlan(

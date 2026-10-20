@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import time
 import unittest
@@ -3809,6 +3810,307 @@ class GalleryPayloadTests(unittest.TestCase):
         # The version only changes the caching, never the picture.
         self.assertEqual(len(plain.data), len(versioned.data))
         self.assertEqual(plain.headers["ETag"], versioned.headers["ETag"])
+
+
+class VideoPayloadTests(unittest.TestCase):
+    """What a video row carries, without needing ffmpeg.
+
+    The rows are written by hand here: the point is the API contract (which
+    fields the gallery and the dialog read), not the extraction, which
+    ``tests/test_video.py`` covers against real files.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        self.cache = os.path.join(self.folder, ".photo-review-cache")
+        os.makedirs(self.folder)
+        os.makedirs(self.cache)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        # A running library has already been through the one-off repairs; the
+        # orientation pass would otherwise rewrite paths under the assertions.
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, ORIENTATION_REPAIR_VERSION)
+        self.db.set_meta(DIMENSIONS_REPAIR_KEY, DIMENSIONS_REPAIR_VERSION)
+
+        self.video_path = os.path.join(self.folder, "trip.mp4")
+        Path(self.video_path).write_bytes(b"\x00" * 8192)
+        self.clip_path = os.path.join(self.cache, "trip_clip.mp4")
+        Path(self.clip_path).write_bytes(b"\x11" * 4096)
+        self.poster_path = os.path.join(self.cache, "trip_thumb.jpg")
+        Image.new("RGB", (64, 36), (120, 90, 60)).save(self.poster_path, "JPEG")
+
+        self.video_id = self.db.upsert_photo(
+            {
+                "path": self.video_path,
+                "folder": self.folder,
+                "filename": "trip.mp4",
+                "status": "analyzed",
+                "media_kind": "video",
+                "duration_ms": 93_000,
+                "width": 1920,
+                "height": 1080,
+                "thumb_path": self.poster_path,
+                "proxy_path": self.poster_path,
+                "clip_path": self.clip_path,
+                "play_state": "none",
+                "video_info": {
+                    "video_codec": "hevc",
+                    "video_profile": "Main 10",
+                    "fps": 59.94,
+                    "video_bitrate": 45_000_000,
+                    "audio_codec": "aac",
+                    "audio_bitrate": 128_000,
+                    "container": ".mov",
+                    "capture_time": "2024:05:01 10:20:30",
+                    "has_audio": True,
+                },
+                "exif": {"datetime_original": "2024:05:01 10:20:30"},
+            }
+        )
+        still = os.path.join(self.folder, "still.jpg")
+        Image.new("RGB", (48, 36), (90, 120, 150)).save(still, "JPEG")
+        live = os.path.join(self.cache, "still_motion.mp4")
+        Path(live).write_bytes(b"\x22" * 2048)
+        self.still_id = self.db.upsert_photo(
+            {
+                "path": still,
+                "folder": self.folder,
+                "filename": "still.jpg",
+                "status": "analyzed",
+                "live_path": live,
+            }
+        )
+        self.client = create_app(self.cfg, self.db).test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:  # pragma: no cover - Windows may hold a served file
+            pass
+
+    def test_a_list_row_says_it_is_a_video_and_how_long(self) -> None:
+        rows = {
+            row["filename"]: row
+            for row in self.client.get("/api/photos").get_json()["photos"]
+        }
+        video = rows["trip.mp4"]
+        self.assertEqual(video["media_kind"], "video")
+        self.assertEqual(video["duration_ms"], 93_000)
+        self.assertFalse(video["has_live"])
+        self.assertEqual(rows["still.jpg"]["media_kind"], "photo")
+        self.assertTrue(rows["still.jpg"]["has_live"])
+
+    def test_the_list_row_does_not_carry_the_codec_block(self) -> None:
+        """Codec detail is for the dialog, like EXIF and the raw size."""
+        row = self.client.get("/api/photos").get_json()["photos"][0]
+        self.assertNotIn("video_info", row)
+
+    def test_the_detail_endpoint_returns_the_video_facts(self) -> None:
+        detail = self.client.get(f"/api/photo/{self.video_id}/detail").get_json()
+        self.assertEqual(detail["media_kind"], "video")
+        self.assertEqual(detail["duration_ms"], 93_000)
+        self.assertEqual(detail["video_info"]["video_codec"], "hevc")
+        self.assertEqual(detail["video_info"]["fps"], 59.94)
+        self.assertEqual(detail["clip_url"], f"/api/video/{self.video_id}/clip")
+        self.assertIn("ffmpeg", detail)
+
+    def test_a_photo_has_no_video_block(self) -> None:
+        detail = self.client.get(f"/api/photo/{self.still_id}/detail").get_json()
+        self.assertEqual(detail["media_kind"], "photo")
+        self.assertEqual(detail["video_info"], {})
+        self.assertIsNone(detail["clip_url"])
+        self.assertTrue(detail["has_live"])
+
+    def test_the_clip_endpoint_serves_the_cached_file(self) -> None:
+        resp = self.client.get(f"/api/video/{self.video_id}/clip")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers["Content-Type"], "video/mp4")
+        self.assertEqual(resp.headers["Accept-Ranges"], "bytes")
+        self.assertEqual(len(resp.data), 4096)
+
+    def test_the_stream_endpoint_answers_range_requests(self) -> None:
+        """A <video> can only seek if the server speaks bytes ranges."""
+        resp = self.client.get(
+            f"/api/video/{self.video_id}/stream",
+            headers={"Range": "bytes=100-199"},
+        )
+        self.assertEqual(resp.status_code, 206)
+        self.assertEqual(len(resp.data), 100)
+        self.assertEqual(
+            resp.headers["Content-Range"], "bytes 100-199/8192"
+        )
+        self.assertEqual(resp.headers["Content-Type"], "video/mp4")
+
+    def test_the_stream_endpoint_uses_the_container_mime_type(self) -> None:
+        self.assertEqual(
+            self.client.get(f"/api/video/{self.video_id}/stream").headers[
+                "Content-Type"
+            ],
+            "video/mp4",
+        )
+
+    def test_the_live_endpoint_serves_the_motion_part(self) -> None:
+        resp = self.client.get(f"/api/photo/{self.still_id}/live")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data), 2048)
+
+    def test_a_photo_without_a_motion_part_is_a_404(self) -> None:
+        plain = os.path.join(self.folder, "plain.jpg")
+        Image.new("RGB", (20, 20), (1, 2, 3)).save(plain, "JPEG")
+        pid = self.db.upsert_photo(
+            {
+                "path": plain,
+                "folder": self.folder,
+                "filename": "plain.jpg",
+                "status": "analyzed",
+            }
+        )
+        self.assertEqual(self.client.get(f"/api/photo/{pid}/live").status_code, 404)
+
+    def test_video_endpoints_refuse_a_photo_row(self) -> None:
+        for endpoint in ("clip", "stream", "playable"):
+            resp = self.client.get(f"/api/video/{self.still_id}/{endpoint}")
+            self.assertEqual(resp.status_code, 404, endpoint)
+
+    def test_unknown_ids_are_404(self) -> None:
+        self.assertEqual(self.client.get("/api/video/999999/clip").status_code, 404)
+        self.assertEqual(self.client.get("/api/video/999999/stream").status_code, 404)
+        self.assertEqual(self.client.get("/api/video/999999/playable").status_code, 404)
+
+    def test_the_playable_endpoint_streams_what_is_already_there(self) -> None:
+        ready = os.path.join(self.cache, "trip_play.mp4")
+        Path(ready).write_bytes(b"\x33" * 1024)
+        self.db.set_video_paths(self.video_id, play_path=ready, play_state="ready")
+        resp = self.client.get(f"/api/video/{self.video_id}/playable")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.data), 1024)
+
+    def test_the_playable_endpoint_starts_a_job_when_nothing_is_ready(self) -> None:
+        resp = self.client.get(f"/api/video/{self.video_id}/playable")
+        # Either a job was started (202) or ffmpeg is missing (503); both are
+        # contract answers, and neither may be a crash.
+        self.assertIn(resp.status_code, (202, 503))
+        if resp.status_code == 202:
+            body = resp.get_json()
+            self.assertIn("job_id", body)
+            self.assertIn(body["state"], ("running", "pending"))
+
+    def test_the_cache_sweep_keeps_derived_video_files(self) -> None:
+        """Cleanup must not delete a preview that a row still points at."""
+        from photo_reviewer.cache import cleanup_folder_cache
+
+        report = cleanup_folder_cache(self.folder, self.db, self.cfg.cache_dir_name)
+        self.assertTrue(os.path.exists(self.clip_path))
+        self.assertTrue(os.path.exists(self.poster_path))
+        self.assertGreaterEqual(report["freed"], 0)
+
+    def test_the_cache_sweep_removes_an_orphaned_preview(self) -> None:
+        from photo_reviewer.cache import cleanup_folder_cache
+
+        orphan = os.path.join(self.cache, "nobody_clip.mp4")
+        Path(orphan).write_bytes(b"\x44" * 512)
+        cleanup_folder_cache(self.folder, self.db, self.cfg.cache_dir_name)
+        self.assertFalse(os.path.exists(orphan))
+
+
+def _ffmpeg_available() -> bool:
+    from photo_reviewer.video import tools_available
+
+    return tools_available()
+
+
+@unittest.skipUnless(_ffmpeg_available(), "ffmpeg is not installed")
+class VideoPlaybackTests(unittest.TestCase):
+    """The full path with real files: index, poster, clip, remux."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+
+    def tearDown(self) -> None:
+        from photo_reviewer.repair import wait_for_repairs
+
+        wait_for_repairs(timeout=30)
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:  # pragma: no cover
+            pass
+
+    def _make_video(self, name: str) -> str:
+        from photo_reviewer.video import find_tools
+
+        tools = find_tools()
+        path = os.path.join(self.folder, name)
+        subprocess.run(
+            [
+                tools.ffmpeg, "-v", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=6",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=6",
+                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-shortest", path,
+            ],
+            check=False,
+            capture_output=True,
+        )
+        return path
+
+    def test_indexing_a_video_writes_a_poster_and_marks_it_collected(self) -> None:
+        from photo_reviewer.scanner import _index_one
+
+        path = self._make_video("trip.mp4")
+        self.assertTrue(_index_one(path, self.folder, self.db, self.cfg))
+        row = self.db.get_photo_by_path(path)
+        self.assertEqual(row["media_kind"], "video")
+        # No model pass for videos, so they land in "已收录" immediately.
+        self.assertEqual(row["status"], "analyzed")
+        self.assertIsNone(row["score"])
+        self.assertGreater(row["duration_ms"], 5000)
+        self.assertAlmostEqual(row["width"], 320)
+        self.assertTrue(row["thumb_path"] and os.path.exists(row["thumb_path"]))
+        self.assertEqual(row["video_info"]["video_codec"], "h264")
+
+    def test_the_clip_endpoint_generates_and_caches(self) -> None:
+        from photo_reviewer.scanner import _index_one
+
+        path = self._make_video("trip.mp4")
+        _index_one(path, self.folder, self.db, self.cfg)
+        row = self.db.get_photo_by_path(path)
+        client = create_app(self.cfg, self.db).test_client()
+
+        first = client.get(f"/api/video/{row['id']}/clip")
+        self.assertEqual(first.status_code, 200)
+        self.assertGreater(len(first.data), 1024)
+        saved = self.db.get_photo(row["id"])["clip_path"]
+        self.assertTrue(saved and os.path.exists(saved))
+
+        second = client.get(f"/api/video/{row['id']}/clip")
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.data, second.data)
+
+    def test_the_clip_is_about_five_seconds(self) -> None:
+        from photo_reviewer.scanner import _index_one
+        from photo_reviewer.video import probe
+
+        path = self._make_video("trip.mp4")
+        _index_one(path, self.folder, self.db, self.cfg)
+        row = self.db.get_photo_by_path(path)
+        create_app(self.cfg, self.db).test_client().get(
+            f"/api/video/{row['id']}/clip"
+        )
+        clip = probe(self.db.get_photo(row["id"])["clip_path"])
+        self.assertIsNotNone(clip)
+        self.assertLessEqual(clip.duration_ms, 5400)
+        self.assertGreater(clip.duration_ms, 4000)
 
 
 if __name__ == "__main__":

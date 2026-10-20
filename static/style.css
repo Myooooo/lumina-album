@@ -771,6 +771,230 @@ select {
   transform: scale(1);
 }
 
+/* ---------- Film card ----------
+   A video is a different material from a still: instead of a paper polaroid it
+   is a strip of film - near-black stock, sprocket holes down both edges, and a
+   warm frame line around the picture. The geometry stays exactly the same as a
+   photo card (same box, same entrance animation, same hover lift), so the grid
+   still reads as one collection.
+
+   The sprockets are drawn with a repeating gradient rather than an image, so
+   they cost nothing to download and scale with the card. */
+.polaroid-card.is-video {
+  --rot: -0.35deg;
+}
+
+.polaroid-card.is-video:nth-child(4n+1) { --rot: -0.5deg; }
+.polaroid-card.is-video:nth-child(4n+2) { --rot: 0.4deg; }
+.polaroid-card.is-video:nth-child(4n+3) { --rot: -0.3deg; }
+.polaroid-card.is-video:nth-child(4n) { --rot: 0.45deg; }
+
+.polaroid-card.is-video .polaroid-inner {
+  background: #14120f;
+  border: 1px solid #2b2620;
+  border-radius: 3px;
+  box-shadow: 0 10px 26px rgba(18, 14, 10, 0.32);
+  padding: 12px 22px 16px;
+}
+
+.polaroid-card.is-video:hover .polaroid-inner {
+  box-shadow: 0 16px 34px rgba(18, 14, 10, 0.42);
+}
+
+/* The sprocket holes: two columns of soft squares down the stock. */
+.film-strip {
+  position: absolute;
+  inset: 6px 4px;
+  pointer-events: none;
+  border-radius: 2px;
+  background-image:
+    radial-gradient(circle at 7px 50%, rgba(247, 239, 228, 0.82) 3.1px, transparent 3.4px),
+    radial-gradient(circle at calc(100% - 7px) 50%, rgba(247, 239, 228, 0.82) 3.1px, transparent 3.4px);
+  background-size: 100% 18px;
+  background-repeat: repeat-y;
+  z-index: 1;
+  opacity: .85;
+}
+
+.polaroid-card.is-video .polaroid-photo-frame {
+  background: #0c0a08;
+  box-shadow: inset 0 0 0 1px rgba(216, 201, 180, 0.16);
+  border-radius: 1px;
+}
+
+.polaroid-card.is-video .polaroid-body {
+  color: #d9cfc2;
+}
+
+.polaroid-card.is-video .photo-location,
+.polaroid-card.is-video .photo-comment {
+  color: #b9ab9c;
+}
+
+.polaroid-card.is-video .photo-location svg,
+.polaroid-card.is-video .photo-comment svg {
+  color: #8a7c6d;
+}
+
+.polaroid-card.is-video .tag {
+  background: rgba(216, 201, 180, 0.14);
+  color: #d5c7b6;
+}
+
+.polaroid-card.is-video .card-actions {
+  border-top-color: rgba(216, 201, 180, 0.12) !important;
+}
+
+.polaroid-card.is-video .card-check input {
+  accent-color: var(--primary);
+}
+
+.polaroid-card.is-video .btn.small {
+  background: rgba(247, 239, 228, 0.08);
+  border-color: rgba(216, 201, 180, 0.16);
+  color: #cfc1b2;
+}
+
+.polaroid-card.is-video .btn.small:hover {
+  background: rgba(247, 239, 228, 0.16);
+  color: #f3ece2;
+}
+
+.polaroid-card.is-video .btn.small.danger {
+  color: #e2908b;
+  border-color: rgba(217, 83, 79, 0.32);
+}
+
+.polaroid-card.is-video .btn.small.danger:hover {
+  background: rgba(217, 83, 79, 0.22);
+  color: #ffd9d6;
+}
+
+.polaroid-card.is-video .favorite-btn {
+  background: rgba(20, 18, 15, 0.62);
+  border-color: rgba(216, 201, 180, 0.22);
+  color: #cfc1b2;
+}
+
+.polaroid-card.is-video .favorite-btn:hover,
+.polaroid-card.is-video .favorite-btn.active {
+  background: rgba(247, 239, 228, 0.15);
+  color: #f2b8b4;
+}
+
+/* Play mark: a soft disc over the frame, brightening on hover. */
+.video-play-mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 52px;
+  height: 52px;
+  margin: -26px 0 0 -26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(14, 12, 10, 0.46);
+  border: 1px solid rgba(247, 239, 228, 0.5);
+  color: #fdf8f1;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: none;
+  transition: transform .3s cubic-bezier(.2,.8,.2,1), background-color .3s ease,
+              box-shadow .3s ease;
+  z-index: 2;
+}
+
+.video-play-mark svg {
+  width: 20px;
+  height: 20px;
+  margin-left: 3px;
+  transform: translateZ(0);
+}
+
+.polaroid-card.is-video:hover .video-play-mark {
+  transform: scale(1.1);
+  background: rgba(20, 16, 12, 0.62);
+  box-shadow: 0 0 0 9px rgba(179, 125, 86, 0.16), 0 8px 22px rgba(0, 0, 0, 0.36);
+}
+
+/* Duration pill: bottom-right of the frame, the twin of the RAW badge. */
+.video-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 4px 8px 4px 6px;
+  border-radius: 999px;
+  color: #fdf8f1;
+  background: rgba(14, 12, 10, 0.66);
+  border: 1px solid rgba(247, 239, 228, 0.22);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.video-badge svg { width: 10px; height: 10px; }
+
+/* ---------- Live Photo badge ----------
+   The concentric mark iOS uses, in the album's own palette. It sits on the
+   photo card (a Live Photo is still a photo) at the top-left, opposite the
+   favourite heart, and the RAW badge shifts along when both are present. */
+.live-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 254, 251, 0.9);
+  border: 1px solid rgba(179, 125, 86, 0.3);
+  box-shadow: 0 2px 8px rgba(60, 40, 20, 0.14);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 7;
+  animation: liveBadgeIn .4s cubic-bezier(.34, 1.28, .64, 1) both;
+}
+
+.live-badge-ring {
+  position: absolute;
+  inset: 3.5px;
+  border-radius: 50%;
+  border: 1.4px solid var(--primary-dark);
+  opacity: .75;
+}
+
+.live-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+}
+
+@keyframes liveBadgeIn {
+  from { opacity: 0; transform: scale(.6); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* When a RAW badge shares the corner, the Live Photo mark moves down. */
+.raw-badge-card + .live-badge {
+  top: 42px;
+}
+
+
 /* Favorite Heart Floating Button on Card */
 .favorite-btn {
   position: absolute;
@@ -1318,6 +1542,210 @@ select {
   box-shadow: var(--shadow-card);
   transition: transform .2s ease;
 }
+
+/* ---------- Video inside the detail dialog ----------
+   The poster keeps the layout: it is the element that decides the box. The clip
+   is laid over it, exactly the same size, and fades in when it can play - a
+   cross-fade rather than a second column. Both elements are in the flex media
+   column, so the video has to be taken out of flow or the two would sit side by
+   side and overflow the dialog. */
+.preview-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-md);
+  object-fit: contain;
+  background: #14120f;
+  box-shadow: var(--shadow-card);
+  animation: previewVideoIn .36s ease both;
+}
+
+@keyframes previewVideoIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* "5 秒预览" tag, top-left of the frame. */
+.preview-video-tag {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  letter-spacing: .04em;
+  padding: 4px 9px 4px 7px;
+  border-radius: 99px;
+  color: #f7efe4;
+  background: rgba(14, 12, 10, 0.6);
+  border: 1px solid rgba(247, 239, 228, 0.2);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.preview-video-tag .btn-icon,
+.preview-video-tag svg { width: 12px; height: 12px; }
+
+/* Round controls floating on the frame. */
+.preview-sound-btn,
+.preview-video-pause,
+.preview-live-btn {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 99px;
+  border: 1px solid rgba(247, 239, 228, 0.24);
+  background: rgba(14, 12, 10, 0.58);
+  color: #f7efe4;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: transform .26s cubic-bezier(.2,.8,.2,1), background-color .2s ease,
+              box-shadow .26s ease;
+  z-index: 4;
+}
+
+.preview-sound-btn {
+  bottom: 12px;
+  right: 12px;
+  width: 38px;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+}
+
+.preview-video-pause {
+  bottom: 12px;
+  left: 12px;
+  width: 38px;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+}
+
+.preview-sound-btn svg,
+.preview-video-pause svg { width: 17px; height: 17px; }
+
+.preview-sound-btn:hover,
+.preview-video-pause:hover {
+  background: rgba(24, 20, 16, 0.78);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
+}
+
+.preview-sound-btn.is-on {
+  border-color: rgba(179, 125, 86, 0.7);
+  color: #f3d9bd;
+  box-shadow: 0 0 0 4px rgba(179, 125, 86, 0.18);
+}
+
+.preview-live-btn {
+  bottom: 12px;
+  right: 12px;
+  padding: 8px 14px 8px 10px;
+  font-size: 12.5px;
+}
+
+.preview-live-btn:hover {
+  background: rgba(24, 20, 16, 0.78);
+  transform: translateY(-2px);
+}
+
+.preview-live-btn.playing {
+  border-color: rgba(179, 125, 86, 0.75);
+  background: rgba(179, 125, 86, 0.28);
+}
+
+.preview-live-mark {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(247, 239, 228, 0.92);
+}
+
+/* ---------- Fullscreen video ---------- */
+.fs-video {
+  max-width: 96vw;
+  max-height: 92vh;
+  border-radius: var(--radius-md);
+  background: #000;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+/* A dim name in front of a technical value ("编码 h264 · High"). */
+.meta-item-row .meta-label {
+  display: inline-block;
+  min-width: 52px;
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- Settings: video block ---------- */
+.settings-subtitle {
+  margin: 22px 0 0;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: .01em;
+}
+
+.settings-subtitle::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 13px;
+  margin-right: 8px;
+  border-radius: 2px;
+  background: var(--primary);
+  vertical-align: -1px;
+}
+
+.checkbox-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px !important;
+  color: var(--text-secondary) !important;
+  font-size: 13px;
+  font-weight: 400 !important;
+  cursor: pointer;
+}
+
+.checkbox-row input {
+  width: auto !important;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 !important;
+  border: none !important;
+  accent-color: var(--primary);
+}
+
+.checkbox-row span {
+  line-height: 1.5;
+}
+
+.settings-status {
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(130, 100, 70, 0.06);
+  border: 1px dashed var(--border-strong);
+}
+
+.settings-status.ok { color: var(--keep); border-color: rgba(96, 141, 109, 0.35); }
+.settings-status.bad { color: var(--danger); border-color: rgba(217, 83, 79, 0.35); }
 
 /* ---------- Fullscreen Image Viewer Modal (Zoom & Pan) ---------- */
 .fs-viewer {
@@ -2750,7 +3178,9 @@ select {
   .preview-switch-left, .preview-switch-right, .stat, .btn,
   .card-status.state-connected::before, .folder-history, .folder-history-item,
   .custom-select-menu, .settings-pane, .card-pending-dot, .toast,
-  .back-to-top, .back-to-top-ring, .back-to-top .btn-icon {
+  .back-to-top, .back-to-top-ring, .back-to-top .btn-icon,
+  .video-play-mark, .live-badge, .preview-video,
+  .preview-sound-btn, .preview-video-pause, .preview-live-btn {
     animation: none !important;
     transition: none !important;
   }

@@ -8,6 +8,21 @@ from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+#: HEIC/AVIF support is optional: ``pillow-heif`` ships a libheif build, so it is
+#: a real dependency when it is wanted and dead weight when it is not. Without
+#: it the extensions are simply not offered, and those files are skipped instead
+#: of turning into a folder full of "cannot identify image file" errors.
+try:  # pragma: no cover - exercised by whether the import succeeds
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+    HEIF_AVAILABLE = True
+except Exception:  # noqa: BLE001 - any import failure means "not available"
+    HEIF_AVAILABLE = False
+
+#: Extensions that only work when ``pillow-heif`` is installed.
+HEIF_EXTENSIONS = (".heic", ".heif", ".avif")
+
 # Kept in sync with ``Config.raw_extensions``. Duplicated here so the
 # thumbnailer stays free of configuration imports.
 RAW_EXTENSIONS = frozenset(
@@ -339,12 +354,29 @@ def hamming_distance(a: str, b: str) -> int:
     return _popcount(ia ^ ib)
 
 
+#: Everything the cache directory is allowed to hold: the two still images,
+#: plus the three video derivatives (detail preview, browser-safe copy, and the
+#: motion part of a Live Photo). Anything else in the directory is not ours and
+#: is left alone.
+_CACHE_SUFFIXES = (
+    "_thumb.jpg",
+    "_proxy.jpg",
+    "_clip.mp4",
+    "_play.mp4",
+    "_motion.mp4",
+)
+
+
 def cleanup_cache(referenced_paths, thumb_dir: str) -> dict:
     """Delete cached proxy/thumbnail files that are not referenced by the DB.
 
     ``referenced_paths`` is an iterable of absolute paths that must be kept.
     Leftover ``*.tmp`` files from interrupted writes are swept as well. Returns
     ``{"freed": int, "freed_size": int, "photos_affected": int}``.
+
+    Video derivatives are swept under the same rule as the still images: a
+    preview clip nobody references any more is a leftover, and a 200 MB
+    transcoded copy of a trashed video must not sit there for ever.
     """
     referenced = set()
     for p in referenced_paths:
@@ -365,7 +397,8 @@ def cleanup_cache(referenced_paths, thumb_dir: str) -> dict:
             except OSError:
                 pass
             continue
-        if not name.endswith(("_thumb.jpg", "_proxy.jpg")):
+        suffix = next((s for s in _CACHE_SUFFIXES if name.endswith(s)), None)
+        if suffix is None:
             continue
         path = os.path.join(thumb_dir, name)
         if path in referenced:
@@ -374,10 +407,11 @@ def cleanup_cache(referenced_paths, thumb_dir: str) -> dict:
             freed_size += os.path.getsize(path)
             os.remove(path)
             freed += 1
-            if name.endswith("_proxy.jpg"):
-                affected_bases.add(name[: -len("_proxy.jpg")])
-            elif name.endswith("_thumb.jpg"):
-                affected_bases.add(name[: -len("_thumb.jpg")])
+            if suffix != "_motion.mp4":
+                # A motion clip is named after the still it belongs to, so its
+                # base counts as affected too - but the still's own files are
+                # what the summary means by "photos".
+                affected_bases.add(name[: -len(suffix)])
         except OSError:
             pass
     return {

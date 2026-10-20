@@ -52,8 +52,7 @@ def cleanup_folder_cache(
     cache_dir = cache_dir_for_folder(folder, cache_dir_name)
     referenced = []
     for item in db.cache_paths_for_folder(folder):
-        if item.get("thumb_path"):
-            referenced.append(item["thumb_path"])
-        if item.get("proxy_path"):
-            referenced.append(item["proxy_path"])
+        for key in ("thumb_path", "proxy_path", "clip_path", "play_path", "live_path"):
+            if item.get(key):
+                referenced.append(item[key])
     return cleanup_cache(referenced, str(cache_dir))

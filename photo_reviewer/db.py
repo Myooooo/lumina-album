@@ -331,6 +331,28 @@ class Database:
                     conn.execute(
                         "ALTER TABLE photos ADD COLUMN geocoded INTEGER DEFAULT 0"
                     )
+                # Video support. ``media_kind`` is 'photo' for everything that
+                # existed before this migration, so no row needs rewriting.
+                if "media_kind" not in cols:
+                    conn.execute(
+                        "ALTER TABLE photos ADD COLUMN media_kind TEXT DEFAULT 'photo'"
+                    )
+                if "duration_ms" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN duration_ms INTEGER")
+                if "video_info" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN video_info TEXT")
+                if "clip_path" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN clip_path TEXT")
+                if "play_path" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN play_path TEXT")
+                if "play_state" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN play_state TEXT")
+                if "live_path" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN live_path TEXT")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_photos_media_kind "
+                    "ON photos(media_kind)"
+                )
                 conn.commit()
             finally:
                 conn.close()
@@ -347,11 +369,13 @@ class Database:
                     INSERT INTO photos
                         (path, original_path, folder, filename, size, width, height, thumb_path,
                          proxy_path, dimensions, location, exif, phash, score, recommendation, tags, reason, title, raw_path, model,
-                         analyzed_at, status, favorite, geocoded, error, created_at)
+                         analyzed_at, status, favorite, geocoded, error, created_at,
+                         media_kind, duration_ms, video_info, clip_path, play_path, play_state, live_path)
                     VALUES
                         (:path, :original_path, :folder, :filename, :size, :width, :height, :thumb_path,
                          :proxy_path, :dimensions, :location, :exif, :phash, :score, :recommendation, :tags, :reason, :title, :raw_path, :model,
-                         :analyzed_at, :status, :favorite, :geocoded, :error, :created_at)
+                         :analyzed_at, :status, :favorite, :geocoded, :error, :created_at,
+                         :media_kind, :duration_ms, :video_info, :clip_path, :play_path, :play_state, :live_path)
                     ON CONFLICT(path) DO UPDATE SET
                         original_path=excluded.original_path,
                         folder=excluded.folder,
@@ -376,7 +400,14 @@ class Database:
                         status=excluded.status,
                         favorite=excluded.favorite,
                         error=excluded.error,
-                        created_at=excluded.created_at
+                        created_at=excluded.created_at,
+                        media_kind=excluded.media_kind,
+                        duration_ms=excluded.duration_ms,
+                        video_info=excluded.video_info,
+                        clip_path=excluded.clip_path,
+                        play_path=excluded.play_path,
+                        play_state=excluded.play_state,
+                        live_path=excluded.live_path
                     """,
                     {
                         "path": record["path"],
@@ -413,6 +444,17 @@ class Database:
                         "geocoded": 1 if record.get("geocoded") else 0,
                         "error": record.get("error"),
                         "created_at": record.get("created_at", now),
+                        "media_kind": record.get("media_kind") or "photo",
+                        "duration_ms": record.get("duration_ms"),
+                        "video_info": json.dumps(
+                            record.get("video_info") or {}, ensure_ascii=False
+                        )
+                        if isinstance(record.get("video_info"), dict)
+                        else record.get("video_info"),
+                        "clip_path": record.get("clip_path"),
+                        "play_path": record.get("play_path"),
+                        "play_state": record.get("play_state"),
+                        "live_path": record.get("live_path"),
                     },
                 )
                 conn.commit()
@@ -1295,16 +1337,31 @@ class Database:
                 conn.close()
 
     def cache_paths_for_folder(self, folder: str) -> list[dict[str, str | None]]:
-        """Return referenced proxy paths for one folder's cache directory."""
+        """Return every cached file one folder's rows still reference.
+
+        Videos add three more kinds of derived file (the preview clip, the
+        remuxed/transcoded copy and the motion part of a Live Photo). Leaving
+        them out of this list would let "清理缓存" delete files that are still in
+        use - and "移除目录" leave them behind for ever.
+        """
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    "SELECT thumb_path, proxy_path FROM photos WHERE folder=? AND (thumb_path IS NOT NULL OR proxy_path IS NOT NULL)",
+                    "SELECT thumb_path, proxy_path, clip_path, play_path, live_path "
+                    "FROM photos WHERE folder=? AND (thumb_path IS NOT NULL "
+                    "OR proxy_path IS NOT NULL OR clip_path IS NOT NULL "
+                    "OR play_path IS NOT NULL OR live_path IS NOT NULL)",
                     (folder,),
                 ).fetchall()
                 return [
-                    {"thumb_path": r["thumb_path"], "proxy_path": r["proxy_path"]}
+                    {
+                        "thumb_path": r["thumb_path"],
+                        "proxy_path": r["proxy_path"],
+                        "clip_path": r["clip_path"],
+                        "play_path": r["play_path"],
+                        "live_path": r["live_path"],
+                    }
                     for r in rows
                 ]
             finally:
@@ -1463,6 +1520,34 @@ class Database:
             finally:
                 conn.close()
 
+    def set_video_paths(
+        self,
+        photo_id: int,
+        clip_path: str | None = None,
+        play_path: str | None = None,
+        play_state: str | None = None,
+    ) -> None:
+        """Remember a derived video file, leaving the others alone.
+
+        Every argument defaults to ``None`` so a caller can record just the one
+        file it produced - generating the preview must not forget the remuxed
+        copy, and vice versa.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE photos SET "
+                    "clip_path=COALESCE(?, clip_path), "
+                    "play_path=COALESCE(?, play_path), "
+                    "play_state=COALESCE(?, play_state) "
+                    "WHERE id=?",
+                    (clip_path, play_path, play_state, photo_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
@@ -1478,6 +1563,15 @@ class Database:
             d["exif"] = json.loads(d["exif"]) if d.get("exif") else {}
         except (TypeError, ValueError):
             d["exif"] = {}
+        try:
+            d["video_info"] = (
+                json.loads(d["video_info"]) if d.get("video_info") else {}
+            )
+        except (TypeError, ValueError):
+            d["video_info"] = {}
+        if not d.get("media_kind"):
+            # Rows written before video support existed are photos.
+            d["media_kind"] = "photo"
         return d
 
 

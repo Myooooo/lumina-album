@@ -12,19 +12,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .cache import cleanup_folder_cache
+from . import video
+from .cache import cleanup_folder_cache, ensure_cache_dirs
 from .config import Config
-from .db import Database
+from .db import Database, utc_now
 from .exif import extract_exif
 from .geocode import geocoding_enabled, reverse_geocode
 from .paths import canonical_path
 from .pipeline import (
     analyze_prepared,
+    attach_live_video,
     base_record,
     is_coordinate_location,
     persist_analysis,
     prepare_for_analysis,
     prepare_proxy,
+    prepare_video,
 )
 
 IMAGE_EXTENSIONS = (
@@ -72,6 +75,10 @@ RAW_EXTENSIONS = {
     ".fff",
 }
 
+# Video files. Kept next to the image list because the scanner, the importer
+# and the settings dialog all need the same extensions.
+VIDEO_EXTENSIONS = video.VIDEO_EXTENSIONS
+
 
 @dataclass
 class ScanJob:
@@ -91,6 +98,9 @@ class ScanJob:
     #: point a reloaded page has to re-learn the speed from a standing start
     #: and shows nothing useful for the first few seconds.
     started_at: float = field(default_factory=time.time)
+    #: Photo id a single-item job is working on (currently only the video
+    #: transcode), so a second request can find the job already running.
+    subject_id: int | None = None
 
     @property
     def elapsed(self) -> float:
@@ -166,8 +176,9 @@ def discover_photo_pairs(
     extensions=IMAGE_EXTENSIONS,
     raw_extensions: set | None = None,
     skip_dirs=None,
+    video_extensions=None,
 ) -> list[tuple[str, str | None]]:
-    """Return ``(image_path, raw_sibling_or_None)`` for every photo to index.
+    """Return ``(image_path, raw_sibling_or_None)`` for every item to index.
 
     A camera raw file next to a same-named ``jpg``/``png``/... is *not* a
     separate photo: the image file is what gets rendered and analysed, and the
@@ -175,6 +186,11 @@ def discover_photo_pairs(
 
     A raw file without a same-named counterpart is indexed on its own; it is
     rendered from its embedded JPEG preview.
+
+    Videos are their own items. The single exception is a Live Photo, where the
+    iPhone writes ``IMG_1234.HEIC`` next to ``IMG_1234.MOV``: the movie is the
+    moving part of that still rather than a second memory, so the still is what
+    gets indexed and ``livephoto.detect`` finds the movie beside it later.
 
     Files whose name starts with ``._`` are skipped: those are macOS
     AppleDouble resource forks (``._DSC_0001.NEF``), not photographs. They
@@ -186,6 +202,10 @@ def discover_photo_pairs(
         raise NotADirectoryError(f"文件夹不存在或不是目录: {folder}")
     exts = {e.lower() for e in extensions}
     raws = {e.lower() for e in (raw_extensions if raw_extensions is not None else RAW_EXTENSIONS)}
+    videos = {
+        e.lower()
+        for e in (video_extensions if video_extensions is not None else VIDEO_EXTENSIONS)
+    }
     skip = {".photo-trash", ".git", "__pycache__"}
     if skip_dirs:
         for d in skip_dirs:
@@ -214,6 +234,8 @@ def discover_photo_pairs(
                 kind = "image"
             elif suffix in raws:
                 kind = "raw"
+            elif suffix in videos:
+                kind = "video"
             else:
                 continue
             key = (root, Path(name).stem.lower())
@@ -223,11 +245,14 @@ def discover_photo_pairs(
     for entry in by_stem.values():
         image = entry.get("image")
         raw = entry.get("raw")
+        clip = entry.get("video")
         if image:
             pairs.append((image, raw))
         elif raw:
             # Raw file with no same-named image: it becomes the photo itself.
             pairs.append((raw, None))
+        elif clip:
+            pairs.append((clip, None))
     pairs.sort(key=lambda item: item[0])
     return pairs
 
@@ -389,12 +414,18 @@ def _index_one(
     resolve_location: bool = False,
     raw_path: str | None = None,
 ) -> bool:
-    """Generate one proxy and upsert its index row."""
+    """Generate one proxy (or poster) and upsert its index row."""
     try:
-        prepared = prepare_proxy(image_path, folder, config, raw_path=raw_path)
+        if video.looks_like_video(image_path):
+            prepared = prepare_video(image_path, folder, config)
+        else:
+            prepared = prepare_proxy(image_path, folder, config, raw_path=raw_path)
+            # A still may carry a short video: a motion photo has it appended to
+            # the JPEG, a Live Photo keeps it in a same-named MOV.
+            prepared = attach_live_video(prepared, config)
         existing = db.get_photo_by_path(prepared.image_path)
         geocoded = False
-        if refresh_exif:
+        if refresh_exif and prepared.media_kind != "video":
             location, exif = extract_exif(image_path)
             if resolve_location:
                 location = _resolve_location(location, exif, existing, config)
@@ -408,12 +439,26 @@ def _index_one(
                 exif["geocoded"] = True
             prepared.location = location
             prepared.exif = exif or {}
-        status = existing.get("status") if existing else "pending"
+        if prepared.media_kind == "video":
+            # Videos are not sent to the model, so they never pass through the
+            # pending -> analyzed transition: they belong in "已收录" the moment
+            # they are indexed.
+            status = "analyzed"
+        else:
+            status = existing.get("status") if existing else "pending"
         record = base_record(prepared, existing=existing, status=status)
+        if prepared.media_kind == "video":
+            record["analyzed_at"] = (existing or {}).get("analyzed_at") or utc_now()
+            record["error"] = None
         record["geocoded"] = 1 if geocoded else 0
-        if refresh_exif:
+        if refresh_exif and prepared.media_kind != "video":
             record["location"] = prepared.location
             record["exif"] = prepared.exif
+        elif prepared.media_kind == "video" and prepared.exif:
+            # Capture time and device come from the container; the row needs
+            # them so year filtering and time sorting work alongside photos.
+            record["exif"] = {**(existing or {}).get("exif", {}), **prepared.exif}
+            record["location"] = (existing or {}).get("location")
         db.upsert_photo(record)
         return True
     except Exception as exc:  # noqa: BLE001
@@ -584,6 +629,7 @@ def _scan_worker(
             config.image_extensions,
             config.raw_extensions,
             skip_dirs=skip_dirs,
+            video_extensions=config.video_extensions,
         )
         if only_paths is not None:
             # Keep the primary file of each group plus its raw sibling, so a
@@ -710,6 +756,7 @@ def _rebuild_worker(
             config.image_extensions,
             config.raw_extensions,
             skip_dirs=skip_dirs,
+            video_extensions=config.video_extensions,
         )
         images = [image_path for image_path, _raw in pairs]
         current_set = set(images)
@@ -824,3 +871,88 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
         _record_photo_error(image_path, folder, db, exc)
         raise
     return db.get_photo(photo_id)
+
+
+# ---------------------------------------------------------------------------
+# Video transcoding job
+# ---------------------------------------------------------------------------
+
+
+def video_job_for(photo_id: int) -> ScanJob | None:
+    """The transcode job for ``photo_id``, if one is still working."""
+    for job in JOBS.list():
+        if job.subject_id == photo_id and job.status in ("pending", "running"):
+            return job
+    return None
+
+
+def start_video_job(photo_id: int, db: Database, config: Config) -> ScanJob:
+    """Prepare a browser-playable copy of one video, as a tracked job.
+
+    Runs on the same job machinery as a scan, so the toolbar shows its progress
+    (and the remaining-time estimate) with no extra UI. A stream copy finishes
+    before the first poll; a real transcode is the case this exists for.
+    """
+    job = JOBS.create(folder="", force=True)
+    JOBS.update(job.id, status="running", phase="video", subject_id=photo_id, total=1)
+
+    def worker() -> None:
+        try:
+            photo = db.get_photo(photo_id)
+            if not photo:
+                raise ValueError("视频不存在")
+            path = photo.get("path")
+            if not path or not os.path.exists(path):
+                raise FileNotFoundError("视频文件不存在")
+            folder = photo.get("folder") or os.path.dirname(path)
+            cache_dir = ensure_cache_dirs(folder, config.cache_dir_name)
+            dest = os.path.join(
+                str(cache_dir), f"{video.video_cache_key(path)}_play.mp4"
+            )
+            JOBS.update(
+                job.id,
+                current=os.path.basename(path),
+                total=max(1, (photo.get("duration_ms") or 1000) // 1000),
+            )
+            info = video.probe(path, config.ffmpeg_path or None)
+            mode = info.play_mode if info else video.PLAY_REMUX
+            db.set_video_paths(photo_id, play_state="running")
+            ok = video.make_playable(
+                path,
+                dest,
+                info,
+                max_edge=config.proxy_max_edge,
+                override_dir=config.ffmpeg_path or None,
+            )
+            if not ok:
+                db.set_video_paths(photo_id, play_state="failed")
+                JOBS.update(
+                    job.id,
+                    status="error",
+                    error="无法转换这段视频，可能是文件损坏或编码不受支持。",
+                    processed=1,
+                )
+                return
+            db.set_video_paths(photo_id, play_path=dest, play_state="ready")
+            JOBS.update(
+                job.id,
+                status="completed",
+                processed=1,
+                current="",
+                report={
+                    "media": "video",
+                    "mode": mode,
+                    "size": os.path.getsize(dest) if os.path.exists(dest) else 0,
+                },
+            )
+        except Exception as exc:
+            logger.warning("video transcode failed for %s", photo_id, exc_info=True)
+            try:
+                db.set_video_paths(photo_id, play_state="failed")
+            except sqlite3.Error:
+                pass
+            JOBS.update(job.id, status="error", error=str(exc), processed=1)
+
+    thread = threading.Thread(target=worker, name=f"lumina-video-{photo_id}", daemon=True)
+    thread.start()
+    return job

@@ -172,6 +172,19 @@
       <div class="preview-body">
         <div class="preview-media-col">
           <img id="previewImage" alt="预览" />
+          <!-- Video: the poster shows immediately, the loop cross-fades in -->
+          <video id="previewVideo" class="preview-video hidden" muted autoplay loop playsinline preload="metadata"></video>
+          <span id="previewVideoTag" class="preview-video-tag hidden"><span class="btn-icon" data-icon="video"></span><span id="previewVideoTagText">5 秒预览</span></span>
+          <button id="previewSoundBtn" class="preview-sound-btn hidden" type="button" title="打开声音">
+            <span class="btn-icon" data-icon="volumeOff"></span>
+          </button>
+          <button id="previewLiveBtn" class="preview-live-btn hidden" type="button" title="播放实况">
+            <span class="preview-live-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
+            <span>实况</span>
+          </button>
+          <button id="previewVideoPauseBtn" class="preview-video-pause hidden" type="button" title="暂停">
+            <span class="btn-icon" data-icon="pause"></span>
+          </button>
         </div>
         <div id="previewInfo" class="preview-info"></div>
       </div>
@@ -332,6 +345,32 @@
             <label>索引线程数
               <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
             </label>
+          </div>
+
+          <h3 class="settings-subtitle">视频</h3>
+          <p class="settings-hint">详情页会循环播放一小段静音预览，全屏才是原片。预览越小越快，也越省缓存。</p>
+          <div class="form-grid">
+            <label>预览时长（秒）
+              <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
+            </label>
+            <label>预览最大边长 (px)
+              <input id="setVideoClipMaxEdge" type="number" min="320" max="1920" step="80" />
+            </label>
+            <label>预览压缩质量 (CRF，越小越清晰)
+              <input id="setVideoClipCrf" type="number" min="18" max="40" step="1" />
+            </label>
+            <label>预览取帧位置（时长比例 0-0.5）
+              <input id="setVideoPosterRatio" type="number" min="0" max="0.5" step="0.05" />
+            </label>
+            <label class="checkbox-row full-row">
+              <input id="setVideoClipAudio" type="checkbox" />
+              <span>预览带音轨（仍然默认静音播放）</span>
+            </label>
+            <label class="checkbox-row full-row">
+              <input id="setVideoPregenerate" type="checkbox" />
+              <span>索引时就生成预览（首次打开更快，扫描更慢）</span>
+            </label>
+            <div class="full-row settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
           </div>
         </section>
 
@@ -508,6 +547,8 @@
     </div>
     <div id="fsImageContainer" class="fs-image-container">
       <img id="fsImage" alt="全屏照片" />
+      <!-- Video: the original file, with sound on, played by the browser -->
+      <video id="fsVideo" class="fs-video hidden" controls playsinline preload="metadata"></video>
     </div>
   </div>
 

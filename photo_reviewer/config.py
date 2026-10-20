@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .thumbnailer import HEIF_AVAILABLE, HEIF_EXTENSIONS
+
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -50,6 +52,12 @@ PERSISTED_FIELDS = (
     "geocoding_api_key",
     "geocoding_interval",
     "geocoding_retries",
+    "video_clip_seconds",
+    "video_clip_max_edge",
+    "video_clip_crf",
+    "video_clip_audio",
+    "video_pregenerate",
+    "video_poster_ratio",
 )
 
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
@@ -144,16 +152,21 @@ class Config:
         )
     )
 
-    # Allowed image extensions (processed directly).
-    image_extensions: tuple = (
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".webp",
-        ".tif",
-        ".tiff",
+    # Allowed image extensions (processed directly). HEIC/AVIF join the list
+    # only when ``pillow-heif`` is installed: promising to index a format the
+    # process cannot decode would turn every such file into an error row.
+    image_extensions: tuple = field(
+        default_factory=lambda: (
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".webp",
+            ".tif",
+            ".tiff",
+        )
+        + (HEIF_EXTENSIONS if HEIF_AVAILABLE else ())
     )
 
     # Camera raw formats. These are only indexed when no same-named
@@ -189,6 +202,63 @@ class Config:
         ".fff",
     )
 
+    # Video files. Indexed alongside the photos and rendered through ffmpeg;
+    # the extension list covers phones (MP4/MOV), cameras (AVCHD's MTS/M2TS),
+    # drones and the containers an edit usually leaves behind.
+    video_extensions: tuple = (
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".qt",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".wmv",
+        ".flv",
+        ".mpg",
+        ".mpeg",
+        ".m2v",
+        ".dv",
+        ".mts",
+        ".m2ts",
+        ".ts",
+        ".3gp",
+        ".3g2",
+        ".ogv",
+        ".mod",
+        ".tod",
+        ".insv",
+        ".360",
+    )
+
+    # Video previews. The detail dialog loops a short clip; the numbers below
+    # decide how long it is and how hard it is compressed. They are editable
+    # from the settings dialog because the right answer depends on the machine.
+    video_clip_seconds: float = field(
+        default_factory=lambda: float(os.getenv("PHOTO_VIDEO_CLIP_SECONDS", "5"))
+    )
+    video_clip_max_edge: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_VIDEO_CLIP_MAX_EDGE", "960"))
+    )
+    video_clip_crf: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_VIDEO_CLIP_CRF", "28"))
+    )
+    video_clip_audio: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_VIDEO_CLIP_AUDIO", True)
+    )
+    #: Generate the preview during indexing instead of on first open. Costs
+    #: ~200 ms per video up front, and makes the first click instant.
+    video_pregenerate: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_VIDEO_PREGENERATE", False)
+    )
+    #: Where the poster frame is taken from, as a fraction of the duration.
+    video_poster_ratio: float = field(
+        default_factory=lambda: float(os.getenv("PHOTO_VIDEO_POSTER_RATIO", "0.1"))
+    )
+    #: Directory holding ffmpeg/ffprobe. Environment only: it describes the
+    #: machine, not the album, so it must not be pinned by a database row.
+    ffmpeg_path: str = field(default_factory=lambda: os.getenv("PHOTO_FFMPEG_PATH", ""))
+
     def __post_init__(self) -> None:
         data = Path(self.data_dir)
         data.mkdir(parents=True, exist_ok=True)
@@ -218,6 +288,13 @@ class Config:
             "geocoding_retries": self.geocoding_retries,
             "image_extensions": list(self.image_extensions),
             "raw_extensions": list(self.raw_extensions),
+            "video_extensions": list(self.video_extensions),
+            "video_clip_seconds": self.video_clip_seconds,
+            "video_clip_max_edge": self.video_clip_max_edge,
+            "video_clip_crf": self.video_clip_crf,
+            "video_clip_audio": self.video_clip_audio,
+            "video_pregenerate": self.video_pregenerate,
+            "video_poster_ratio": self.video_poster_ratio,
         }
 
 

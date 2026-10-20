@@ -157,9 +157,13 @@ const historyEntries = (indexed, history) =>
 const galleryHelpers = new Function(
   `${extract("diffPhotoRows")}
    ${extract("thumbnailUrl")}
-   return { diffPhotoRows, thumbnailUrl };`
+   ${extract("formatDuration")}
+   ${extract("formatBitrate")}
+   ${extract("formatFps")}
+   return { diffPhotoRows, thumbnailUrl, formatDuration, formatBitrate, formatFps };`
 )();
-const { diffPhotoRows, thumbnailUrl } = galleryHelpers;
+const { diffPhotoRows, thumbnailUrl, formatDuration, formatBitrate, formatFps } =
+  galleryHelpers;
 
 // The back-to-top curve.
 const easeInOutCubic = new Function(`${extract("easeInOutCubic")} return easeInOutCubic;`)();
@@ -525,6 +529,29 @@ check("an empty page against an empty list", diffPhotoRows([], []), {
   sameShape: true,
   changed: [],
 });
+
+/* --------------------------------------------------------------- video */
+section("formatDuration");
+check("a few seconds", formatDuration(7000), "00:07");
+check("just over a minute", formatDuration(83_000), "01:23");
+check("an hour and change", formatDuration(3_723_000), "1:02:03");
+check("exactly ten minutes", formatDuration(600_000), "10:00");
+check("a long drone clip", formatDuration(1_500_000), "25:00");
+check("unknown duration renders nothing", formatDuration(null), "");
+check("a zero duration renders nothing", formatDuration(0), "");
+check("nonsense renders nothing", formatDuration("abc"), "");
+
+section("formatBitrate");
+check("megabits", formatBitrate(45_000_000), "45.0 Mbps");
+check("kilobits", formatBitrate(128_000), "128 kbps");
+check("unknown renders nothing", formatBitrate(0), "");
+check("missing renders nothing", formatBitrate(null), "");
+
+section("formatFps");
+check("whole frames", formatFps(25), "25 fps");
+check("a fractional rate", formatFps(59.94), "59.94 fps");
+check("unknown renders nothing", formatFps(0), "");
+check("missing renders nothing", formatFps(null), "");
 
 /* ------------------------------------------------------------ thumbnailUrl */
 section("thumbnailUrl");

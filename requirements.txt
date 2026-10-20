@@ -1,3 +1,6 @@
 Flask>=3.0
 Pillow>=10.0
 requests>=2.31
+# 可选：解码 iPhone 的 HEIC/AVIF 照片，以及 HEIC 版动态照片。
+# 未安装时程序照常运行，只是这些文件会被跳过（JPG/PNG 与 JPEG 版动态照片不受影响）。
+pillow-heif>=0.16
