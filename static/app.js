@@ -18,7 +18,15 @@ const state = {
   pollTick: 0,
   //: Speed estimate for the running job (see updateEta).
   eta: null,
-  photoSignature: "",
+  //: ``id -> photo`` for the rows currently in ``state.photos``. Rebuilding this
+  //: map on every change keeps lookups O(1); a long album used to run a linear
+  //: ``find`` for every click, every favourite toggle and every card render.
+  photoById: new Map(),
+  //: Ids whose detail payload (EXIF, raw size) has already been fetched.
+  detailFetched: new Set(),
+  //: ``id -> position`` in ``state.photos``, for the few callers that splice by
+  //: index instead of by row.
+  photoIndex: new Map(),
   pageSize: 100,
   offset: 0,
   hasMore: false,
@@ -86,6 +94,37 @@ async function api(url, options = {}) {
 
 function folderPathKey(path) {
   return String(path || "").replace(/[\/]+$/, "").toLowerCase();
+}
+
+/* ==========================================================================
+   Photo index
+   A long album holds thousands of rows, and almost every interaction needs one
+   of them by id. A linear `find` per click is fine at 100 photos and painful at
+   3000, so the list keeps an id -> row map alongside it. Every place that
+   replaces `state.photos` goes through `indexPhotos` so the map cannot drift.
+   ========================================================================== */
+
+function indexPhotos(list) {
+  state.photos = list;
+  const map = new Map();
+  const positions = new Map();
+  for (let i = 0; i < list.length; i += 1) {
+    map.set(list[i].id, list[i]);
+    positions.set(list[i].id, i);
+  }
+  state.photoById = map;
+  state.photoIndex = positions;
+  return list;
+}
+
+function photoById(id) {
+  return state.photoById.get(id) || null;
+}
+
+/** Position of a photo in the loaded list, or -1. */
+function photoIndexById(id) {
+  const index = state.photoIndex.get(id);
+  return index === undefined ? -1 : index;
 }
 
 /* ==========================================================================
@@ -206,7 +245,7 @@ async function loadInitialFolder() {
     await applyDefaultStatusFilter();
     await loadPhotos();
   } else {
-    state.photos = [];
+    indexPhotos([]);
     renderGallery();
     updateSelectionBar();
     loadStats();
@@ -557,7 +596,6 @@ async function loadPhotos(options = {}) {
   const params = getFilterParams(0);
   const mode = $("searchMode").value;
   const query = $("searchInput").value.trim();
-  const scrollY = quiet ? window.scrollY : 0;
   let data;
   let hasMore = false;
   try {
@@ -590,15 +628,11 @@ async function loadPhotos(options = {}) {
 
     if (data.warning && !quiet) showToast(data.warning, "warning");
     const nextPhotos = data.photos || [];
-    const nextSignature = nextPhotos
-      .map((p) => `${p.id}:${p.status}:${p.score}:${p.favorite ? 1 : 0}`)
-      .join("|");
-    if (quiet && nextSignature === state.photoSignature) {
-      state.photos = nextPhotos;
+    if (quiet) {
+      applyQuietRefresh(nextPhotos);
       return;
     }
-    state.photoSignature = nextSignature;
-    state.photos = nextPhotos;
+    indexPhotos(nextPhotos);
     state.offset = nextPhotos.length;
     state.hasMore = hasMore;
     state.renderedCount = 0;
@@ -606,28 +640,117 @@ async function loadPhotos(options = {}) {
     for (const id of [...state.selected]) {
       if (!ids.has(id)) state.selected.delete(id);
     }
-    renderGallery({ animate: !quiet });
+    renderGallery({ animate: true });
     updateLoadMoreButton();
-    if (quiet) window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
     updateSelectionBar();
-    if (!quiet) {
-      loadStats();
-      loadTags();
-      loadYears();
-      // The open folder decides whether a delete can also reach a card, so the
-      // badge is refreshed whenever the gallery is (re)loaded.
-      refreshCardStatus();
-    }
+    loadStats();
+    loadTags();
+    loadYears();
+    // The open folder decides whether a delete can also reach a card, so the
+    // badge is refreshed whenever the gallery is (re)loaded.
+    refreshCardStatus();
   } catch (e) {
     if (quiet) {
       console.warn("后台刷新照片失败", e);
       return;
     }
     if (shouldSkeleton) {
-      state.photos = [];
+      indexPhotos([]);
       renderGallery();
     }
     showToast("读取照片失败：" + e.message, "error");
+  }
+}
+
+/**
+ * Compare a freshly polled page against the rows already loaded.
+ *
+ * Returns ``{ sameShape, changed }``. ``sameShape`` means the polled page is a
+ * prefix of what is on screen - the same photos, in the same order - so the
+ * loaded list does not have to be rebuilt. ``changed`` names the photos whose
+ * status, score or favourite flag moved and whose card therefore needs a
+ * repaint.
+ *
+ * A longer polled page than the loaded list also counts as "different shape":
+ * the first page grew, so a photo entered the filter.
+ */
+function diffPhotoRows(current, nextPhotos) {
+  if (nextPhotos.length > current.length) {
+    return { sameShape: false, changed: [] };
+  }
+  const changed = [];
+  for (let i = 0; i < nextPhotos.length; i += 1) {
+    const fresh = nextPhotos[i];
+    const old = current[i];
+    if (fresh.id !== old.id) return { sameShape: false, changed: [] };
+    if (
+      old.status !== fresh.status ||
+      old.score !== fresh.score ||
+      Boolean(old.favorite) !== Boolean(fresh.favorite)
+    ) {
+      changed.push(fresh.id);
+    }
+  }
+  return { sameShape: true, changed };
+}
+
+/**
+ * Apply a background poll without disturbing what the user is looking at.
+ *
+ * The previous implementation assigned the polled first page straight over
+ * `state.photos`, which silently truncated a deep album to 100 rows: the cards
+ * stayed on screen, but every one of them beyond the first page was gone from
+ * the model, so clicking one opened an empty detail dialog. When the ids also
+ * differed it rebuilt the grid from page one and threw the user back to the top.
+ *
+ * The polled page is now compared against the same leading slice of the loaded
+ * list:
+ *   same ids  - patch only the rows whose status/score/favourite moved, and the
+ *               cards that show them; nothing is laid out again and the scroll
+ *               position is untouched;
+ *   other ids - a photo really did enter or leave the filter, so the grid is
+ *               rebuilt, but the scroll position is restored afterwards.
+ *
+ * Either way the rows the user has paged in are kept.
+ */
+function applyQuietRefresh(nextPhotos) {
+  const current = state.photos;
+  const { sameShape, changed } = diffPhotoRows(current, nextPhotos);
+
+  if (sameShape) {
+    if (!changed.length) return;
+    const byId = new Map(nextPhotos.map((p) => [p.id, p]));
+    for (const id of changed) {
+      const old = state.photoById.get(id);
+      const fresh = byId.get(id);
+      if (!old || !fresh) continue;
+      // The detail extras (EXIF, raw size) may have just arrived with the
+      // analysis, so the next dialog open re-fetches them.
+      state.detailFetched.delete(id);
+      // Keep the object identity: the card's DOM was built from this row.
+      Object.assign(old, fresh);
+      refreshCard(id);
+    }
+    updateSelectionBar();
+    if (state.currentPreviewId && changed.includes(state.currentPreviewId)) {
+      updatePreview({ skipImage: true });
+    }
+    return;
+  }
+
+  // A row entered or left the filter. Rebuild, keeping the viewport.
+  const scrollY = window.scrollY;
+  const kept = current.filter((p) => !nextPhotos.some((fresh) => fresh.id === p.id));
+  indexPhotos(nextPhotos.concat(kept));
+  const ids = new Set(state.photos.map((p) => p.id));
+  for (const id of [...state.selected]) {
+    if (!ids.has(id)) state.selected.delete(id);
+  }
+  renderGallery({ animate: false });
+  window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
+  updateSelectionBar();
+  if (state.currentPreviewId && !state.photoById.has(state.currentPreviewId)) {
+    applyPreviewAfterRemoval(null);
   }
 }
 
@@ -639,7 +762,7 @@ async function loadMorePhotos() {
     const params = getFilterParams(state.offset);
     const data = await api(`/api/photos?${params.toString()}`);
     const nextPhotos = data.photos || [];
-    state.photos = state.photos.concat(nextPhotos);
+    indexPhotos(state.photos.concat(nextPhotos));
     state.offset += nextPhotos.length;
     state.hasMore = !!data.has_more;
     renderGallery({ append: true, animate: true });
@@ -689,6 +812,233 @@ async function loadYears() {
   }
 }
 
+/**
+ * Build the markup for one card.
+ *
+ * Split out of `renderGallery` so a row that changed (a favourite toggled, a
+ * score arrived) can be refreshed without rebuilding the whole grid: the same
+ * function paints the replacement card.
+ */
+function cardHtml(photo) {
+  const isDeleted = photo.status === "deleted";
+  const dims = photo.dimensions || {};
+  const tagsHtml = (photo.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
+  const rawBadge = rawBadgeHtml(photo, "card");
+
+  // A photo that has only been indexed has no score yet. Printing "总分 -"
+  // for it is noise, so the whole score row is dropped until there is
+  // something to show. The sub-scores keep their own rule: they appear only
+  // when the breakdown is actually meaningful.
+  const hasScore = photo.score !== null && photo.score !== undefined;
+  const scorePills = hasScore
+    ? `<div class="score-pills">
+            <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
+            ${dimensionValues(dims, photo.score)}
+          </div>`
+    : "";
+
+  let deleteActions = "";
+  if (isDeleted) {
+    // A trashed photo is not analysed again; offering the button would only
+    // invite the model to describe a file that is on its way out.
+    deleteActions = `
+      <button class="btn small restore-btn" title="恢复"><span class="btn-icon">${ICONS.restore}</span>恢复</button>
+      <button class="btn small danger permanent-btn" title="彻底移除"><span class="btn-icon">${ICONS.close}</span></button>
+    `;
+  } else {
+    deleteActions = `
+      <button class="btn small danger delete-btn" title="暂时收起"><span class="btn-icon">${ICONS.trash}</span></button>
+    `;
+  }
+  const reanalyzeAction = isDeleted
+    ? ""
+    : `<button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>`;
+
+  return `
+    <div class="polaroid-inner">
+      <div class="polaroid-front">
+        <div class="tape"></div>
+        <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
+        ${rawBadge}
+        <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" /></div>
+        <div class="polaroid-body">
+          ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
+          ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
+          <div class="back-tags">${tagsHtml || ""}</div>
+          ${scorePills}
+          <div class="card-actions">
+            <label class="card-check" title="选择">
+              <input type="checkbox"${state.selected.has(photo.id) ? " checked" : ""} />
+            </label>
+            <span class="card-btn-group">
+              ${reanalyzeAction}
+              ${deleteActions}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * The thumbnail URL for a card.
+ *
+ * ``v`` is the row's content hash, which changes whenever the JPEG is
+ * re-rendered, so the URL can be cached forever (see `_image_cache_timeout`).
+ * That is what makes scrolling a long album up and down cost no requests.
+ */
+function thumbnailUrl(photo) {
+  const version = photo.thumb_version ? `?v=${encodeURIComponent(photo.thumb_version)}` : "";
+  return `/api/thumbnail/${photo.id}${version}`;
+}
+
+/* ==========================================================================
+   Card lifecycle: thumbnails and off-screen culling
+   Two costs, one observer plus one sweep.
+
+   Every decoded <img> keeps its bitmap in memory until the element is gone -
+   `loading="lazy"` only defers the *first* load - so a 4000-photo album held
+   ~3 GB of decoded pixels after one scroll through it. And every tilted card is
+   its own composited layer, so a few thousand of them make each scroll frame
+   re-rasterise the lot.
+
+   Entering cards get their `src` (a content-addressed URL, so coming back to a
+   card is served from the browser cache) and leave `is-culled`; leaving cards
+   drop the bitmap and take `is-culled` so the browser can skip their layout,
+   paint and compositing. The margin is wide enough that every switch happens
+   well outside the viewport: the tilt, the shadows, the tape and the hover lift
+   are exactly what they were.
+
+   The observer alone is not enough. Its callbacks describe where a card was
+   when it was observed, and after a jump - clicking "回到顶部", a search result,
+   a browser find - the queued entries are stale, so cards that are now on
+   screen can stay culled and look blank. `sweepCardState` runs once the scroll
+   has settled and re-derives the whole grid from the current positions, which
+   makes the state self-correcting whatever the observer managed to deliver.
+   ========================================================================== */
+
+//: How far outside the viewport a card keeps its bitmap and its tilt.
+const CARD_ROOT_MARGIN = "1500px 0px";
+//: The same margin as a number, for the geometry sweep.
+const CARD_MARGIN_PX = 1500;
+//: Below this many loaded cards the bookkeeping costs more than it saves.
+const CARD_CULL_MIN_CARDS = 120;
+//: How long the scroll must be still before the sweep runs.
+const CARD_SWEEP_DELAY_MS = 120;
+
+let cardObserver = null;
+let cardSweepTimer = null;
+
+function cardObserverInstance() {
+  if (cardObserver || typeof IntersectionObserver === "undefined") return cardObserver;
+  cardObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const img = entry.target;
+        const card = img.closest(".polaroid-card");
+        if (entry.isIntersecting) {
+          attachThumb(img);
+          if (card) {
+            card.dataset.seen = "1";
+            card.classList.remove("is-culled");
+          }
+        } else {
+          if (shouldReleaseThumb(img)) releaseThumb(img);
+          if (card && card.dataset.seen && state.photos.length >= CARD_CULL_MIN_CARDS) {
+            card.classList.add("is-culled");
+          }
+        }
+      }
+      if (!entries.length) return;
+      scheduleCardSweep();
+    },
+    { rootMargin: CARD_ROOT_MARGIN }
+  );
+  return cardObserver;
+}
+
+function attachThumb(img) {
+  const src = img.dataset.src;
+  if (!src || img.getAttribute("src")) return;
+  img.setAttribute("src", src);
+}
+
+/** Should this card's bitmap be given back now that it is far away? */
+function shouldReleaseThumb(img) {
+  if (!img.getAttribute("src")) return false;
+  return state.photos.length >= CARD_CULL_MIN_CARDS;
+}
+
+function releaseThumb(img) {
+  img.removeAttribute("src");
+  img.classList.remove("is-loaded");
+}
+
+/**
+ * Queue a geometry sweep for when the scroll settles.
+ *
+ * Debounced rather than rAF-throttled: the sweep reads every card's position,
+ * which is only worth doing once, after the user has stopped moving.
+ */
+function scheduleCardSweep() {
+  if (cardSweepTimer) clearTimeout(cardSweepTimer);
+  cardSweepTimer = setTimeout(() => {
+    cardSweepTimer = null;
+    sweepCardState();
+  }, CARD_SWEEP_DELAY_MS);
+}
+
+/**
+ * Bring every card's culled state back in line with where it actually is.
+ *
+ * Two passes on purpose: the positions are read first, in one layout, and only
+ * then are classes changed. Interleaving the two would force a fresh layout per
+ * card. Cards are read in DOM order, so a collapsed card earlier in the list
+ * shifts the ones after it; their heights are stable to within the placeholder
+ * size, so a sweep can only ever be one iteration behind, and the next one (the
+ * observer fires again after any class change) settles it.
+ */
+function sweepCardState() {
+  const gallery = $("gallery");
+  if (!gallery || !state.photos.length) return;
+  const cards = gallery.children;
+  if (!cards.length) return;
+  const enough = state.photos.length >= CARD_CULL_MIN_CARDS;
+  const viewport = window.innerHeight || document.documentElement.clientHeight;
+  const top = -CARD_MARGIN_PX;
+  const bottom = viewport + CARD_MARGIN_PX;
+
+  const near = new Array(cards.length);
+  for (let i = 0; i < cards.length; i += 1) {
+    const rect = cards[i].getBoundingClientRect();
+    near[i] = rect.bottom > top && rect.top < bottom;
+  }
+  for (let i = 0; i < cards.length; i += 1) {
+    const card = cards[i];
+    const img = card.querySelector(".polaroid-photo");
+    if (near[i]) {
+      if (img && !img.getAttribute("src")) attachThumb(img);
+      card.dataset.seen = "1";
+      card.classList.remove("is-culled");
+    } else if (enough && card.dataset.seen) {
+      if (img && shouldReleaseThumb(img)) releaseThumb(img);
+      card.classList.add("is-culled");
+    }
+  }
+}
+
+/** Start observing a card's image (called for every card that enters the DOM). */
+function watchThumb(card) {
+  const img = card.querySelector(".polaroid-photo");
+  if (!img) return;
+  const observer = cardObserverInstance();
+  if (observer) observer.observe(img);
+  // No IntersectionObserver (very old browser): load everything and keep every
+  // card rendered, which is the behaviour the app had before.
+  else attachThumb(img);
+}
+
 function renderGallery(options = {}) {
   const gallery = $("gallery");
   const empty = $("emptyState");
@@ -704,6 +1054,7 @@ function renderGallery(options = {}) {
   empty.classList.add("hidden");
 
   const startIndex = options.append ? state.renderedCount : 0;
+  const fragment = document.createDocumentFragment();
   state.photos.slice(startIndex).forEach((photo, offset) => {
     const idx = startIndex + offset;
     const card = document.createElement("div");
@@ -714,148 +1065,177 @@ function renderGallery(options = {}) {
       card.style.animationDelay = `${(idx % 16) * 0.025}s`;
     }
     card.dataset.id = photo.id;
-
-    const isDeleted = photo.status === "deleted";
-    const dims = photo.dimensions || {};
-    const tagsHtml = (photo.tags || []).map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("");
-    const rawBadge = rawBadgeHtml(photo, "card");
-
-    // A photo that has only been indexed has no score yet. Printing "总分 -"
-    // for it is noise, so the whole score row is dropped until there is
-    // something to show. The sub-scores keep their own rule: they appear only
-    // when the breakdown is actually meaningful.
-    const hasScore = photo.score !== null && photo.score !== undefined;
-    const scorePills = hasScore
-      ? `<div class="score-pills">
-              <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
-              ${dimensionValues(dims, photo.score)}
-            </div>`
-      : "";
-
-    let deleteActions = "";
-    if (isDeleted) {
-      // A trashed photo is not analysed again; offering the button would only
-      // invite the model to describe a file that is on its way out.
-      deleteActions = `
-        <button class="btn small restore-btn" title="恢复"><span class="btn-icon">${ICONS.restore}</span>恢复</button>
-        <button class="btn small danger permanent-btn" title="彻底移除"><span class="btn-icon">${ICONS.close}</span></button>
-      `;
-    } else {
-      deleteActions = `
-        <button class="btn small danger delete-btn" title="暂时收起"><span class="btn-icon">${ICONS.trash}</span></button>
-      `;
-    }
-    const reanalyzeAction = isDeleted
-      ? ""
-      : `<button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>`;
-
-    card.innerHTML = `
-      <div class="polaroid-inner">
-        <div class="polaroid-front">
-          <div class="tape"></div>
-          <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
-          ${rawBadge}
-          <img class="polaroid-photo" src="/api/thumbnail/${photo.id}" alt="${escapeHtml(photo.filename)}" loading="lazy" />
-          <div class="polaroid-body">
-            ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
-            ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
-            <div class="back-tags">${tagsHtml || ""}</div>
-            ${scorePills}
-            <div class="card-actions">
-              <label class="card-check" title="选择">
-                <input type="checkbox" />
-              </label>
-              <span class="card-btn-group">
-                ${reanalyzeAction}
-                ${deleteActions}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-    gallery.appendChild(card);
-
-    const photoImg = card.querySelector(".polaroid-photo");
-    photoImg.addEventListener("load", () => photoImg.classList.add("is-loaded"));
-    photoImg.addEventListener("error", () => photoImg.classList.add("is-loaded"));
-
-    card.addEventListener("click", (e) => {
-      if (e.target.closest("button") || e.target.closest("input") || e.target.closest("a")) return;
-      openPreview(photo.id);
-    });
-
-    const favBtn = card.querySelector(".favorite-btn");
-    favBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      const newVal = !photo.favorite;
-      try {
-        await api("/api/favorite", {
-          method: "POST",
-          body: JSON.stringify({ id: photo.id, favorite: newVal }),
-        });
-        photo.favorite = newVal;
-        favBtn.classList.toggle("active", newVal);
-        favBtn.title = newVal ? "取消珍藏" : "珍藏";
-        favBtn.innerHTML = newVal ? ICONS.heartFilled : ICONS.heart;
-        loadStats();
-        if ($("favoriteFilter").value === "1" && !newVal) {
-          await loadPhotos();
-        }
-      } catch (err) {
-        showToast("珍藏操作失败：" + err.message, "error");
-      }
-    });
-
-    const checkbox = card.querySelector(".card-check input");
-    checkbox.checked = state.selected.has(photo.id);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) state.selected.add(photo.id);
-      else state.selected.delete(photo.id);
-      updateSelectionBar();
-    });
-
-    const reanalyzeBtn = card.querySelector(".reanalyze-btn");
-    if (reanalyzeBtn) {
-      reanalyzeBtn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        await reanalyze(photo.id);
-      });
-    }
-
-    if (isDeleted) {
-      card.querySelector(".restore-btn").addEventListener("click", async (e) => {
-        e.stopPropagation();
-        await restorePhotos([photo.id]);
-      });
-      card.querySelector(".permanent-btn").addEventListener("click", async (e) => {
-        e.stopPropagation();
-        await permanentDeletePhotos([photo.id]);
-      });
-    } else {
-      card.querySelector(".delete-btn").addEventListener("click", async (e) => {
-        e.stopPropagation();
-        await deletePhotos([photo.id]);
-      });
-    }
+    card.innerHTML = cardHtml(photo);
+    fragment.appendChild(card);
+    watchThumb(card);
   });
+  // One insertion instead of N: the browser lays the new cards out once.
+  gallery.appendChild(fragment);
   state.renderedCount = state.photos.length;
+  // New cards have never been positioned; let the sweep decide which of them
+  // are far enough away to cull straight away.
+  scheduleCardSweep();
 }
 
+/** Rebuild one card in place, keeping its position and selection state. */
+function refreshCard(id) {
+  const card = $("gallery").querySelector(`.polaroid-card[data-id="${id}"]`);
+  const photo = photoById(id);
+  if (!card || !photo) return;
+  card.style.animation = "none";
+  const observer = cardObserverInstance();
+  const oldImg = card.querySelector(".polaroid-photo");
+  if (observer && oldImg) observer.unobserve(oldImg);
+  card.innerHTML = cardHtml(photo);
+  watchThumb(card);
+}
+
+/**
+ * Rebuild every rendered card without losing the scroll position.
+ *
+ * Kept for the operations that change many rows at once (a batch delete, a
+ * batch re-analysis); single-row changes go through `refreshCard`.
+ */
 function rerenderLoadedGallery() {
   const scrollY = window.scrollY;
   renderGallery({ animate: false });
   window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
 }
 
+/**
+ * Drop rows from the loaded list and their cards from the grid.
+ *
+ * Deleting or trashing photos used to filter `state.photos` and rebuild every
+ * card, which at 3000 photos meant a 300 ms stall and a fresh decode of every
+ * thumbnail still on screen. Removing just the affected cards keeps the work
+ * proportional to how many photos actually changed.
+ */
+function removePhotoRows(ids) {
+  const removed = new Set(ids);
+  if (!removed.size) return;
+  indexPhotos(state.photos.filter((p) => !removed.has(p.id)));
+  const gallery = $("gallery");
+  const observer = cardObserverInstance();
+  for (const id of removed) {
+    const card = gallery.querySelector(`.polaroid-card[data-id="${id}"]`);
+    if (!card) continue;
+    const img = card.querySelector(".polaroid-photo");
+    if (observer && img) observer.unobserve(img);
+    card.remove();
+    state.selected.delete(id);
+  }
+  state.renderedCount = state.photos.length;
+  if (!state.photos.length) renderGallery({ animate: false });
+}
+
 function updateCardFavorite(id) {
-  const photo = state.photos.find((p) => p.id === id);
+  const photo = photoById(id);
   const card = document.querySelector(`.polaroid-card[data-id="${id}"]`);
   if (!photo || !card) return;
   const btn = card.querySelector(".favorite-btn");
   btn.classList.toggle("active", !!photo.favorite);
   btn.title = photo.favorite ? "取消珍藏" : "珍藏";
   btn.innerHTML = photo.favorite ? ICONS.heartFilled : ICONS.heart;
+}
+
+/* ==========================================================================
+   Gallery events
+   One listener per event type on the grid, instead of six per card. At 4000
+   cards the old scheme registered 24,000 closures, all of them kept alive for
+   as long as the cards were on the page.
+   ========================================================================== */
+
+function initGalleryEvents() {
+  const gallery = $("gallery");
+  if (!gallery) return;
+
+  // After any scroll - wheel, drag, keyboard or the back-to-top animation -
+  // re-derive the culled state once things are still.
+  window.addEventListener("scroll", scheduleCardSweep, { passive: true });
+  window.addEventListener("resize", scheduleCardSweep);
+
+  gallery.addEventListener("click", async (e) => {
+    const card = e.target.closest(".polaroid-card");
+    if (!card) return;
+    const id = Number(card.dataset.id);
+    const photo = photoById(id);
+    if (!photo) return;
+
+    if (e.target.closest(".favorite-btn")) {
+      await toggleCardFavorite(photo);
+      return;
+    }
+    if (e.target.closest(".reanalyze-btn")) {
+      await reanalyze(id);
+      return;
+    }
+    if (e.target.closest(".delete-btn")) {
+      await deletePhotos([id]);
+      return;
+    }
+    if (e.target.closest(".restore-btn")) {
+      await restorePhotos([id]);
+      return;
+    }
+    if (e.target.closest(".permanent-btn")) {
+      await permanentDeletePhotos([id]);
+      return;
+    }
+    if (e.target.closest("button") || e.target.closest("input") || e.target.closest("a")) {
+      return;
+    }
+    openPreview(id);
+  });
+
+  gallery.addEventListener("change", (e) => {
+    const checkbox = e.target.closest(".card-check input");
+    if (!checkbox) return;
+    const card = checkbox.closest(".polaroid-card");
+    const id = Number(card && card.dataset.id);
+    if (!Number.isFinite(id)) return;
+    if (checkbox.checked) state.selected.add(id);
+    else state.selected.delete(id);
+    updateSelectionBar();
+  });
+
+  // `load`/`error` do not bubble, so they are caught on the way down.
+  gallery.addEventListener(
+    "load",
+    (e) => {
+      if (e.target.classList && e.target.classList.contains("polaroid-photo")) {
+        e.target.classList.add("is-loaded");
+      }
+    },
+    true
+  );
+  gallery.addEventListener(
+    "error",
+    (e) => {
+      if (e.target.classList && e.target.classList.contains("polaroid-photo")) {
+        e.target.classList.add("is-loaded");
+      }
+    },
+    true
+  );
+}
+
+/** Flip one photo's favourite flag and repaint just that card. */
+async function toggleCardFavorite(photo) {
+  const newVal = !photo.favorite;
+  try {
+    await api("/api/favorite", {
+      method: "POST",
+      body: JSON.stringify({ id: photo.id, favorite: newVal }),
+    });
+    photo.favorite = newVal;
+    updateCardFavorite(photo.id);
+    loadStats();
+    if ($("favoriteFilter").value === "1" && !newVal) {
+      await loadPhotos();
+    }
+  } catch (err) {
+    showToast("珍藏操作失败：" + err.message, "error");
+  }
 }
 
 function updateSelectionBar() {
@@ -1281,7 +1661,7 @@ function jobSummaryText(job) {
 
 async function deletePhotos(ids) {
   ids = ids.filter((id) => {
-    const p = state.photos.find((x) => x.id === id);
+    const p = photoById(id);
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
@@ -1290,7 +1670,7 @@ async function deletePhotos(ids) {
   const canSync = !!(card && card.usable);
   let confirmMessage;
   if (ids.length === 1) {
-    const photo = state.photos.find((p) => p.id === ids[0]);
+    const photo = photoById(ids[0]);
     confirmMessage = `确定把“${photo ? photo.filename : "这张照片"}”暂时收起吗？`;
   } else {
     confirmMessage = `确定把选中的 ${ids.length} 张照片暂时收起吗？`;
@@ -1328,9 +1708,9 @@ async function deletePhotos(ids) {
       showToast("部分照片暂时收起失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
     reportCardResult(data.card, "删除");
-    state.photos = state.photos.filter((p) => !ids.includes(p.id));
+    removePhotoRows(ids);
     state.selected.clear();
-    rerenderLoadedGallery();
+    updateSelectionBar();
     loadStats();
     applyPreviewAfterRemoval(previewNext);
     await refreshCardStatus();
@@ -1341,12 +1721,12 @@ async function deletePhotos(ids) {
 
 async function permanentDeletePhotos(ids) {
   ids = ids.filter((id) => {
-    const p = state.photos.find((x) => x.id === id);
+    const p = photoById(id);
     return p && p.status === "deleted";
   });
   if (!ids.length) return;
   const hasRaw = ids.some((id) => {
-    const p = state.photos.find((x) => x.id === id);
+    const p = photoById(id);
     return p && (p.has_raw || p.is_raw);
   });
   const answer = await confirmDialog(
@@ -1375,9 +1755,9 @@ async function permanentDeletePhotos(ids) {
     if (data.raw_removed) {
       showToast(`已彻底移除，含 ${data.raw_removed} 个 RAW 文件。`, "success");
     }
-    state.photos = state.photos.filter((p) => !ids.includes(p.id));
+    removePhotoRows(ids);
     state.selected.clear();
-    rerenderLoadedGallery();
+    updateSelectionBar();
     loadStats();
     applyPreviewAfterRemoval(previewNext);
   } catch (e) {
@@ -1387,7 +1767,7 @@ async function permanentDeletePhotos(ids) {
 
 async function restorePhotos(ids) {
   ids = ids.filter((id) => {
-    const p = state.photos.find((x) => x.id === id);
+    const p = photoById(id);
     return p && p.status === "deleted";
   });
   if (!ids.length) return;
@@ -1406,9 +1786,9 @@ async function restorePhotos(ids) {
       showToast("部分照片恢复失败：" + data.errors.map((e) => e.error).join("; "), "error");
     }
     reportCardResult(data.card, "恢复");
-    state.photos = state.photos.filter((p) => !ids.includes(p.id));
+    removePhotoRows(ids);
     state.selected.clear();
-    rerenderLoadedGallery();
+    updateSelectionBar();
     loadStats();
     applyPreviewAfterRemoval(previewNext);
     await refreshCardStatus();
@@ -1427,14 +1807,16 @@ async function reanalyze(id) {
 
     // Patch the current card immediately so the latest title/score/tags are
     // visible without reloading the whole list.
-    const idx = state.photos.findIndex((p) => p.id === id);
+    const idx = photoIndexById(id);
     if (idx >= 0 && updated) {
       if ($("statusFilter").value === "pending") {
-        state.photos = state.photos.filter((p) => p.id !== id);
+        removePhotoRows([id]);
       } else {
-        state.photos[idx] = updated;
+        // Same row, new contents: one card is repainted, the grid is not.
+        Object.assign(state.photos[idx], updated);
+        state.detailFetched.delete(id);
+        refreshCard(id);
       }
-      rerenderLoadedGallery();
     }
 
     const stillVisible = state.photos.some((p) => p.id === id);
@@ -1701,7 +2083,7 @@ async function openFolder() {
 
 async function reanalyzeSelected(ids) {
   ids = ids.filter((id) => {
-    const p = state.photos.find((x) => x.id === id);
+    const p = photoById(id);
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
@@ -1714,12 +2096,14 @@ async function reanalyzeSelected(ids) {
       $("loadingText").textContent = `正在重新解读照片 ${i + 1}/${ids.length}…`;
       try {
         const updated = await api("/api/reanalyze", { method: "POST", body: JSON.stringify({ id: ids[i] }) });
-        const idx = state.photos.findIndex((p) => p.id === ids[i]);
+        const idx = photoIndexById(ids[i]);
         if (idx >= 0 && updated) {
           if ($("statusFilter").value === "pending") {
-            state.photos = state.photos.filter((p) => p.id !== ids[i]);
+            removePhotoRows([ids[i]]);
           } else {
-            state.photos[idx] = updated;
+            Object.assign(state.photos[idx], updated);
+            state.detailFetched.delete(ids[i]);
+            refreshCard(ids[i]);
           }
         }
         ok++;
@@ -1728,7 +2112,7 @@ async function reanalyzeSelected(ids) {
       }
     }
     state.selected.clear();
-    rerenderLoadedGallery();
+    updateSelectionBar();
     showToast(`重新解读完成：成功 ${ok} 张，失败 ${fail} 张`, fail ? "error" : "success");
   } finally {
     hideLoading();
@@ -1746,7 +2130,7 @@ function applyFsTransform() {
 
 function openFullscreenViewer() {
   if (!state.currentPreviewId) return;
-  const photo = state.photos.find((p) => p.id === state.currentPreviewId);
+  const photo = photoById(state.currentPreviewId);
   if (!photo) return;
   
   const fsModal = $("fullscreenModal");
@@ -1804,6 +2188,38 @@ function openPreview(id) {
 }
 
 /**
+ * Fetch the detail-only extras (EXIF, raw size) for the photo on screen.
+ *
+ * They used to ride along with every list row, which cost ~30% of the payload
+ * and one `os.path.getsize` per photo on the album drive. The dialog paints
+ * immediately from the row it already has and repaints once this lands; the
+ * result is written back into the row so re-opening the photo costs nothing.
+ */
+async function ensurePhotoDetail(id) {
+  const photo = photoById(id);
+  if (!photo || state.detailFetched.has(id)) return;
+  state.detailFetched.add(id);
+  try {
+    const detail = await api(`/api/photo/${id}/detail`);
+    const target = photoById(id);
+    if (!target) return;
+    Object.assign(target, {
+      exif: detail.exif || {},
+      raw_size: detail.raw_size,
+      width: detail.width,
+      height: detail.height,
+      size: detail.size,
+    });
+    if (detail.location) target.location = detail.location;
+    if (state.currentPreviewId === id) updatePreview({ skipImage: true });
+  } catch (e) {
+    // The row still renders; only the specs row stays empty until a retry.
+    state.detailFetched.delete(id);
+    console.warn("读取照片详情失败", e);
+  }
+}
+
+/**
  * Close a dialog, playing the reverse of its entrance animation first.
  *
  * ``hideModal`` keeps the element in the DOM for the length of the exit, so a
@@ -1823,8 +2239,11 @@ function closeModal(id, onHidden) {
  */
 function updatePreview(options = {}) {
   const id = state.currentPreviewId;
-  const photo = state.photos.find((p) => p.id === id);
+  const photo = photoById(id);
   if (!photo) return;
+  // Pull the EXIF / raw size for this photo if it has not arrived yet; the
+  // dialog is already painted by the time the response lands.
+  ensurePhotoDetail(id);
   const hasNav = state.photos.length > 1;
   $("previewPrevBtn").classList.toggle("hidden", !hasNav);
   $("previewNextBtn").classList.toggle("hidden", !hasNav);
@@ -2220,7 +2639,7 @@ function initScoreEditors() {
 }
 
 function openEditPreview() {
-  const photo = state.photos.find((p) => p.id === state.currentPreviewId);
+  const photo = photoById(state.currentPreviewId);
   if (!photo) return;
   const dims = photo.dimensions || {};
   $("editTitle").value = photo.title || "";
@@ -2241,7 +2660,7 @@ function openEditPreview() {
 
 async function saveEditedPhoto() {
   const id = state.currentPreviewId;
-  const photo = state.photos.find((p) => p.id === id);
+  const photo = photoById(id);
   if (!photo) return;
   const score = parseFloat($("editScore").value);
   if (Number.isNaN(score) || score < 0 || score > 10) {
@@ -2276,9 +2695,13 @@ async function saveEditedPhoto() {
       }),
     });
     closeModal("editModal");
-    const idx = state.photos.findIndex((p) => p.id === id);
-    if (idx >= 0 && updated) state.photos[idx] = updated;
-    rerenderLoadedGallery();
+    const idx = photoIndexById(id);
+    if (idx >= 0 && updated) {
+      // A hand-edit rewrites one row; repaint that card, not the whole grid.
+      Object.assign(state.photos[idx], updated);
+      state.detailFetched.delete(id);
+      refreshCard(id);
+    }
     if (state.currentPreviewId === id) updatePreview({ skipImage: true });
     showToast("这段回忆已经更新。", "success");
   } catch (e) {
@@ -2305,9 +2728,9 @@ async function removeCurrentFolder() {
     closeModal("settingsModal");
     if (!$("previewModal").classList.contains("hidden")) closeModal("previewModal");
     state.folder = "";
-    state.photos = [];
+    indexPhotos([]);
     state.selected.clear();
-    state.photoSignature = "";
+    state.detailFetched.clear();
     state.folder = await selectBestFolder();
     saveUiState({ folder: state.folder });
     $("folderInput").value = state.folder;
@@ -2410,7 +2833,7 @@ async function loadDirList(path) {
 }
 
 async function toggleCurrentPreviewFavorite() {
-  const photo = state.photos.find((p) => p.id === state.currentPreviewId);
+  const photo = photoById(state.currentPreviewId);
   if (!photo) return;
   const newVal = !photo.favorite;
   try {
@@ -3059,6 +3482,7 @@ function init() {
     updateSelectionBar();
     renderGallery();
   });
+  initGalleryEvents();
 
   $("previewPrevBtn").addEventListener("click", () => navigatePreview(-1));
   $("previewNextBtn").addEventListener("click", () => navigatePreview(1));
@@ -3247,6 +3671,138 @@ function init() {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshCardStatus();
   });
+  initBackToTop();
+}
+
+/* ==========================================================================
+   Back to top
+   The button only exists while the page is scrolled, and the return itself is
+   eased rather than instant: it accelerates away from the bottom, then settles
+   into the top instead of stopping dead. Both halves are one easing curve - a
+   cubic-Bezier that starts fast and lands softly - so the motion reads as a
+   single gesture rather than a scroll with a brake.
+   ========================================================================== */
+
+//: How long the return takes. Long enough to follow, short enough not to wait.
+const BACK_TO_TOP_MS = 780;
+//: Scroll further than this and the button appears.
+const BACK_TO_TOP_TRIGGER = 320;
+
+/** True when the visitor asked the system to avoid large movements. */
+function motionIsReduced() {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
+ * The easing used for the return.
+ *
+ * Cubic in and out: it leaves the bottom gently, builds speed, then sheds it as
+ * it lands, so the page arrives at the top rather than stopping there.
+ */
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/**
+ * Scroll the window to the top over ``BACK_TO_TOP_MS``.
+ *
+ * `requestAnimationFrame` drives the position, which is what lets the curve be
+ * a curve; `scroll-behavior: smooth` can only be the browser's own timing. A
+ * wheel turn, a drag or a key press during the animation cancels it instead of
+ * fighting the user. Someone who asked the system for reduced motion gets an
+ * instant jump - the movement is the whole point of the animation, so it cannot
+ * be kept while honouring that setting.
+ */
+function scrollToTopSmoothly() {
+  const start = window.scrollY || window.pageYOffset || 0;
+  if (start <= 0) return;
+  if (motionIsReduced()) {
+    window.scrollTo(0, 0);
+    syncBackToTop();
+    return;
+  }
+  const button = $("backToTopBtn");
+  if (button) button.classList.add("returning");
+
+  const started = performance.now();
+  let cancelled = false;
+  const cancel = () => {
+    cancelled = true;
+  };
+  const stopListening = () => {
+    window.removeEventListener("wheel", cancel);
+    window.removeEventListener("touchstart", cancel);
+    window.removeEventListener("keydown", cancel);
+  };
+  window.addEventListener("wheel", cancel, { passive: true });
+  window.addEventListener("touchstart", cancel, { passive: true });
+  window.addEventListener("keydown", cancel);
+
+  const step = (now) => {
+    if (cancelled) {
+      stopListening();
+      if (button) button.classList.remove("returning");
+      return;
+    }
+    const progress = Math.min(1, (now - started) / BACK_TO_TOP_MS);
+    const eased = easeInOutCubic(progress);
+    window.scrollTo(0, Math.round(start * (1 - eased)));
+    if (progress < 1) {
+      requestAnimationFrame(step);
+      return;
+    }
+    stopListening();
+    if (button) button.classList.remove("returning");
+    syncBackToTop();
+  };
+  requestAnimationFrame(step);
+}
+
+/** Show or hide the button for the current scroll position. */
+function syncBackToTop() {
+  const button = $("backToTopBtn");
+  if (!button) return;
+  const scrolled = (window.scrollY || window.pageYOffset || 0) > BACK_TO_TOP_TRIGGER;
+  const hidden = button.classList.contains("hidden");
+  if (scrolled && hidden) {
+    button.classList.remove("leaving");
+    button.classList.remove("hidden");
+  } else if (!scrolled && !hidden && !button.classList.contains("leaving")) {
+    button.classList.add("leaving");
+    setTimeout(() => {
+      // The scroll may have come back while the exit played.
+      if ((window.scrollY || 0) <= BACK_TO_TOP_TRIGGER) {
+        button.classList.add("hidden");
+        button.classList.remove("leaving");
+      } else {
+        button.classList.remove("leaving");
+      }
+    }, 240);
+  }
+}
+
+function initBackToTop() {
+  const button = $("backToTopBtn");
+  if (!button) return;
+  renderAllIcons(button);
+  button.addEventListener("click", scrollToTopSmoothly);
+  let ticking = false;
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        syncBackToTop();
+      });
+    },
+    { passive: true }
+  );
+  syncBackToTop();
 }
 
 document.addEventListener("DOMContentLoaded", init);

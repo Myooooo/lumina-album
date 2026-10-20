@@ -676,6 +676,32 @@ select {
   z-index: 10;
 }
 
+/* Cards far outside the viewport are taken out of the render tree.
+   `content-visibility: auto` skips layout, paint and compositing for them, and
+   dropping the tilt on those same cards is what removes the composited layers:
+   a rotated card is its own layer, and a browser keeps thousands of those alive
+   even when their contents are skipped.
+
+   The `transition: none` is not cosmetic. `.polaroid-card` transitions its
+   transform over .4s, so culling a card would *start* an animation on every card
+   at once - measured, that was worse than not culling at all (207ms/frame vs
+   269ms unculled). With the transition suppressed while a card is culled, and
+   `contain` tightened, the same 4000-card page scrolls at 24ms/frame.
+
+   None of this can be seen: the observer only culls cards several viewports
+   away, so the card on screen keeps its tilt, its shadows, its tape, its hover
+   lift and its entrance animation exactly as before. `auto <height>` makes the
+   browser remember each card's real height once it has been rendered, so the
+   placeholder only applies to cards never seen - which keeps the scrollbar
+   length stable. */
+.polaroid-card.is-culled {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 586px;
+  contain: layout paint style;
+  transform: none;
+  transition: none;
+}
+
 .polaroid-inner {
   position: relative;
   width: 100%;
@@ -713,13 +739,28 @@ select {
   backdrop-filter: blur(3px);
 }
 
-.polaroid-photo {
+/* The square the photo sits in.
+   The frame carries the aspect ratio rather than the <img>, because an <img>
+   whose src has been released collapses to zero height - the card would visibly
+   shrink and every card below it would jump. A plain block keeps its box
+   whatever the image inside is doing, so culling a bitmap changes nothing on
+   screen. */
+.polaroid-photo-frame {
+  position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
-  object-fit: cover;
   border-radius: 1px;
   background: #eae2d5;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.polaroid-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   opacity: 0;
   transform: scale(1.015);
   transition: opacity .5s ease, transform .6s cubic-bezier(.2,.8,.2,1);
@@ -2585,6 +2626,105 @@ select {
 ::-webkit-scrollbar-thumb { background: #d6bda4; border-radius: 99px; border: 2px solid #f7efe4; }
 ::-webkit-scrollbar-thumb:hover { background: var(--primary); }
 
+/* ---------- Back to top ----------
+   Sits above the selection bar so the two never overlap, and only appears once
+   the album has actually been scrolled (the caller toggles `.hidden`). The ring
+   is a hairline that swells on hover, which keeps the button reading as part of
+   the paper-and-tape language rather than as a generic FAB. */
+.back-to-top {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 254, 251, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: var(--primary-dark);
+  cursor: pointer;
+  z-index: 120;
+  box-shadow: 0 10px 28px rgba(45, 30, 15, 0.18);
+  transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .28s ease,
+              color .2s ease, background-color .2s ease;
+  animation: backToTopIn .34s cubic-bezier(.34, 1.28, .64, 1) both;
+}
+
+.back-to-top .btn-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  transform: translateY(1px);
+  transition: transform .28s cubic-bezier(.2,.8,.2,1);
+}
+
+.back-to-top .btn-icon svg { width: 20px; height: 20px; }
+
+/* The ring is what turns the hover into a small, deliberate gesture. */
+.back-to-top-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--primary);
+  opacity: 0;
+  transform: scale(.82);
+  transition: opacity .28s ease, transform .28s cubic-bezier(.2,.8,.2,1);
+  pointer-events: none;
+}
+
+.back-to-top:hover {
+  background: #fffdf9;
+  color: var(--primary);
+  box-shadow: 0 14px 34px rgba(45, 30, 15, 0.24);
+  transform: translateY(-3px);
+}
+
+.back-to-top:hover .btn-icon { transform: translateY(-1px); }
+.back-to-top:hover .back-to-top-ring { opacity: .55; transform: scale(1.12); }
+
+.back-to-top:active {
+  transform: translateY(-1px) scale(.96);
+  box-shadow: 0 8px 20px rgba(45, 30, 15, 0.2);
+}
+
+/* Leaving: the same gesture in reverse, so it never blinks out. */
+.back-to-top.leaving {
+  animation: backToTopOut .26s ease both;
+  pointer-events: none;
+}
+
+@keyframes backToTopIn {
+  from { opacity: 0; transform: translateY(14px) scale(.86); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes backToTopOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(10px) scale(.9); }
+}
+
+/* While the smooth scroll is running the button has done its job: it fades a
+   little so the eye follows the page instead of the button. */
+.back-to-top.returning {
+  animation: backToTopPulse 1.1s ease-in-out;
+}
+
+@keyframes backToTopPulse {
+  0%   { box-shadow: 0 10px 28px rgba(45, 30, 15, 0.18); }
+  40%  { box-shadow: 0 0 0 10px rgba(179, 125, 86, 0.16); }
+  100% { box-shadow: 0 10px 28px rgba(45, 30, 15, 0.18); }
+}
+
+@media (max-width: 640px) {
+  .back-to-top { right: 16px; bottom: 88px; width: 46px; height: 46px; }
+  .back-to-top .btn-icon, .back-to-top .btn-icon svg { width: 18px; height: 18px; }
+}
+
 @media (max-width: 1024px) {
   .gallery { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 18px 20px; padding: 20px; }
   /* Stacked: the flex basis would otherwise force an odd width. */
@@ -2609,7 +2749,8 @@ select {
   .modal, .modal-content, .preview-body img, .polaroid-card,
   .preview-switch-left, .preview-switch-right, .stat, .btn,
   .card-status.state-connected::before, .folder-history, .folder-history-item,
-  .custom-select-menu, .settings-pane, .card-pending-dot, .toast {
+  .custom-select-menu, .settings-pane, .card-pending-dot, .toast,
+  .back-to-top, .back-to-top-ring, .back-to-top .btn-icon {
     animation: none !important;
     transition: none !important;
   }

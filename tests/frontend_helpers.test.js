@@ -153,6 +153,17 @@ const historyEntries = (indexed, history) =>
     String(p).replace(/[\/\\]+$/, "").toLowerCase()
   )(indexed);
 
+// The gallery helpers: what a poll changed, and where a card's thumbnail lives.
+const galleryHelpers = new Function(
+  `${extract("diffPhotoRows")}
+   ${extract("thumbnailUrl")}
+   return { diffPhotoRows, thumbnailUrl };`
+)();
+const { diffPhotoRows, thumbnailUrl } = galleryHelpers;
+
+// The back-to-top curve.
+const easeInOutCubic = new Function(`${extract("easeInOutCubic")} return easeInOutCubic;`)();
+
 let failures = 0;
 let checks = 0;
 
@@ -454,6 +465,112 @@ check(
   ["最近+已索引"]
 );
 check("an empty list stays empty", historyEntries([], []), []);
+
+/* ---------------------------------------------------- diffPhotoRows (poll) */
+section("diffPhotoRows - what a background poll changes");
+const rows = (...ids) => ids.map((id) => ({ id, status: "analyzed", score: 7, favorite: false }));
+
+check(
+  "an identical page needs no work",
+  diffPhotoRows(rows(1, 2, 3), rows(1, 2, 3)),
+  { sameShape: true, changed: [] }
+);
+check(
+  "a scored row is reported",
+  diffPhotoRows(rows(1, 2, 3), [
+    { id: 1, status: "analyzed", score: 7, favorite: false },
+    { id: 2, status: "analyzed", score: 9, favorite: false },
+    { id: 3, status: "analyzed", score: 7, favorite: false },
+  ]),
+  { sameShape: true, changed: [2] }
+);
+check(
+  "a favourited row is reported",
+  diffPhotoRows(rows(1, 2), [
+    { id: 1, status: "analyzed", score: 7, favorite: true },
+    { id: 2, status: "analyzed", score: 7, favorite: false },
+  ]),
+  { sameShape: true, changed: [1] }
+);
+check(
+  "a row that left the filter is a rebuild",
+  diffPhotoRows(rows(1, 2, 3), rows(1, 3)),
+  { sameShape: false, changed: [] }
+);
+check(
+  "a row that entered the filter is a rebuild",
+  diffPhotoRows(rows(1, 2), rows(9, 1)),
+  { sameShape: false, changed: [] }
+);
+check(
+  "a polled page longer than the loaded list is a rebuild",
+  diffPhotoRows(rows(1), rows(1, 2)),
+  { sameShape: false, changed: [] }
+);
+check(
+  "a polled page shorter than the loaded list is still a prefix",
+  diffPhotoRows(rows(1, 2, 3, 4), rows(1, 2)),
+  { sameShape: true, changed: [] }
+);
+check(
+  "several changed rows are all reported",
+  diffPhotoRows(rows(1, 2, 3), [
+    { id: 1, status: "deleted", score: 7, favorite: false },
+    { id: 2, status: "analyzed", score: 8, favorite: false },
+    { id: 3, status: "analyzed", score: 7, favorite: true },
+  ]),
+  { sameShape: true, changed: [1, 2, 3] }
+);
+check("an empty page against an empty list", diffPhotoRows([], []), {
+  sameShape: true,
+  changed: [],
+});
+
+/* ------------------------------------------------------------ thumbnailUrl */
+section("thumbnailUrl");
+check("no version means a plain url", thumbnailUrl({ id: 7 }), "/api/thumbnail/7");
+check(
+  "the version rides along as a query",
+  thumbnailUrl({ id: 7, thumb_version: "abc123" }),
+  "/api/thumbnail/7?v=abc123"
+);
+check(
+  "an empty version is dropped",
+  thumbnailUrl({ id: 7, thumb_version: "" }),
+  "/api/thumbnail/7"
+);
+
+/* ------------------------------------------------------------ easeInOutCubic */
+section("easeInOutCubic (the back-to-top curve)");
+check("starts at rest", easeInOutCubic(0), 0);
+check("ends at rest", easeInOutCubic(1), 1);
+check("crosses the middle", easeInOutCubic(0.5), 0.5);
+check("accelerates off the mark", easeInOutCubic(0.1) < 0.1, true);
+check("still accelerating at a quarter", easeInOutCubic(0.25) < 0.25, true);
+check("decelerates into the top", easeInOutCubic(0.9) > 0.9, true);
+check("never runs backwards", (() => {
+  let previous = -1;
+  for (let i = 0; i <= 100; i += 1) {
+    const value = easeInOutCubic(i / 100);
+    if (value < previous) return false;
+    previous = value;
+  }
+  return true;
+})(), true);
+check("stays inside the range", (() => {
+  for (let i = -5; i <= 105; i += 1) {
+    const t = Math.min(1, Math.max(0, i / 100));
+    const value = easeInOutCubic(t);
+    if (value < 0 || value > 1) return false;
+  }
+  return true;
+})(), true);
+check("is symmetric around the midpoint", (() => {
+  for (const t of [0.05, 0.2, 0.35, 0.49]) {
+    if (Math.abs(easeInOutCubic(t) + easeInOutCubic(1 - t) - 1) > 1e-9) return false;
+  }
+  return true;
+})(), true);
 
 console.log(
   failures

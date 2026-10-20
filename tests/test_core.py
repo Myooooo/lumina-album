@@ -64,6 +64,10 @@ from photo_reviewer.importer import (
 )
 from photo_reviewer.paths import canonical_path, is_in_named_dir
 from photo_reviewer.repair import (
+    DIMENSIONS_REPAIR_KEY,
+    DIMENSIONS_REPAIR_VERSION,
+    ORIENTATION_REPAIR_KEY,
+    ORIENTATION_REPAIR_VERSION,
     needs_dimensions_repair,
     needs_orientation_repair,
     repair_dimension_keys,
@@ -1596,7 +1600,12 @@ class RawSupportTests(unittest.TestCase):
         self.assertTrue(photo["has_raw"])
         self.assertFalse(photo["is_raw"])
         self.assertEqual(photo["raw_ext"], "NEF")
-        self.assertEqual(photo["raw_size"], 3)
+        # The raw size needs a stat(), so a list row does not carry it; the
+        # detail endpoint that the dialog calls does.
+        self.assertNotIn("raw_size", photo)
+        photo_id = self.db.get_photo_by_path(jpg)["id"]
+        detail = client.get(f"/api/photo/{photo_id}/detail").get_json()
+        self.assertEqual(detail["raw_size"], 3)
 
     def test_raw_only_photo_is_flagged_as_raw(self) -> None:
         raw = os.path.join(self.folder, "SOLO.ARW")
@@ -1636,8 +1645,12 @@ class RawSupportTests(unittest.TestCase):
         client = app.test_client()
         photo_id = self.db.get_photo_by_path(image)["id"]
 
+        # The gallery row only says a raw file exists; the size comes from the
+        # detail endpoint the dialog asks for once, for the photo on screen.
         listed = client.get("/api/photos").get_json()["photos"][0]
-        self.assertEqual(listed["raw_size"], 4096)
+        self.assertTrue(listed["has_raw"])
+        self.assertNotIn("raw_size", listed)
+        self.assertNotIn("exif", listed)
 
         detail = client.get(f"/api/photo/{photo_id}").get_json()
         self.assertEqual(detail["raw_size"], 4096)
@@ -1659,7 +1672,9 @@ class RawSupportTests(unittest.TestCase):
         client = app.test_client()
         photo = client.get("/api/photos").get_json()["photos"][0]
         self.assertTrue(photo["has_raw"])
-        self.assertEqual(photo["raw_size"], 0)
+        photo_id = self.db.get_photo_by_path(image)["id"]
+        detail = client.get(f"/api/photo/{photo_id}/detail").get_json()
+        self.assertEqual(detail["raw_size"], 0)
 
     def test_embedded_preview_is_extracted_from_a_fake_raw(self) -> None:
         """A TIFF container holding a JPEG preview is rendered from the preview."""
@@ -3670,6 +3685,130 @@ class GeocodingDisabledTests(unittest.TestCase):
         with patch("photo_reviewer.pipeline.reverse_geocode") as geocode:
             enrich_metadata(prepared, self.cfg, existing_location="杭州市西湖区")
         geocode.assert_not_called()
+
+
+class GalleryPayloadTests(unittest.TestCase):
+    """What a list row carries, and what the detail dialog fetches itself.
+
+    A 4000-photo album used to send the EXIF block with every row (~30% of the
+    payload) and stat the raw sibling of every photo with one (~100 filesystem
+    calls per page). Both now come from the per-photo detail endpoint, so this
+    pins the split: the list stays small, the dialog still gets everything.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        self.cache = os.path.join(self.folder, ".photo-review-cache")
+        os.makedirs(self.folder)
+        os.makedirs(self.cache)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.image = os.path.join(self.folder, "A.JPG")
+        self.raw = os.path.join(self.folder, "A.NEF")
+        Image.new("RGB", (40, 30), (120, 90, 60)).save(self.image, "JPEG")
+        Path(self.raw).write_bytes(b"N" * 2048)
+        self.thumb = os.path.join(self.cache, "a_thumb.jpg")
+        Image.new("RGB", (40, 30), (120, 90, 60)).save(self.thumb, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": self.image,
+                "folder": self.folder,
+                "filename": "A.JPG",
+                "status": "analyzed",
+                "score": 8.0,
+                "exif": {
+                    "datetime_original": "2024:05:01 10:20:30",
+                    "make": "FUJIFILM",
+                    "model": "X-T30 III",
+                    "iso": "400",
+                },
+                "dimensions": {"technical": 7.0, "memory": 8.0, "uniqueness": 6.0},
+                "tags": ["风景"],
+                "title": "堤上的风",
+                "size": 12345,
+                "width": 6000,
+                "height": 4000,
+                "raw_path": self.raw,
+                "thumb_path": self.thumb,
+                "phash": "abc123def4567890",
+            }
+        )
+        self.photo_id = self.db.get_photo_by_path(self.image)["id"]
+        # Mark the one-off startup repairs as done, the state a running library
+        # is in. Otherwise the orientation pass may rewrite the cached path and
+        # re-render the thumbnail underneath the assertions below.
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, ORIENTATION_REPAIR_VERSION)
+        self.db.set_meta(DIMENSIONS_REPAIR_KEY, DIMENSIONS_REPAIR_VERSION)
+        self.client = create_app(self.cfg, self.db).test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        # Windows can still hold the served JPEG open for a moment; a failed
+        # cleanup of a temp dir must not fail the test.
+        try:
+            self.tmp.cleanup()
+        except OSError:  # pragma: no cover - timing dependent
+            pass
+
+    def test_a_list_row_leaves_out_exif_and_the_raw_size(self) -> None:
+        row = self.client.get("/api/photos").get_json()["photos"][0]
+        self.assertNotIn("exif", row)
+        self.assertNotIn("raw_size", row)
+        # Everything a card paints is still there.
+        for key in ("id", "filename", "score", "tags", "reason", "status", "favorite"):
+            self.assertIn(key, row)
+        self.assertTrue(row["has_raw"])
+        self.assertEqual(row["raw_ext"], "NEF")
+
+    def test_the_grid_never_touches_the_filesystem(self) -> None:
+        """One ``os.path.getsize`` per raw-carrying photo was the old cost."""
+        with patch("photo_reviewer.server.os.path.getsize") as getsize:
+            self.client.get("/api/photos")
+        getsize.assert_not_called()
+
+    def test_the_thumb_version_changes_with_the_thumbnail(self) -> None:
+        row = self.client.get("/api/photos").get_json()["photos"][0]
+        self.assertEqual(row["thumb_version"], "abc123def4567890")
+        # Re-rendering a thumbnail writes a new hash; the URL follows it.
+        self.db.update_cache_paths(self.photo_id, self.thumb, self.thumb, "ffff0000")
+        row = self.client.get("/api/photos").get_json()["photos"][0]
+        self.assertEqual(row["thumb_version"], "ffff0000")
+
+    def test_the_detail_endpoint_supplies_what_the_dialog_shows(self) -> None:
+        detail = self.client.get(f"/api/photo/{self.photo_id}/detail").get_json()
+        self.assertEqual(detail["exif"]["make"], "FUJIFILM")
+        self.assertEqual(detail["raw_size"], 2048)
+        self.assertEqual((detail["width"], detail["height"]), (6000, 4000))
+        self.assertEqual(detail["size"], 12345)
+
+    def test_the_detail_endpoint_404s_for_an_unknown_photo(self) -> None:
+        self.assertEqual(
+            self.client.get("/api/photo/999999/detail").status_code, 404
+        )
+
+    def test_the_single_photo_endpoint_still_returns_everything(self) -> None:
+        """Older callers (and the edit round trip) keep the full payload."""
+        body = self.client.get(f"/api/photo/{self.photo_id}").get_json()
+        self.assertIn("exif", body)
+        self.assertEqual(body["raw_size"], 2048)
+        self.assertEqual(body["folder"], self.folder)
+
+    def test_a_versioned_thumbnail_url_is_cacheable_for_a_year(self) -> None:
+        """The version query is what makes scrolling back cost no requests."""
+        plain = self.client.get(f"/api/thumbnail/{self.photo_id}")
+        versioned = self.client.get(
+            f"/api/thumbnail/{self.photo_id}?v=abc123def4567890"
+        )
+        self.assertEqual(plain.status_code, 200)
+        self.assertEqual(versioned.status_code, 200)
+        self.assertIn("no-cache", plain.headers["Cache-Control"])
+        self.assertIn("max-age=31536000", versioned.headers["Cache-Control"])
+        # The version only changes the caching, never the picture.
+        self.assertEqual(len(plain.data), len(versioned.data))
+        self.assertEqual(plain.headers["ETag"], versioned.headers["ETag"])
 
 
 if __name__ == "__main__":

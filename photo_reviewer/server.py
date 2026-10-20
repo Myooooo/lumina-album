@@ -73,14 +73,23 @@ UI_STATE_HISTORY_LIMIT = 20
 #: Methods that mutate state and therefore require a same-origin request.
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
+#: One year, in seconds: how long a content-addressed thumbnail is cacheable.
+_IMMUTABLE_IMAGE_MAX_AGE = 31536000
+
 
 def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any]:
     """Shape one photo row for the API.
 
-    The gallery only needs what it renders; paths, hashes and the model name
-    are dropped from list responses (they were ~25% of a 200-photo page and the
-    frontend never read them). ``detail=True`` keeps them for single-photo
-    endpoints.
+    The gallery only needs what it renders; paths, hashes, the model name and
+    the EXIF block are dropped from list responses. ``detail=True`` keeps them
+    for single-photo endpoints.
+
+    Both the EXIF block and the raw sibling's size were once sent with every
+    list row, which cost two things on a 4000-photo album: ~30% of the payload
+    was EXIF that no card reads, and every photo with a raw file triggered an
+    ``os.path.getsize`` on the album drive - on an external disk, a page of 100
+    could stall for a second. The detail dialog fetches both on demand from
+    ``/api/photo/<id>/detail``, one small request per photo actually opened.
 
     ``raw_path`` is set when a same-named camera-raw file sits next to the
     image; ``is_raw`` is set when the photo itself is the raw file because no
@@ -95,7 +104,6 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         "width": photo["width"],
         "height": photo["height"],
         "location": photo.get("location"),
-        "exif": photo.get("exif") or {},
         "dimensions": _clean_dimensions(photo.get("dimensions")),
         "score": photo.get("score"),
         "tags": photo.get("tags") or [],
@@ -109,9 +117,11 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         "has_raw": bool(raw_path),
         "is_raw": _is_raw_file(photo.get("path") or photo.get("original_path")),
         "raw_ext": Path(raw_path).suffix.lstrip(".").upper() if raw_path else "",
-        # Size of the raw sibling, so the detail page can say "10 MB + 30 MB".
-        # One stat() call, and only for photos that actually have a raw file.
-        "raw_size": _file_size(raw_path),
+        # The thumbnail URL carries this, so the browser can cache the image
+        # forever: re-rendering a thumbnail (cache clean, orientation repair)
+        # changes the hash and therefore the URL. A 16-char string is far
+        # cheaper than revalidating thousands of images.
+        "thumb_version": photo.get("phash") or "",
     }
     if detail:
         payload.update(
@@ -124,6 +134,11 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
                 "recommendation": photo.get("recommendation"),
                 "model": photo.get("model"),
                 "geocoded": bool(photo.get("geocoded")),
+                "exif": photo.get("exif") or {},
+                # Size of the raw sibling, so the detail page can say
+                # "10 MB + 30 MB". One stat() call, only for the photo on
+                # screen - never for a whole page.
+                "raw_size": _file_size(raw_path),
             }
         )
     return payload
@@ -223,6 +238,18 @@ def _thumbnail_path(photo: dict[str, Any]) -> str | None:
         if candidate.endswith("_thumb.jpg") and os.path.exists(candidate):
             return candidate
     return None
+
+
+def _image_cache_timeout() -> int | None:
+    """How long a thumbnail may be cached, given the request.
+
+    ``?v=<hash>`` means the URL is content-addressed by the caller, so the
+    response can be cached for a year - that is what makes scrolling a long
+    album back and forth free. A bare ``/api/thumbnail/<id>`` is not
+    content-addressed (the file behind it can be re-rendered at any time), so it
+    keeps Flask's default of ``no-cache`` and revalidates with its ETag.
+    """
+    return _IMMUTABLE_IMAGE_MAX_AGE if request.args.get("v") else None
 
 
 def _trash_destination(day_dir: Path, source: str) -> Path:
@@ -1482,6 +1509,34 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         photo = _ensure_exif(photo, database, cfg)
         return jsonify(_photo_payload(photo, detail=True))
 
+    @app.get("/api/photo/<int:photo_id>/detail")
+    def api_photo_detail(photo_id: int):
+        """The detail-only extras for the photo the user just opened.
+
+        The detail dialog needs three things the gallery list deliberately
+        omits: the EXIF block (for the camera/spec row and the capture time),
+        the raw sibling's size (for "10 MB + 30 MB") and the true pixel size.
+        Sending them with every list row cost ~30% of the payload plus one
+        ``stat()`` per photo; asking for them once per opened photo costs one
+        small request, and the dialog paints its frame before this lands.
+        """
+        photo = database.get_photo(photo_id)
+        if not photo:
+            return jsonify({"error": "照片不存在"}), 404
+        photo = _ensure_exif(photo, database, cfg)
+        raw_path = photo.get("raw_path")
+        return jsonify(
+            {
+                "id": photo["id"],
+                "exif": photo.get("exif") or {},
+                "raw_size": _file_size(raw_path),
+                "width": photo.get("width"),
+                "height": photo.get("height"),
+                "size": photo.get("size"),
+                "location": photo.get("location"),
+            }
+        )
+
     @app.get("/api/thumbnail/<int:photo_id>")
     def api_thumbnail(photo_id: int):
         """Serve the small gallery thumbnail.
@@ -1489,13 +1544,26 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         Lookup order is ``thumb_path`` → sibling of ``proxy_path`` → generate.
         Only the last branch decodes the picture, so a cached thumbnail is
         served straight from disk and a raw file never needs the sensor data.
+
+        ``?v=<hash>`` marks the URL as content-addressed: the client sends the
+        row's ``thumb_version``, which changes whenever the file is re-rendered.
+        Those responses are cached for a year, so scrolling a long album back
+        and forth costs no requests at all. Without the parameter (an old
+        bookmark, a manual visit) the response stays revalidated, because the
+        file behind a bare id can change under it.
         """
         photo = database.get_photo(photo_id)
         if not photo:
             return jsonify({"error": "照片不存在"}), 404
+        cache_timeout = _image_cache_timeout()
         thumb = _thumbnail_path(photo)
         if thumb:
-            return send_file(thumb, mimetype="image/jpeg", conditional=True)
+            return send_file(
+                thumb,
+                mimetype="image/jpeg",
+                conditional=True,
+                max_age=cache_timeout,
+            )
         path = photo.get("path") or photo.get("original_path")
         if path and os.path.exists(path):
             try:
@@ -1510,7 +1578,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     thumb_quality=cfg.thumb_quality,
                 )
                 database.update_cache_paths(photo_id, thumb_path, proxy_path, phash)
-                return send_file(thumb_path, mimetype="image/jpeg", conditional=True)
+                return send_file(
+                    thumb_path,
+                    mimetype="image/jpeg",
+                    conditional=True,
+                    max_age=cache_timeout,
+                )
             except (OSError, ValueError):
                 logger.warning(
                     "thumbnail generation failed for photo %s", photo_id, exc_info=True
