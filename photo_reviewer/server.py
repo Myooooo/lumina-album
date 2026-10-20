@@ -44,7 +44,7 @@ from .cards import (
     restore_to_card,
     target_for,
 )
-from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, Config
+from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, PREVIEW_MODES, Config
 from .db import Database, sort_photos
 from .exif import extract_exif
 from .geocode import PROVIDERS as GEOCODING_PROVIDERS
@@ -846,6 +846,21 @@ def _load_settings_from_db(database: Database, cfg: Config) -> None:
         except (TypeError, ValueError):
             continue
 
+    # The stored 5-second preview predates the control actually working: until
+    # this release ``POST /api/config`` dropped every video key, so the value in
+    # the database can only be the old built-in default, never a choice. Move it
+    # to the new default once; anything else is left alone.
+    if _stored_video_clip_seconds(raw) == 5.0:
+        cfg.video_clip_seconds = 3.0
+        database.save_settings({"video_clip_seconds": 3.0})
+
+
+def _stored_video_clip_seconds(raw: dict) -> float | None:
+    try:
+        return float(str(raw.get("video_clip_seconds", "")).strip())
+    except (TypeError, ValueError):
+        return None
+
 
 def _save_settings_to_db(database: Database, cfg: Config) -> None:
     """Persist current config into the SQLite ``settings`` table."""
@@ -1050,6 +1065,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 return f"{key} 参数不合法"
             return None
 
+        def as_bool(key: str) -> str | None:
+            if key not in data:
+                return None
+            staged[key] = bool(data[key])
+            return None
+
         checks = (
             as_int("proxy_max_edge", 64, 8192),
             as_int("gallery_thumb_size", 96, 4096),
@@ -1061,10 +1082,29 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             as_int("index_concurrency", 1, 32),
             as_int("geocoding_retries", 0, 10),
             as_float("geocoding_interval", 0.1, 10.0),
+            # The video block. These keys were listed as editable but never
+            # staged, so the dialog accepted a change and silently dropped it -
+            # which is why the preview length kept snapping back to its old
+            # value. Every numeric setting is clamped here, not in the browser.
+            as_float("video_clip_seconds", 2.0, 20.0),
+            as_int("video_clip_max_edge", 320, 1920),
+            as_int("video_clip_crf", 18, 40),
+            as_float("video_poster_ratio", 0.0, 0.5),
+            as_int("video_preview_volume", 0, 100),
+            as_int("live_volume", 0, 100),
+            as_bool("video_clip_audio"),
+            as_bool("video_pregenerate"),
+            as_bool("merge_live_photos"),
         )
         for error in checks:
             if error:
                 return jsonify({"error": error}), 400
+
+        if "video_preview_mode" in data:
+            mode = str(data["video_preview_mode"]).strip().lower()
+            if mode not in PREVIEW_MODES:
+                return jsonify({"error": "video_preview_mode 参数不合法"}), 400
+            staged["video_preview_mode"] = mode
 
         if "api_base_url" in data:
             staged["api_base_url"] = (

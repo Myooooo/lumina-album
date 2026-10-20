@@ -190,6 +190,11 @@
           <button id="previewVideoPauseBtn" class="preview-video-pause hidden" type="button" title="暂停">
             <span class="btn-icon" data-icon="pause"></span>
           </button>
+          <!-- The Live Photo replay control, back where it has always been: on
+               the corner of the picture, where a play button belongs. -->
+          <button id="previewLiveBtn" class="preview-live-btn hidden" type="button" title="播放实况">
+            <span class="preview-live-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
+          </button>
         </div>
         <div id="previewInfo" class="preview-info"></div>
       </div>
@@ -287,7 +292,7 @@
         </button>
         <button class="settings-tab" role="tab" data-tab="video" id="tabBtnVideo"
                 aria-selected="false" aria-controls="tabVideo" tabindex="-1">
-          <span class="btn-icon" data-icon="video"></span><span class="tab-label">视频</span>
+          <span class="btn-icon" data-icon="video"></span><span class="tab-label">视频处理</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="geo" id="tabBtnGeo"
                 aria-selected="false" aria-controls="tabGeo" tabindex="-1">
@@ -359,11 +364,22 @@
               <span>合并显示实况照片（重新整理后生效）</span>
             </label>
           </div>
+
+          <h3 class="settings-subtitle">实况照片</h3>
+          <p class="settings-hint">打开详情页时会自动播放一小段动态，播完淡回静止画面。0% 即静音播放。</p>
+          <div class="form-grid">
+            <label class="full-row">实况音量
+              <span class="range-row">
+                <input id="setLiveVolume" type="range" min="0" max="100" step="5" />
+                <span class="range-value" id="setLiveVolumeValue">0%</span>
+              </span>
+            </label>
+          </div>
         </section>
 
         <section class="settings-pane" id="tabVideo" role="tabpanel"
                  aria-labelledby="tabBtnVideo" data-pane="video" hidden>
-          <p class="settings-hint">详情页会循环播放一小段静音预览，全屏才是原片。预览越小越快，也越省缓存。</p>
+          <p class="settings-hint">详情页会播放一小段预览，全屏才是原片。预览越小越快，也越省缓存。</p>
           <div class="form-grid">
             <label>预览时长（秒）
               <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
@@ -376,6 +392,19 @@
             </label>
             <label>预览取帧位置（时长比例 0-0.5）
               <input id="setVideoPosterRatio" type="number" min="0" max="0.5" step="0.05" />
+            </label>
+            <label>预览模式
+              <select id="setVideoPreviewMode">
+                <option value="off">不播放</option>
+                <option value="once">播放一次</option>
+                <option value="loop">循环播放</option>
+              </select>
+            </label>
+            <label>预览音量
+              <span class="range-row">
+                <input id="setVideoPreviewVolume" type="range" min="0" max="100" step="5" />
+                <span class="range-value" id="setVideoPreviewVolumeValue">50%</span>
+              </span>
             </label>
             <label class="checkbox-row full-row">
               <input id="setVideoClipAudio" type="checkbox" />

@@ -160,10 +160,17 @@ const galleryHelpers = new Function(
    ${extract("formatDuration")}
    ${extract("formatBitrate")}
    ${extract("formatFps")}
-   return { diffPhotoRows, thumbnailUrl, formatDuration, formatBitrate, formatFps };`
+   ${extract("fmtSize")}
+   ${extract("formatExposure")}
+   return {
+     diffPhotoRows, thumbnailUrl, formatDuration, formatBitrate, formatFps,
+     fmtSize, formatExposure,
+   };`
 )();
-const { diffPhotoRows, thumbnailUrl, formatDuration, formatBitrate, formatFps } =
-  galleryHelpers;
+const {
+  diffPhotoRows, thumbnailUrl, formatDuration, formatBitrate, formatFps,
+  fmtSize, formatExposure,
+} = galleryHelpers;
 
 // The back-to-top curve.
 const easeInOutCubic = new Function(`${extract("easeInOutCubic")} return easeInOutCubic;`)();
@@ -531,6 +538,24 @@ check("an empty page against an empty list", diffPhotoRows([], []), {
 });
 
 /* --------------------------------------------------------------- video */
+section("fmtSize");
+check("bytes", fmtSize(512), "512 B");
+check("kilobytes", fmtSize(934824), "912.9 KB");
+check("megabytes under a gigabyte", fmtSize(214 * 1024 * 1024), "214.0 MB");
+check("just under the boundary stays MB", fmtSize(1023 * 1024 * 1024), "1023.0 MB");
+check("a gigabyte rolls over", fmtSize(1024 * 1024 * 1024), "1.00 GB");
+check("a phone video at 1.5 GB", fmtSize(1536 * 1024 * 1024), "1.50 GB");
+check("a two-hour recording", fmtSize(9.4 * 1024 * 1024 * 1024), "9.40 GB");
+check("zero is still zero", fmtSize(0), "0 B");
+check("nothing is a dash", fmtSize(null), "-");
+
+section("formatExposure");
+check("already has a unit", formatExposure("1/120s"), "1/120s");
+check("a bare fraction", formatExposure("1/120"), "1/120s");
+check("a bare number under a second", formatExposure(0.5), "1/2s");
+check("seconds", formatExposure(2), "2s");
+check("empty", formatExposure(""), "");
+
 section("formatDuration");
 check("a few seconds", formatDuration(7000), "00:07");
 check("just over a minute", formatDuration(83_000), "01:23");

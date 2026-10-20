@@ -482,6 +482,34 @@ def _index_one(
         return False
 
 
+def _stalled_video_pairs(
+    folder: str, db: Database, already: list[tuple[str, str | None]]
+) -> list[tuple[str, str | None]]:
+    """Video items already in the database that still have nothing to show.
+
+    A probe can fail for reasons that go away: ffmpeg not installed yet, a drive
+    that was unplugged, a file still being copied. The row then holds an empty
+    ``video_info`` and an error, and the incremental scan would skip it forever
+    because its path is already known. Re-indexing it is cheap (one ffprobe) and
+    turns "this video has no information" into a self-healing state.
+    """
+    queued = {os.path.normcase(canonical_path(path)) for path, _raw in already}
+    stalled: list[tuple[str, str | None]] = []
+    for row in db.list_photos(folder=folder, limit=100000):
+        if (row.get("media_kind") or "photo") != "video":
+            continue
+        if row.get("video_info") or row.get("status") not in ("error", "pending"):
+            continue
+        path = row.get("path")
+        if not path or not os.path.exists(path):
+            continue
+        key = os.path.normcase(canonical_path(path))
+        if key in queued:
+            continue
+        stalled.append((path, row.get("raw_path")))
+    return stalled
+
+
 def _raw_owner_map(
     pairs: list[tuple[str, str | None]], current_set: set[str]
 ) -> dict[str, str]:
@@ -669,6 +697,12 @@ def _scan_worker(
             to_index = [
                 pair for pair in pairs if pair[0] not in active_paths
             ]
+        # A video whose probe failed - ffmpeg was not installed yet, the file was
+        # on a disconnected drive, a codec ffprobe could not read - keeps an
+        # empty ``video_info`` and never gets looked at again, because its path
+        # is already in the database. Those rows are re-probed on every scan so
+        # they heal as soon as the cause is gone.
+        to_index.extend(_stalled_video_pairs(folder, db, to_index))
 
         if to_index and not _run_index_phase(
             job_id,

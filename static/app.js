@@ -27,6 +27,12 @@ const state = {
   //: Length of the video preview clip, filled from /api/config so the dialog
   //: label matches what the server actually produced.
   videoClipSeconds: 3,
+  //: How the detail-page preview behaves: "off", "once" or "loop".
+  videoPreviewMode: "once",
+  //: Preview volume, 0-100.
+  videoPreviewVolume: 50,
+  //: Live Photo motion volume, 0-100. Silent by default.
+  liveVolume: 0,
   //: ``id -> position`` in ``state.photos``, for the few callers that splice by
   //: index instead of by row.
   photoIndex: new Map(),
@@ -336,7 +342,25 @@ function fmtSize(bytes) {
   if (!bytes && bytes !== 0) return "-";
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  // Past a gigabyte, "1024.0 MB" is a number nobody reads. The threshold is
+  // 1024 MB rather than 1000: the unit is binary, so that is where the value
+  // actually rolls over to 1.0 GB.
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
+}
+
+/**
+ * Set a range input and keep its live percentage label in step.
+ *
+ * The slider itself carries no visible number, so the little "50%" beside it is
+ * the only feedback while dragging.
+ */
+function setRangeValue(id, value) {
+  const input = $(id);
+  if (!input) return;
+  input.value = String(value);
+  const label = $(`${id}Value`);
+  if (label) label.textContent = `${input.value}%`;
 }
 
 /**
@@ -439,7 +463,7 @@ function videoDetailRows(photo) {
     if (Number(info.audio_channels) > 0) {
       audioParts.push(`${info.audio_channels} 声道`);
     }
-  } else {
+  } else if (Object.keys(info).length) {
     audioParts.push("无音轨");
   }
 
@@ -450,6 +474,15 @@ function videoDetailRows(photo) {
           <div class="meta-content">${escapeHtml(text)}</div>
         </div>`
       : "";
+
+  // Nothing was read from the file, so say so instead of showing a blank panel.
+  // The most common cause is that the file is not there any more.
+  if (!Object.keys(info).length) {
+    const why = photo.error
+      ? `无法读取这段视频的信息：${photo.error}`
+      : "没能读取这段视频的信息。文件可能已被移动或删除，重新整理一次可以再试。";
+    return row(ICONS.error, "视频信息", why);
+  }
 
   return (
     row(ICONS.hourglass, "时长与封装", videoParts.join(" · ")) +
@@ -543,6 +576,9 @@ function formatFnumber(val) {
 function formatExposure(val) {
   if (val === null || val === undefined || val === "") return "";
   const s = String(val).trim();
+  // The backend already writes "1/120s"; adding another unit produced
+  // "1/120ss". Only append when the value is still bare.
+  if (/s$/i.test(s)) return s;
   if (s.includes("/")) return s + "s";
   const num = Number(s);
   if (!Number.isFinite(num) || num <= 0) return s;
@@ -963,7 +999,8 @@ function cardHtml(photo) {
       <button class="btn small danger delete-btn" title="暂时收起"><span class="btn-icon">${ICONS.trash}</span></button>
     `;
   }
-  const reanalyzeAction = isDeleted || isVideo
+  // A video is analysed now, from its poster frame, so it keeps the button.
+  const reanalyzeAction = isDeleted
     ? ""
     : `<button class="btn small reanalyze-btn" title="重新解读"><span class="btn-icon">${ICONS.refresh}</span></button>`;
 
@@ -2506,6 +2543,8 @@ function applyPreviewMedia(photo, options = {}) {
   // the previous clip running underneath.
   stopPreviewVideo();
   if (soundBtn) soundBtn.classList.add("hidden");
+  const liveBtn = $("previewLiveBtn");
+  if (liveBtn) liveBtn.classList.add("hidden");
   $("previewImage").classList.toggle("hidden", false);
 
   if (isVideo) {
@@ -2520,23 +2559,35 @@ function applyPreviewMedia(photo, options = {}) {
 
   delete video.dataset.photoId;
   // A Live Photo shows itself off: the still is on screen, the motion fades in
-  // over it, plays once, and fades back out.
-  if (hasLive) {
-    playLiveMotion(photo, { muted: true });
+  // over it, plays once, and fades back out. The corner button is there to see
+  // it again.
+  if (hasLive && state.videoPreviewMode !== "off") {
+    playLiveMotion(photo);
   }
+  if (hasLive && liveBtn) liveBtn.classList.remove("hidden");
 }
 
-/** Load and start the silent preview loop for ``photo``. */
+/** Load and start the preview for ``photo``, honouring the preview settings. */
 function playPreviewClip(photo) {
   const video = $("previewVideo");
   if (!video) return;
+  const pause = $("previewVideoPauseBtn");
   const wanted = `/api/video/${photo.id}/clip`;
   video.dataset.photoId = String(photo.id);
+
+  // "不播放" leaves the poster alone; the sound button still works, because
+  // pressing play is then the user's own decision.
+  if (state.videoPreviewMode === "off") {
+    video.classList.add("hidden");
+    if (pause) pause.classList.add("hidden");
+    return;
+  }
+
   video.muted = !previewSoundOn;
-  video.loop = true;
+  video.volume = Math.max(0, Math.min(1, (Number(state.videoPreviewVolume) || 0) / 100));
+  video.loop = state.videoPreviewMode === "loop";
   video.classList.add("hidden");
   video.src = wanted;
-  const pause = $("previewVideoPauseBtn");
   const onReady = () => {
     if (video.dataset.photoId !== String(photo.id)) return;
     video.classList.remove("hidden");
@@ -2552,6 +2603,18 @@ function playPreviewClip(photo) {
     }
   };
   video.addEventListener("canplay", onReady, { once: true });
+  if (!video.loop) {
+    // A one-shot preview leaves its last frame on screen - the dialog reads as
+    // a still again instead of a paused video player.
+    video.addEventListener(
+      "ended",
+      () => {
+        if (video.dataset.photoId !== String(photo.id)) return;
+        if (pause) pause.classList.add("hidden");
+      },
+      { once: true }
+    );
+  }
   video.addEventListener(
     "error",
     () => {
@@ -2621,10 +2684,14 @@ function playLiveMotion(photo, options = {}) {
   const video = $("previewVideo");
   if (!video || !photo || !photo.has_live) return;
   const wanted = `/api/photo/${photo.id}/live`;
+  const volume = Math.max(0, Math.min(1, (Number(state.liveVolume) || 0) / 100));
   livePlaying = true;
   video.dataset.photoId = String(photo.id);
   video.loop = false;
-  video.muted = options.muted !== false;
+  // Volume is a setting, not a boolean: at 0% the motion is silent, and above
+  // it the user has asked for sound. `muted` alone cannot express "20%".
+  video.volume = volume;
+  video.muted = volume <= 0;
   video.classList.remove("is-fading");
   video.classList.add("hidden", "is-live-motion");
   video.src = wanted;
@@ -2661,7 +2728,7 @@ function playLiveMotion(photo, options = {}) {
       // Autoplay is allowed to fail quietly (a motion that will not decode
       // should not throw an error at someone who just opened a photo), but a
       // press deserves an answer.
-      if (options.muted === false) showToast("这段实况视频无法播放。", "error");
+      if (options.loud) showToast("这段实况视频无法播放。", "error");
     },
     { once: true }
   );
@@ -2677,6 +2744,9 @@ function playLiveMotion(photo, options = {}) {
 function closeModal(id, onHidden) {
   hideModal($(id), onHidden);
   if (id === "previewModal") {
+    // A looping preview would otherwise keep decoding (and playing) behind a
+    // closed dialog until something else happened to stop it.
+    stopPreviewVideo();
     state.currentPreviewId = null;
     state.previewNavToken += 1;
     $("previewImage").classList.remove("preview-switch-left", "preview-switch-right");
@@ -2809,14 +2879,14 @@ function updatePreview(options = {}) {
       `);
     }
     if (photo.has_live) {
-      // The Live Photo mark doubles as the replay button: the motion plays by
-      // itself when the dialog opens, so this is for watching it again - and
-      // this time with sound, because a press is a deliberate act.
+      // A plain chip, drawn like the aperture and ISO badges beside it - it
+      // reports that this still carries motion, nothing more. Playing it is the
+      // play button's job, on the corner of the picture.
       specItems.push(`
-        <button type="button" class="spec-badge live-badge-chip" id="previewLiveChip" title="重播实况">
-          <span class="live-badge-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
-          <span class="spec-val">实况</span>
-        </button>
+        <div class="spec-badge live-spec" title="实况照片：这张照片带一段动态">
+          <span class="live-spec-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
+          <span class="spec-val">Live</span>
+        </div>
       `);
     }
   }
@@ -3079,7 +3149,13 @@ async function openSettings() {
     $("setVideoClipAudio").checked = cfg.video_clip_audio !== false;
     $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
     $("setMergeLivePhotos").checked = cfg.merge_live_photos !== false;
+    setSelectValue($("setVideoPreviewMode"), cfg.video_preview_mode || "once");
+    setRangeValue("setVideoPreviewVolume", cfg.video_preview_volume ?? 50);
+    setRangeValue("setLiveVolume", cfg.live_volume ?? 0);
     state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
+    state.videoPreviewMode = cfg.video_preview_mode || "once";
+    state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
+    state.liveVolume = Number(cfg.live_volume ?? 0);
     paintFfmpegStatus();
     // Always open on the model tab: that is what most visits are for.
     showSettingsTab("model");
@@ -3116,6 +3192,9 @@ async function saveSettings() {
     video_clip_audio: $("setVideoClipAudio").checked,
     video_pregenerate: $("setVideoPregenerate").checked,
     merge_live_photos: $("setMergeLivePhotos").checked,
+    video_preview_mode: $("setVideoPreviewMode").value,
+    video_preview_volume: parseInt($("setVideoPreviewVolume").value, 10) || 0,
+    live_volume: parseInt($("setLiveVolume").value, 10) || 0,
   };
   try {
     await api("/api/config", {
@@ -3967,6 +4046,26 @@ async function handlePreviewInfoClick(event) {
   else showToast("复制失败，请手动选择路径文本。", "error");
 }
 
+/**
+ * Fetch the handful of settings the playback path needs.
+ *
+ * The settings dialog loads the whole config, but that only happens when it is
+ * opened - a preview must already know its mode and volume on the first click,
+ * so this runs once at startup and stays quiet if it fails.
+ */
+async function loadPlaybackConfig() {
+  try {
+    const cfg = await api("/api/config");
+    state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
+    state.videoPreviewMode = cfg.video_preview_mode || "once";
+    state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
+    state.liveVolume = Number(cfg.live_volume ?? 0);
+  } catch (e) {
+    // Defaults are sensible, so a failure here changes nothing visible.
+    console.warn("读取播放设置失败", e);
+  }
+}
+
 function init() {
   // Render embedded icons
   renderAllIcons();
@@ -4061,14 +4160,10 @@ function init() {
     togglePreviewPause();
   });
   $("previewInfo").addEventListener("click", handlePreviewInfoClick);
-  // The 实况 chip lives inside the info panel, so it is delegated: the panel is
-  // rebuilt every time the selection changes.
-  $("previewInfo").addEventListener("click", (e) => {
-    const chip = e.target.closest("#previewLiveChip");
-    if (!chip) return;
+  $("previewLiveBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     const photo = photoById(state.currentPreviewId);
-    if (photo) playLiveMotion(photo, { muted: false });
+    if (photo) playLiveMotion(photo, { loud: true });
   });
 
   // Fullscreen Viewer Controls
@@ -4141,6 +4236,15 @@ function init() {
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
+  // Keep the percentage beside each slider in step while it is dragged.
+  ["setVideoPreviewVolume", "setLiveVolume"].forEach((id) => {
+    const input = $(id);
+    if (!input) return;
+    input.addEventListener("input", () => {
+      const label = $(`${id}Value`);
+      if (label) label.textContent = `${input.value}%`;
+    });
+  });
   $("cleanCacheBtn").addEventListener("click", cleanCache);
   $("removeFolderBtn").addEventListener("click", removeCurrentFolder);
   document.querySelectorAll("#settingsModal .settings-tab").forEach((tab) => {
@@ -4236,6 +4340,9 @@ function init() {
   });
 
   loadInitialFolder();
+  // Playback preferences are needed before the first dialog opens, not only
+  // when someone visits the settings page.
+  loadPlaybackConfig();
   // The card can be plugged in or pulled out at any time; the badge is the only
   // place that says so, so it keeps itself up to date.
   refreshCardStatus();

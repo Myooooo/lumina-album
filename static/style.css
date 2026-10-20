@@ -792,7 +792,7 @@ select {
 .polaroid-card.is-video .polaroid-inner {
   background: #14120f;
   border: 1px solid #2b2620;
-  border-radius: 12px;
+  border-radius: 3px;
   box-shadow: 0 10px 26px rgba(18, 14, 10, 0.32);
   /* Wide enough for the sprocket column on each side; the picture sits between
      them, so the holes never land on the frame. */
@@ -804,30 +804,32 @@ select {
   box-shadow: 0 16px 34px rgba(18, 14, 10, 0.42);
 }
 
-/* The sprocket holes: two columns of soft dots down the black border, one on
-   each side of the picture. Rounded rectangles, the way a 35 mm strip reads.
+/* The sprocket holes: two columns of *rounded rectangles* down the black
+   border, one on each side of the picture - the way a 35 mm strip reads.
+   Drawn as an inline SVG because a radial gradient can only make circles.
+
    The element is a child of ``.polaroid-front``, which sits inside the card's
-   padding; the negative inset pulls it back out to the card's own edges so the
-   columns are painted on the border rather than over the picture. */
+   padding, so the negative inset pulls it back out to the card's own edges and
+   the columns land on the border rather than over the picture. */
 .film-strip {
   position: absolute;
   /* top / sides / bottom of the card padding + border, negated. */
   inset: -13px -27px -17px;
   pointer-events: none;
   z-index: 3;
-  opacity: .75;
+  opacity: .8;
   background-image:
-    radial-gradient(circle at 11px 50%, rgba(247, 239, 228, 0.5) 2.6px, transparent 3px),
-    radial-gradient(circle at calc(100% - 11px) 50%, rgba(247, 239, 228, 0.5) 2.6px, transparent 3px);
-  background-size: 100% 20px, 100% 20px;
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='3' fill='%23f7efe4' fill-opacity='0.55'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='3' fill='%23f7efe4' fill-opacity='0.55'/></svg>");
+  background-size: 9px 20px, 9px 20px;
   background-repeat: repeat-y, repeat-y;
-  background-position: 0 12px, 0 12px;
+  background-position: 7px 0, calc(100% - 7px) 0;
 }
 
 .polaroid-card.is-video .polaroid-photo-frame {
   background: #0c0a08;
   box-shadow: inset 0 0 0 1px rgba(216, 201, 180, 0.16);
-  border-radius: 7px;
+  border-radius: 1px;
 }
 
 .polaroid-card.is-video .polaroid-body {
@@ -1523,6 +1525,10 @@ select {
   display: flex;
   justify-content: center;
   align-items: center;
+  /* Height follows the picture, not the taller info column beside it. The
+     preview video is absolutely positioned to fill this box, so a stretched
+     column would letterbox it with black bands. */
+  align-self: center;
   cursor: zoom-in;
 }
 
@@ -1571,10 +1577,17 @@ select {
 
 /* A Live Photo's motion fades in over the still and, when it ends, fades back
    out - the way iOS turns a moment into movement and back. The clip loop uses
-   the entrance animation above; this is the one-shot motion's own curve. */
+   the entrance animation above; this is the one-shot motion's own curve.
+
+   ``object-fit: cover`` rather than ``contain``: the motion is not always the
+   same shape as its poster, and letterboxing it would paint bars down the sides
+   of a photograph. Cropping a sliver is invisible; a black band is not. */
 .preview-video.is-live-motion {
   animation: none;
   opacity: 1;
+  object-fit: cover;
+  background: transparent;
+  box-shadow: none;
   transition: opacity .4s ease;
 }
 
@@ -1641,46 +1654,110 @@ select {
 }
 
 /* ---------- Live Photo chip ----------
-   Sits in the spec row beside the aperture and ISO badges. It is the replay
-   control: the motion already played when the dialog opened, so a press here
-   means "again, this time with sound". */
-.spec-badge.live-badge-chip {
-  border: 1px solid rgba(179, 125, 86, 0.28);
-  background: rgba(179, 125, 86, 0.08);
-  color: var(--primary-dark);
-  cursor: pointer;
-  font: inherit;
-  padding: 5px 11px 5px 7px;
-  transition: background-color .22s ease, transform .22s cubic-bezier(.2,.8,.2,1),
-              box-shadow .22s ease;
+   Sits in the spec row beside the aperture and ISO badges and is drawn exactly
+   like them: same padding, same height, same border. It only *reports* that the
+   still carries motion - the replay control is the play button on the corner of
+   the picture. */
+.spec-badge.live-spec {
+  cursor: default;
 }
 
-.spec-badge.live-badge-chip:hover {
-  background: rgba(179, 125, 86, 0.16);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(179, 125, 86, 0.18);
-}
-
-.live-badge-mark {
+.live-spec-mark {
   position: relative;
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(179, 125, 86, 0.16);
+  border: 1.3px solid currentColor;
   flex: 0 0 auto;
+  opacity: .85;
 }
 
-.live-badge-mark .live-badge-ring {
-  inset: 2px;
-  border-width: 1.2px;
+.live-spec-mark .live-badge-ring {
+  display: none;
 }
 
-.live-badge-mark .live-badge-dot {
+.live-spec-mark .live-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* The replay button on the corner of the picture, where it has always been. */
+.preview-live-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 99px;
+  border: 1px solid rgba(247, 239, 228, 0.35);
+  background: rgba(14, 12, 10, 0.5);
+  color: #f7efe4;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: transform .26s cubic-bezier(.2,.8,.2,1), background-color .2s ease;
+  z-index: 4;
+}
+
+.preview-live-btn:hover {
+  background: rgba(24, 20, 16, 0.72);
+  transform: translateY(-2px);
+}
+
+.preview-live-mark {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(247, 239, 228, 0.94);
+}
+
+.preview-live-mark .live-badge-ring {
+  inset: 3px;
+  border-width: 1.3px;
+}
+
+.preview-live-mark .live-badge-dot {
   width: 4.5px;
   height: 4.5px;
+}
+
+/* ---------- Sliders in the settings dialog ---------- */
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.range-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.range-value {
+  flex: 0 0 auto;
+  min-width: 42px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 /* ---------- Fullscreen video ---------- */

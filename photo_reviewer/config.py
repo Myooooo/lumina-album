@@ -58,12 +58,19 @@ PERSISTED_FIELDS = (
     "video_clip_audio",
     "video_pregenerate",
     "video_poster_ratio",
+    "video_preview_volume",
+    "video_preview_mode",
+    "live_volume",
     "merge_live_photos",
 )
 
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
 # must never be able to move the cache/trash directories or rebind the server.
 EDITABLE_FIELDS = frozenset(PERSISTED_FIELDS) - {"trash_dir_name", "cache_dir_name"}
+
+#: What the detail-page preview does when a video is opened. ``off`` keeps the
+#: poster, ``once`` plays the clip and leaves the last frame, ``loop`` repeats.
+PREVIEW_MODES = ("off", "once", "loop")
 
 
 @dataclass
@@ -262,6 +269,23 @@ class Config:
     video_poster_ratio: float = field(
         default_factory=lambda: float(os.getenv("PHOTO_VIDEO_POSTER_RATIO", "0.1"))
     )
+    #: Playback volume of the detail-page preview, 0-100. Independent of the
+    #: preview *mode*: a silent loop is usually what people want, so the default
+    #: is half volume rather than full.
+    video_preview_volume: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_VIDEO_PREVIEW_VOLUME", "50"))
+    )
+    #: What the preview does when the dialog opens: ``off``, ``once`` or
+    #: ``loop``. "once" leaves the poster on screen when the clip ends, which
+    #: reads as a glance rather than a video player.
+    video_preview_mode: str = field(
+        default_factory=lambda: os.getenv("PHOTO_VIDEO_PREVIEW_MODE", "once")
+    )
+    #: Volume of a Live Photo's motion, 0-100. Silent by default: the motion is
+    #: ambience, and a photo that suddenly talks is startling.
+    live_volume: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_LIVE_VOLUME", "0"))
+    )
     #: Directory holding ffmpeg/ffprobe. Environment only: it describes the
     #: machine, not the album, so it must not be pinned by a database row.
     ffmpeg_path: str = field(default_factory=lambda: os.getenv("PHOTO_FFMPEG_PATH", ""))
@@ -302,6 +326,9 @@ class Config:
             "video_clip_audio": self.video_clip_audio,
             "video_pregenerate": self.video_pregenerate,
             "video_poster_ratio": self.video_poster_ratio,
+            "video_preview_volume": self.video_preview_volume,
+            "video_preview_mode": self.video_preview_mode,
+            "live_volume": self.live_volume,
             "merge_live_photos": self.merge_live_photos,
         }
 

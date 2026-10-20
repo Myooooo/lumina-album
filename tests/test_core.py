@@ -1233,6 +1233,88 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(self.cfg.cache_dir_name, ".photo-review-cache")
         self.assertNotEqual(self.cfg.host, "0.0.0.0")
 
+    def test_the_video_block_survives_a_save(self) -> None:
+        """Regression: these keys were listed as editable but never staged.
+
+        The dialog accepted a change, answered 200, and quietly kept the old
+        value - which is why the preview length kept snapping back.
+        """
+        resp = self.client.post(
+            "/api/config",
+            json={
+                "video_clip_seconds": 7,
+                "video_clip_max_edge": 720,
+                "video_clip_crf": 31,
+                "video_poster_ratio": 0.25,
+                "video_clip_audio": False,
+                "video_pregenerate": True,
+                "merge_live_photos": False,
+                "video_preview_mode": "loop",
+                "video_preview_volume": 80,
+                "live_volume": 35,
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        cfg = self.client.get("/api/config").get_json()
+        self.assertEqual(cfg["video_clip_seconds"], 7)
+        self.assertEqual(cfg["video_clip_max_edge"], 720)
+        self.assertEqual(cfg["video_clip_crf"], 31)
+        self.assertAlmostEqual(cfg["video_poster_ratio"], 0.25)
+        self.assertFalse(cfg["video_clip_audio"])
+        self.assertTrue(cfg["video_pregenerate"])
+        self.assertFalse(cfg["merge_live_photos"])
+        self.assertEqual(cfg["video_preview_mode"], "loop")
+        self.assertEqual(cfg["video_preview_volume"], 80)
+        self.assertEqual(cfg["live_volume"], 35)
+
+    def test_video_settings_are_clamped(self) -> None:
+        self.client.post(
+            "/api/config",
+            json={"video_clip_seconds": 999, "video_preview_volume": -20},
+        )
+        cfg = self.client.get("/api/config").get_json()
+        self.assertEqual(cfg["video_clip_seconds"], 20)
+        self.assertEqual(cfg["video_preview_volume"], 0)
+
+    def test_an_unknown_preview_mode_is_rejected(self) -> None:
+        before = self.cfg.video_preview_mode
+        resp = self.client.post("/api/config", json={"video_preview_mode": "sideways"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.cfg.video_preview_mode, before)
+
+    def test_all_three_preview_modes_are_accepted(self) -> None:
+        for mode in ("off", "once", "loop"):
+            resp = self.client.post("/api/config", json={"video_preview_mode": mode})
+            self.assertEqual(resp.status_code, 200, mode)
+            self.assertEqual(self.client.get("/api/config").get_json()["video_preview_mode"], mode)
+
+    def test_the_defaults_are_three_seconds_and_half_volume(self) -> None:
+        cfg = Config(data_dir=self.tmp.name)
+        self.assertEqual(cfg.video_clip_seconds, 3.0)
+        self.assertEqual(cfg.video_preview_mode, "once")
+        self.assertEqual(cfg.video_preview_volume, 50)
+        self.assertEqual(cfg.live_volume, 0)
+
+    def test_a_stored_five_second_preview_is_migrated(self) -> None:
+        """The old value can only be the old default: the control never worked."""
+        from photo_reviewer.server import _load_settings_from_db
+
+        self.db.save_settings({"video_clip_seconds": 5})
+        cfg = Config(data_dir=self.tmp.name)
+        _load_settings_from_db(self.db, cfg)
+        self.assertEqual(cfg.video_clip_seconds, 3.0)
+        self.assertEqual(
+            float(str(self.db.get_settings()["video_clip_seconds"])), 3.0
+        )
+
+    def test_a_deliberate_preview_length_is_left_alone(self) -> None:
+        from photo_reviewer.server import _load_settings_from_db
+
+        self.db.save_settings({"video_clip_seconds": 8})
+        cfg = Config(data_dir=self.tmp.name)
+        _load_settings_from_db(self.db, cfg)
+        self.assertEqual(cfg.video_clip_seconds, 8.0)
+
     def test_host_port_debug_are_not_persisted(self) -> None:
         self.client.post("/api/config", json={"model": "next-model"})
         stored = self.db.get_settings()
@@ -3269,6 +3351,89 @@ class DeletionSafetyTests(unittest.TestCase):
         )
         self.assertFalse(is_in_named_dir(None, self.cfg.trash_dir_name))
         self.assertFalse(is_in_named_dir(inside, ""))
+
+
+class StalledVideoTests(unittest.TestCase):
+    """A video whose probe failed must be retried, not stranded.
+
+    Its path is already in the database, so the incremental scan skipped it
+    forever and the detail dialog stayed empty with no way out but deleting the
+    row by hand.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _video_row(self, name: str, **overrides):
+        path = os.path.join(self.folder, name)
+        with open(path, "wb") as fh:
+            fh.write(b"\x00" * 64)
+        record = {
+            "path": path,
+            "folder": self.folder,
+            "filename": name,
+            "status": "error",
+            "media_kind": "video",
+            "video_info": {},
+            "error": "ffprobe failed",
+        }
+        record.update(overrides)
+        return self.db.upsert_photo(record)
+
+    def test_a_video_without_info_is_re_queued(self) -> None:
+        from photo_reviewer.scanner import _stalled_video_pairs
+
+        self._video_row("broken.mp4")
+        stalled = _stalled_video_pairs(self.folder, self.db, [])
+        self.assertEqual([os.path.basename(p) for p, _raw in stalled], ["broken.mp4"])
+
+    def test_a_healthy_video_is_left_alone(self) -> None:
+        from photo_reviewer.scanner import _stalled_video_pairs
+
+        self._video_row(
+            "fine.mp4", video_info={"video_codec": "h264"}, status="analyzed"
+        )
+        self.assertEqual(_stalled_video_pairs(self.folder, self.db, []), [])
+
+    def test_a_video_that_is_already_queued_is_not_repeated(self) -> None:
+        from photo_reviewer.scanner import _stalled_video_pairs
+
+        path = os.path.join(self.folder, "broken.mp4")
+        self._video_row("broken.mp4")
+        self.assertEqual(
+            _stalled_video_pairs(self.folder, self.db, [(path, None)]), []
+        )
+
+    def test_a_video_whose_file_is_gone_is_skipped(self) -> None:
+        from photo_reviewer.scanner import _stalled_video_pairs
+
+        path = os.path.join(self.folder, "broken.mp4")
+        self._video_row("broken.mp4")
+        os.remove(path)
+        self.assertEqual(_stalled_video_pairs(self.folder, self.db, []), [])
+
+    def test_a_photo_is_never_re_queued_by_this_path(self) -> None:
+        from photo_reviewer.scanner import _stalled_video_pairs
+
+        path = os.path.join(self.folder, "still.jpg")
+        Path(path).write_bytes(b"\xff\xd8\xff")
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": "still.jpg",
+                "status": "error",
+                "media_kind": "photo",
+            }
+        )
+        self.assertEqual(_stalled_video_pairs(self.folder, self.db, []), [])
 
 
 class LivePhotoMergeSwitchTests(unittest.TestCase):
