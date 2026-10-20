@@ -166,14 +166,7 @@ def tools_version(override_dir: str | None = None) -> str:
     if not tools:
         return ""
     try:
-        out = subprocess.run(
-            [tools.ffmpeg, "-version"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-            creationflags=_no_window_flag(),
-        )
+        out = _run([tools.ffmpeg, "-version"], timeout=20)
     except (OSError, subprocess.SubprocessError):
         return ""
     return (out.stdout or "").splitlines()[0] if out.stdout else ""
@@ -202,10 +195,21 @@ def video_cache_key(path: str) -> str:
 
 
 def _run(args: list[str], timeout: float = 120.0) -> subprocess.CompletedProcess:
+    """Run a tool and decode its output as UTF-8.
+
+    ffprobe/ffmpeg always write UTF-8, but ``text=True`` on its own decodes with
+    the *locale* encoding - cp936 on a Chinese Windows. Any file whose path or
+    tags contain a character outside that code page makes the reader thread
+    raise ``UnicodeDecodeError``, the call fails, and a perfectly good video ends
+    up with no metadata at all. ``errors="replace"`` keeps a stray byte from
+    taking the whole probe down.
+    """
     return subprocess.run(
         args,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
         creationflags=_no_window_flag(),

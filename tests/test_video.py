@@ -8,6 +8,7 @@ are missing, which is what keeps the suite green in a bare checkout.
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -217,6 +218,57 @@ class ContainerForTests(unittest.TestCase):
 
     def test_an_unknown_format_gives_an_empty_string(self) -> None:
         self.assertEqual(video.container_for("", "something else"), "")
+
+
+class DecodingTests(unittest.TestCase):
+    """ffprobe writes UTF-8; the locale on a Chinese Windows is not UTF-8.
+
+    ``subprocess.run(..., text=True)`` decodes with the *locale* encoding, so a
+    file whose path held a character outside that code page made the reader
+    thread raise ``UnicodeDecodeError`` and the probe came back as ``None``: the
+    video then had no metadata, no poster and an error status. The runner pins
+    UTF-8 instead.
+    """
+
+    def test_output_is_decoded_as_utf8(self) -> None:
+        out = video._run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write('视频'.encode('utf-8'))",
+            ]
+        )
+        self.assertEqual(out.returncode, 0)
+        self.assertEqual(out.stdout, "视频")
+
+    def test_undecodable_bytes_do_not_raise(self) -> None:
+        out = video._run(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'a\\xff\\xfeb')"]
+        )
+        self.assertEqual(out.returncode, 0)
+        self.assertIn("a", out.stdout)
+
+    def test_a_non_ascii_path_still_probes(self) -> None:
+        tools = video.find_tools()
+        if not tools:
+            self.skipTest("ffmpeg not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = os.path.join(tmp, "手机备份 2025年12月5日")
+            os.makedirs(folder)
+            path = os.path.join(folder, "视频测试.mp4")
+            subprocess.run(
+                [
+                    tools.ffmpeg, "-v", "error", "-y",
+                    "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=10:duration=1",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                    path,
+                ],
+                check=False,
+                capture_output=True,
+            )
+            info = video.probe(path)
+            self.assertIsNotNone(info)
+            self.assertGreater(info.duration_ms, 500)
 
 
 class PosterSeekTests(unittest.TestCase):

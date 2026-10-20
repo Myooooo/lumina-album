@@ -94,10 +94,10 @@
       <label><span class="label-icon" data-icon="score"></span>总分</label>
       <select id="minScoreFilter">
         <option value="">不限</option>
-        <option value="2">2分</option>
-        <option value="4">4分</option>
-        <option value="6">6分</option>
-        <option value="8">8分</option>
+        <option value="2">2+</option>
+        <option value="4">4+</option>
+        <option value="6">6+</option>
+        <option value="8">8+</option>
       </select>
     </div>
     <div class="filter-group sort-group" data-filter-key="sort">
@@ -180,21 +180,26 @@
       <button class="modal-close" data-close="previewModal" title="关闭 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
       <div class="preview-body">
         <div class="preview-media-col">
-          <img id="previewImage" alt="预览" />
-          <!-- Video: the poster shows immediately, the loop cross-fades in.
-               The same element plays a Live Photo's motion once, then fades. -->
-          <video id="previewVideo" class="preview-video hidden" muted autoplay loop playsinline preload="metadata"></video>
-          <button id="previewSoundBtn" class="preview-sound-btn hidden" type="button" title="打开声音">
-            <span class="btn-icon" data-icon="volumeOff"></span>
-          </button>
-          <button id="previewVideoPauseBtn" class="preview-video-pause hidden" type="button" title="暂停">
-            <span class="btn-icon" data-icon="pause"></span>
-          </button>
-          <!-- The Live Photo replay control, back where it has always been: on
-               the corner of the picture, where a play button belongs. -->
-          <button id="previewLiveBtn" class="preview-live-btn hidden" type="button" title="播放实况">
-            <span class="preview-live-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
-          </button>
+          <!-- The stage is exactly the picture's box: the overlay controls
+               anchor to it, so they hug the frame instead of floating in the
+               margin beside a portrait photo. -->
+          <div class="preview-stage">
+            <img id="previewImage" alt="预览" />
+            <!-- Video: the poster shows immediately, the loop cross-fades in.
+                 The same element plays a Live Photo's motion once, then fades. -->
+            <video id="previewVideo" class="preview-video hidden" muted autoplay loop playsinline preload="metadata"></video>
+            <button id="previewSoundBtn" class="preview-sound-btn hidden" type="button" title="打开声音">
+              <span class="btn-icon" data-icon="volumeOff"></span>
+            </button>
+            <button id="previewVideoPauseBtn" class="preview-video-pause hidden" type="button" title="暂停">
+              <span class="btn-icon" data-icon="pause"></span>
+            </button>
+            <!-- The Live Photo replay control: a plain play mark on the corner,
+                 the same shape as the one a video card carries. -->
+            <button id="previewLiveBtn" class="preview-live-btn hidden" type="button" title="播放实况">
+              <span class="btn-icon" data-icon="play"></span>
+            </button>
+          </div>
         </div>
         <div id="previewInfo" class="preview-info"></div>
       </div>
@@ -359,27 +364,25 @@
             <label>索引线程数
               <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
             </label>
-            <label class="checkbox-row full-row">
-              <input id="setMergeLivePhotos" type="checkbox" />
-              <span>合并显示实况照片（重新整理后生效）</span>
-            </label>
           </div>
 
           <h3 class="settings-subtitle">实况照片</h3>
-          <p class="settings-hint">打开详情页时会自动播放一小段动态，播完淡回静止画面。0% 即静音播放。</p>
           <div class="form-grid">
-            <label class="full-row">实况音量
-              <span class="range-row">
-                <input id="setLiveVolume" type="range" min="0" max="100" step="5" />
-                <span class="range-value" id="setLiveVolumeValue">0%</span>
-              </span>
+            <div class="volume-editor full-row" data-volume-key="live">
+              <span class="volume-editor-label">实况音量</span>
+              <input id="setLiveVolume" class="volume-range" type="range" min="0" max="100" step="1" value="0" />
+              <input id="setLiveVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
+            </div>
+            <label class="checkbox-row full-row">
+              <input id="setMergeLivePhotos" type="checkbox" />
+              <span>合并显示实况照片（重新整理后生效）</span>
             </label>
           </div>
         </section>
 
         <section class="settings-pane" id="tabVideo" role="tabpanel"
                  aria-labelledby="tabBtnVideo" data-pane="video" hidden>
-          <p class="settings-hint">详情页会播放一小段预览，全屏才是原片。预览越小越快，也越省缓存。</p>
+          <p class="settings-hint">详情页播放预览，全屏播放原片。预览越小处理越快，也越省缓存。</p>
           <div class="form-grid">
             <label>预览时长（秒）
               <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
@@ -400,19 +403,18 @@
                 <option value="loop">循环播放</option>
               </select>
             </label>
-            <label>预览音量
-              <span class="range-row">
-                <input id="setVideoPreviewVolume" type="range" min="0" max="100" step="5" />
-                <span class="range-value" id="setVideoPreviewVolumeValue">50%</span>
-              </span>
-            </label>
+            <div class="volume-editor full-row" data-volume-key="video">
+              <span class="volume-editor-label">预览音量</span>
+              <input id="setVideoPreviewVolume" class="volume-range" type="range" min="0" max="100" step="1" value="50" />
+              <input id="setVideoPreviewVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
+            </div>
             <label class="checkbox-row full-row">
               <input id="setVideoClipAudio" type="checkbox" />
-              <span>预览带音轨（仍然默认静音播放）</span>
+              <span>预览片段附带音轨（默认仍静音）</span>
             </label>
             <label class="checkbox-row full-row">
               <input id="setVideoPregenerate" type="checkbox" />
-              <span>索引时就生成预览（首次打开更快，扫描更慢）</span>
+              <span>索引时生成预览片段（首次打开更快，扫描更慢）</span>
             </label>
             <div class="full-row settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
           </div>

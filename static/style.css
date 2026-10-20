@@ -221,21 +221,75 @@ svg {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
+/* 重新整理全部 sits between two buttons, so it is drawn as one: same height,
+   same border, same radius. Without the frame it read as loose text floating in
+   the toolbar. */
 .force-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  color: var(--muted);
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-secondary);
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  transition: color .2s;
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-md);
+  transition: color .2s, background-color .2s, border-color .2s, box-shadow .2s;
 }
-.force-label:hover { color: var(--text); }
-.force-label input { accent-color: var(--primary); cursor: pointer; }
+
+.force-label:hover {
+  color: var(--text);
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(60, 40, 20, 0.07);
+}
+
+/* A small check square rather than a switch: this one is an option on the next
+   action, not a setting that persists. */
+.force-label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1.4px solid var(--border-strong);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: background-color .2s ease, border-color .2s ease;
+}
+
+.force-label input[type="checkbox"]:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+/* The tick: two borders rotated into a check, so there is no extra markup. */
+.force-label input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fffdf9;
+  border-width: 0 1.8px 1.8px 0;
+  transform: rotate(43deg);
+}
+
+.force-label input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(179, 129, 90, 0.28);
+}
+
+.force-label:has(input:checked) {
+  color: var(--text);
+  border-color: rgba(179, 129, 90, 0.45);
+}
 
 /* ---------- Buttons & UI Primitives ---------- */
 .btn {
@@ -919,7 +973,6 @@ select {
 .video-play-mark svg {
   width: 20px;
   height: 20px;
-  margin-left: 3px;
   transform: translateZ(0);
 }
 
@@ -969,7 +1022,7 @@ select {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(255, 254, 251, 0.9);
+  background: rgba(255, 254, 251, 0.66);
   border: 1px solid rgba(179, 125, 86, 0.3);
   box-shadow: 0 2px 8px rgba(60, 40, 20, 0.14);
   backdrop-filter: blur(6px);
@@ -979,19 +1032,13 @@ select {
   animation: liveBadgeIn .4s cubic-bezier(.34, 1.28, .64, 1) both;
 }
 
-.live-badge-ring {
-  position: absolute;
-  inset: 3.5px;
-  border-radius: 50%;
-  border: 1.4px solid var(--primary-dark);
-  opacity: .75;
-}
-
-.live-badge-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--primary);
+/* The Live Photo mark is drawn in icons.js (a dotted orbit around a ring and a
+   pupil); only its size and colour belong here. */
+.live-badge svg {
+  width: 16px;
+  height: 16px;
+  color: var(--primary-dark);
+  opacity: .9;
 }
 
 @keyframes liveBadgeIn {
@@ -1557,6 +1604,17 @@ select {
   transition: transform .2s ease;
 }
 
+/* The picture's own box. The overlay controls are positioned against this, so
+   they sit on the frame rather than in the empty margin a portrait photo leaves
+   inside the wider media column. */
+.preview-stage {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  max-height: 78vh;
+  border-radius: var(--radius-md);
+}
+
 /* ---------- Video inside the detail dialog ----------
    The poster keeps the layout: it is the element that decides the box. The clip
    is laid over it, exactly the same size, and fades in when it can play - a
@@ -1655,35 +1713,12 @@ select {
 
 /* ---------- Live Photo chip ----------
    Sits in the spec row beside the aperture and ISO badges and is drawn exactly
-   like them: same padding, same height, same border. It only *reports* that the
-   still carries motion - the replay control is the play button on the corner of
-   the picture. */
+   like them: same padding, same height, same border, and the same
+   ``var(--primary)`` tint that ``.spec-badge svg`` gives every icon in the row.
+   It only *reports* that the still carries motion - the replay control is the
+   play button on the corner of the picture. */
 .spec-badge.live-spec {
   cursor: default;
-}
-
-.live-spec-mark {
-  position: relative;
-  width: 13px;
-  height: 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1.3px solid currentColor;
-  flex: 0 0 auto;
-  opacity: .85;
-}
-
-.live-spec-mark .live-badge-ring {
-  display: none;
-}
-
-.live-spec-mark .live-badge-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
 }
 
 /* The replay button on the corner of the picture, where it has always been. */
@@ -1713,51 +1748,114 @@ select {
   transform: translateY(-2px);
 }
 
-.preview-live-mark {
-  position: relative;
-  width: 18px;
-  height: 18px;
+/* A plain play mark, nudged right so the triangle looks centred in its circle -
+   the same trick the film card's play badge uses. */
+.preview-live-btn .btn-icon,
+.preview-live-btn svg {
+  width: 17px;
+  height: 17px;
+  margin-left: 2px;
+}
+
+/* ---------- Volume editor ----------
+   The score editors' shape, reused for the two volume settings: a label, a
+   filled slider and a number box on one line. A slider alone cannot express an
+   exact "35%", and a number box alone has no feel; the pair does both. */
+.form-grid .volume-editor {
+  display: grid;
+  grid-template-columns: 68px 1fr 76px;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 0;
+  --volume-color: var(--primary);
+  --volume-glow: rgba(179, 125, 86, 0.24);
+}
+
+.form-grid .volume-editor[data-volume-key="live"] {
+  --volume-color: var(--dim-memory);
+  --volume-glow: rgba(189, 99, 113, 0.24);
+}
+
+.form-grid .volume-editor-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--volume-color);
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: rgba(247, 239, 228, 0.94);
+  white-space: nowrap;
 }
 
-.preview-live-mark .live-badge-ring {
-  inset: 3px;
-  border-width: 1.3px;
-}
-
-.preview-live-mark .live-badge-dot {
-  width: 4.5px;
-  height: 4.5px;
-}
-
-/* ---------- Sliders in the settings dialog ---------- */
-.range-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.range-row input[type="range"] {
-  flex: 1;
-  min-width: 0;
+/* The track: a filled portion on a warm rail, so the value reads from across
+   the dialog without guessing where the knob sits. */
+.form-grid input.volume-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  min-height: 6px;
+  margin: 0;
   padding: 0;
   border: none;
-  background: transparent;
-  accent-color: var(--primary);
+  border-radius: 99px;
+  background: linear-gradient(
+    to right,
+    var(--volume-color) 0%,
+    var(--volume-color) var(--volume-pct, 0%),
+    #ebe0d2 var(--volume-pct, 0%),
+    #ebe0d2 100%
+  );
+  outline: none;
   cursor: pointer;
+  transition: box-shadow .25s ease;
 }
 
-.range-value {
-  flex: 0 0 auto;
-  min-width: 42px;
-  text-align: right;
+.form-grid input.volume-range:focus-visible {
+  box-shadow: 0 0 0 3px var(--volume-glow);
+}
+
+.volume-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--volume-color);
+  box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
+  cursor: grab;
+  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+}
+
+.volume-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--volume-color);
+  box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
+  cursor: grab;
+  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+}
+
+.volume-range:active::-webkit-slider-thumb,
+.volume-range:active::-moz-range-thumb {
+  transform: scale(1.18);
+  cursor: grabbing;
+  box-shadow: 0 0 0 6px var(--volume-glow), 0 2px 6px rgba(60, 40, 20, 0.2);
+}
+
+.form-grid input.volume-number {
+  padding: 7px 6px;
+  border-radius: var(--radius-sm);
+  text-align: center;
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-weight: 600;
+  color: var(--volume-color);
+}
+
+.form-grid input.volume-number:focus {
+  border-color: var(--volume-color);
+  box-shadow: 0 0 0 3px var(--volume-glow);
 }
 
 /* ---------- Fullscreen video ---------- */
@@ -1789,29 +1887,94 @@ select {
   vertical-align: -1px;
 }
 
+/* ---------- Settings: switches ----------
+   A checkbox in a settings list is a state, not a task, and iOS draws that kind
+   of state as a switch. The native input is kept (focus, keyboard, labels, form
+   serialisation all still work) and simply made invisible; the track and knob
+   are drawn on its ::before and ::after, so there is nothing to keep in sync in
+   JavaScript. */
 .checkbox-row {
   display: flex !important;
   flex-direction: row !important;
   align-items: center;
   justify-content: flex-start;
-  gap: 9px !important;
+  gap: 11px !important;
   color: var(--text-secondary) !important;
   font-size: 13px;
   font-weight: 400 !important;
+  line-height: 1.5;
   cursor: pointer;
+  padding: 3px 0;
 }
 
-.checkbox-row input {
-  width: auto !important;
+.checkbox-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
   flex: 0 0 auto;
+  width: 40px !important;
+  height: 24px;
   margin: 0;
   padding: 0 !important;
   border: none !important;
-  accent-color: var(--primary);
+  border-radius: 999px;
+  background: rgba(120, 100, 84, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(120, 100, 84, 0.16);
+  cursor: pointer;
+  transition: background-color .3s cubic-bezier(.2,.8,.2,1),
+              box-shadow .3s cubic-bezier(.2,.8,.2,1);
+}
+
+/* The knob. Translation carries it across; a slight widening while pressed is
+   what makes the gesture feel physical. */
+.checkbox-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fffdf9;
+  box-shadow: 0 1px 3px rgba(60, 40, 20, 0.28), 0 1px 1px rgba(60, 40, 20, 0.12);
+  transition: transform .3s cubic-bezier(.2,.8,.2,1), width .2s ease;
+}
+
+.checkbox-row input[type="checkbox"]:checked {
+  background: var(--primary);
+  box-shadow: inset 0 0 0 1px rgba(140, 95, 60, 0.3);
+}
+
+.checkbox-row input[type="checkbox"]:checked::after {
+  transform: translateX(16px);
+}
+
+.checkbox-row input[type="checkbox"]:active::after {
+  width: 21px;
+}
+
+.checkbox-row input[type="checkbox"]:checked:active::after {
+  transform: translateX(13px);
+}
+
+.checkbox-row input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(179, 129, 90, 0.28);
+}
+
+.checkbox-row input[type="checkbox"]:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }
 
 .checkbox-row span {
   line-height: 1.5;
+}
+
+/* An unchecked switch is a "no", so its label leans muted; checked, it reads
+   like the value it now holds. */
+.checkbox-row:has(input:checked) {
+  color: var(--text) !important;
 }
 
 .settings-status {

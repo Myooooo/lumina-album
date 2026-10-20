@@ -12,6 +12,12 @@ window.LuminaIcons = {
   heartFilled: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>',
   // Video & sound. "play" is filled so it reads at 14px on a dark film card.
   play: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.4v13.2a1 1 0 0 0 1.53.85l9.7-6.6a1 1 0 0 0 0-1.7l-9.7-6.6A1 1 0 0 0 8 5.4Z"/></svg>',
+  // Live Photo, drawn the way iOS draws it: a dotted orbit, a ring, and a
+  // filled pupil. Three concentric gestures read as "this one moves" at any
+  // size, whereas the old two-ring mark was indistinguishable from a radio
+  // button. The dots are a single dashed circle, so the whole icon is three
+  // elements and inherits currentColor everywhere it is used.
+  live: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10.4" stroke-width="2.1" stroke-linecap="round" stroke-dasharray="0.1 3.28"/><circle cx="12" cy="12" r="6.9" stroke-width="2.2"/><circle cx="12" cy="12" r="2.9" fill="currentColor" stroke="none"/></svg>',
   pause: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="7" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.4" y="5" width="3.6" height="14" rx="1.2"/></svg>',
   volume: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6.5 8.8H3.5v6.4h3L11 19V5Z"/><path d="M15 9a4.2 4.2 0 0 1 0 6"/><path d="M17.8 6.4a8 8 0 0 1 0 11.2"/></svg>',
   volumeOff: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6.5 8.8H3.5v6.4h3L11 19V5Z"/><path d="m15.5 9.5 4.5 5"/><path d="m20 9.5-4.5 5"/></svg>',

@@ -4266,6 +4266,24 @@ class VideoPayloadTests(unittest.TestCase):
             body = resp.get_json()
             self.assertIn("job_id", body)
             self.assertIn(body["state"], ("running", "pending"))
+            # Wait for it: the job writes into the temp folder, and tearing the
+            # fixture down underneath a running ffmpeg turns an unrelated test's
+            # cleanup into a PermissionError on Windows.
+            self._drain_job(body["job_id"])
+
+    def _drain_job(self, job_id: str, timeout: float = 30.0) -> None:
+        from photo_reviewer.scanner import JOBS
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            job = JOBS.get(job_id)
+            if job is None or getattr(job, "status", "") in (
+                "completed",
+                "error",
+                "cancelled",
+            ):
+                return
+            time.sleep(0.05)
 
     def test_the_cache_sweep_keeps_derived_video_files(self) -> None:
         """Cleanup must not delete a preview that a row still points at."""

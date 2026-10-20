@@ -23,7 +23,12 @@ const state = {
   //: ``find`` for every click, every favourite toggle and every card render.
   photoById: new Map(),
   //: Ids whose detail payload (EXIF, raw size) has already been fetched.
-  detailFetched: new Set(),
+  //: ``id -> detail payload`` (EXIF, raw size, video info). Kept beside the
+  //: rows so a background poll, which rebuilds them from the list, cannot lose
+  //: what the dialog needs.
+  details: new Map(),
+  //: Ids with a detail request in flight, so a fast double-click asks once.
+  detailRequested: new Set(),
   //: Length of the video preview clip, filled from /api/config so the dialog
   //: label matches what the server actually produced.
   videoClipSeconds: 3,
@@ -118,8 +123,14 @@ function indexPhotos(list) {
   const map = new Map();
   const positions = new Map();
   for (let i = 0; i < list.length; i += 1) {
-    map.set(list[i].id, list[i]);
-    positions.set(list[i].id, i);
+    const row = list[i];
+    // The list payload carries no EXIF or video metadata on purpose. A row that
+    // has been opened before gets its detail payload put back here, so a poll
+    // or a filter change cannot make the parameters disappear.
+    const detail = state.details.get(row.id);
+    if (detail) applyPhotoDetail(row, detail);
+    map.set(row.id, row);
+    positions.set(row.id, i);
   }
   state.photoById = map;
   state.photoIndex = positions;
@@ -349,18 +360,10 @@ function fmtSize(bytes) {
   return (bytes / 1024 / 1024 / 1024).toFixed(2) + " GB";
 }
 
-/**
- * Set a range input and keep its live percentage label in step.
- *
- * The slider itself carries no visible number, so the little "50%" beside it is
- * the only feedback while dragging.
- */
-function setRangeValue(id, value) {
-  const input = $(id);
-  if (!input) return;
-  input.value = String(value);
-  const label = $(`${id}Value`);
-  if (label) label.textContent = `${input.value}%`;
+/** Write a volume setting into both of its inputs. */
+function setVolume(key, value) {
+  const editor = VOLUME_EDITORS.find((row) => row.key === key);
+  if (editor) setVolumeValue(editor, value);
 }
 
 /**
@@ -428,9 +431,7 @@ function videoDurationBadge(photo) {
  */
 function liveBadgeHtml(photo) {
   if (!photo.has_live) return "";
-  return `<span class="live-badge" title="实况照片，详情页可以播放">
-    <span class="live-badge-ring"></span><span class="live-badge-dot"></span>
-  </span>`;
+  return `<span class="live-badge" title="实况照片，详情页可以播放">${ICONS.live}</span>`;
 }
 
 /**
@@ -874,7 +875,7 @@ function applyQuietRefresh(nextPhotos) {
       if (!old || !fresh) continue;
       // The detail extras (EXIF, raw size) may have just arrived with the
       // analysis, so the next dialog open re-fetches them.
-      state.detailFetched.delete(id);
+      invalidatePhotoDetail(id);
       // Keep the object identity: the card's DOM was built from this row.
       Object.assign(old, fresh);
       refreshCard(id);
@@ -1974,7 +1975,7 @@ async function reanalyze(id) {
       } else {
         // Same row, new contents: one card is repainted, the grid is not.
         Object.assign(state.photos[idx], updated);
-        state.detailFetched.delete(id);
+        invalidatePhotoDetail(id);
         refreshCard(id);
       }
     }
@@ -2262,7 +2263,7 @@ async function reanalyzeSelected(ids) {
             removePhotoRows([ids[i]]);
           } else {
             Object.assign(state.photos[idx], updated);
-            state.detailFetched.delete(ids[i]);
+            invalidatePhotoDetail(ids[i]);
             refreshCard(ids[i]);
           }
         }
@@ -2383,7 +2384,7 @@ async function waitForVideoJob(jobId, photoId) {
       return;
     }
     if (status.status === "completed") {
-      state.detailFetched.delete(photoId);
+      invalidatePhotoDetail(photoId);
       if (video) {
         video.src = `/api/video/${photoId}/playable`;
         video.load();
@@ -2455,34 +2456,83 @@ function openPreview(id) {
  * immediately from the row it already has and repaints once this lands; the
  * result is written back into the row so re-opening the photo costs nothing.
  */
+/**
+ * Fetch the detail-only extras (EXIF, raw size) for the photo on screen.
+ *
+ * They used to ride along with every list row, which cost ~30% of the payload
+ * and one `os.path.getsize` per photo on the album drive. The dialog paints
+ * immediately from the row it already has and repaints once this lands.
+ *
+ * The payload is kept in ``state.details`` rather than only written onto the
+ * row, because a background poll rebuilds the row objects from the list - which
+ * deliberately carries no EXIF. Writing it onto the old object alone meant the
+ * parameters vanished and never came back: the fetch was remembered as done, so
+ * nothing ever asked for them again until the page was reloaded. The cache is
+ * re-applied whenever the rows are rebuilt.
+ */
 async function ensurePhotoDetail(id) {
   const photo = photoById(id);
-  if (!photo || state.detailFetched.has(id)) return;
-  state.detailFetched.add(id);
+  if (!photo) return;
+  if (state.details.has(id)) {
+    applyPhotoDetail(photo, state.details.get(id));
+    return;
+  }
+  if (state.detailRequested.has(id)) return;
+  state.detailRequested.add(id);
   try {
     const detail = await api(`/api/photo/${id}/detail`);
+    state.details.set(id, detail);
     const target = photoById(id);
-    if (!target) return;
-    Object.assign(target, {
-      exif: detail.exif || {},
-      raw_size: detail.raw_size,
-      width: detail.width,
-      height: detail.height,
-      size: detail.size,
-      media_kind: detail.media_kind || target.media_kind,
-      duration_ms: detail.duration_ms,
-      video_info: detail.video_info || {},
-      has_live: detail.has_live,
-      play_state: detail.play_state,
-      ffmpeg: detail.ffmpeg,
-    });
-    if (detail.location) target.location = detail.location;
+    if (target) applyPhotoDetail(target, detail);
     if (state.currentPreviewId === id) updatePreview({ skipImage: true });
   } catch (e) {
     // The row still renders; only the specs row stays empty until a retry.
-    state.detailFetched.delete(id);
+    state.detailRequested.delete(id);
     console.warn("读取照片详情失败", e);
   }
+}
+
+/** Merge one detail payload into a list row. */
+function applyPhotoDetail(row, detail) {
+  const mediaKind = detail.media_kind || row.media_kind;
+  Object.assign(row, {
+    exif: detail.exif || {},
+    raw_size: detail.raw_size,
+    width: detail.width,
+    height: detail.height,
+    size: detail.size,
+    media_kind: mediaKind,
+    duration_ms: detail.duration_ms,
+    video_info: detail.video_info || {},
+    has_live: detail.has_live,
+    play_state: detail.play_state,
+    ffmpeg: detail.ffmpeg,
+  });
+  if (detail.location) row.location = detail.location;
+  return row;
+}
+
+/** Forget a photo's detail payload so the next open fetches it again. */
+function invalidatePhotoDetail(id) {
+  state.details.delete(id);
+  state.detailRequested.delete(id);
+  const row = photoById(id);
+  if (row) {
+    // Keep the row renderable in the meantime: an empty EXIF block is honest,
+    // a stale one would show wrong camera data while the refetch is in flight.
+    row.exif = {};
+    row.video_info = {};
+  }
+}
+
+/**
+ * Drop every cached payload for the photos in ``ids``.
+ *
+ * Called after an edit or a re-analysis: the server may have changed what the
+ * detail endpoint would answer, and the list row only carries the visible part.
+ */
+function invalidatePhotoDetails(ids) {
+  for (const id of ids) invalidatePhotoDetail(id);
 }
 
 /* ==========================================================================
@@ -2553,7 +2603,13 @@ function applyPreviewMedia(photo, options = {}) {
       soundBtn.classList.remove("hidden");
       paintSoundButton();
     }
+    // The play/pause control stays on screen for a video whatever the preview
+    // mode is: "不播放" and "播放一次" both stop on their own, and the button is
+    // the only way back into the clip.
+    const pause = $("previewVideoPauseBtn");
+    if (pause) pause.classList.remove("hidden");
     playPreviewClip(photo);
+    paintPauseButton();
     return;
   }
 
@@ -2568,23 +2624,26 @@ function applyPreviewMedia(photo, options = {}) {
 }
 
 /** Load and start the preview for ``photo``, honouring the preview settings. */
-function playPreviewClip(photo) {
+function playPreviewClip(photo, options = {}) {
   const video = $("previewVideo");
   if (!video) return;
   const pause = $("previewVideoPauseBtn");
   const wanted = `/api/video/${photo.id}/clip`;
   video.dataset.photoId = String(photo.id);
 
-  // "不播放" leaves the poster alone; the sound button still works, because
-  // pressing play is then the user's own decision.
-  if (state.videoPreviewMode === "off") {
+  // "不播放" leaves the poster alone until the user presses play. The button
+  // stays visible for exactly that reason.
+  if (state.videoPreviewMode === "off" && !options.force) {
     video.classList.add("hidden");
-    if (pause) pause.classList.add("hidden");
+    if (pause) pause.classList.remove("hidden");
+    paintPauseButton();
     return;
   }
 
   video.muted = !previewSoundOn;
-  video.volume = Math.max(0, Math.min(1, (Number(state.videoPreviewVolume) || 0) / 100));
+  video.volume = volumeFraction();
+  // A manual start while the mode is "once" still plays a single pass; only
+  // "loop" repeats.
   video.loop = state.videoPreviewMode === "loop";
   video.classList.add("hidden");
   video.src = wanted;
@@ -2595,26 +2654,20 @@ function playPreviewClip(photo) {
     const played = video.play();
     if (played && typeof played.catch === "function") {
       // Autoplay can still be refused (a strict browser profile); the poster
-      // stays visible and the pause button is meaningless, so hide it.
+      // stays and the button falls back to "play", which is what it now is.
       played.catch(() => {
         video.classList.add("hidden");
-        if (pause) pause.classList.add("hidden");
+        paintPauseButton();
       });
     }
+    paintPauseButton();
   };
   video.addEventListener("canplay", onReady, { once: true });
-  if (!video.loop) {
-    // A one-shot preview leaves its last frame on screen - the dialog reads as
-    // a still again instead of a paused video player.
-    video.addEventListener(
-      "ended",
-      () => {
-        if (video.dataset.photoId !== String(photo.id)) return;
-        if (pause) pause.classList.add("hidden");
-      },
-      { once: true }
-    );
-  }
+  // Both endings leave the button showing "play" again; the clip itself stays
+  // on its last frame so the dialog still shows a picture.
+  video.addEventListener("ended", paintPauseButton, { once: true });
+  video.addEventListener("pause", paintPauseButton);
+  video.addEventListener("play", paintPauseButton);
   video.addEventListener(
     "error",
     () => {
@@ -2625,10 +2678,18 @@ function playPreviewClip(photo) {
       if (!current || current !== wanted) return;
       // No ffmpeg, or a codec ffmpeg could not read: keep the poster.
       video.classList.add("hidden");
-      if (pause) pause.classList.add("hidden");
+      paintPauseButton();
     },
     { once: true }
   );
+}
+
+/** The preview volume, as a 0-1 fraction the media element understands. */
+function volumeFraction(value) {
+  const raw = value === undefined ? state.videoPreviewVolume : value;
+  const percent = Number(raw);
+  if (!Number.isFinite(percent)) return 0;
+  return Math.max(0, Math.min(1, percent / 100));
 }
 
 function paintSoundButton() {
@@ -2645,20 +2706,46 @@ function togglePreviewSound() {
   previewSoundOn = !previewSoundOn;
   paintSoundButton();
 }
+/** Draw the play/pause mark to match what the element is actually doing. */
+function paintPauseButton() {
+  const video = $("previewVideo");
+  const btn = $("previewVideoPauseBtn");
+  if (!btn) return;
+  // An element with no source still reports ``paused === false`` in some
+  // browsers, which would draw a pause mark over a clip nobody started.
+  const hasSource = !!video && !!video.getAttribute("src");
+  const playing = hasSource && !video.paused && !video.ended;
+  btn.innerHTML = `<span class="btn-icon">${playing ? ICONS.pause : ICONS.play}</span>`;
+  btn.title = playing ? "暂停" : "播放";
+}
 
-function togglePreviewPause() {
+/**
+ * Start or stop the preview by hand.
+ *
+ * The button is always on screen for a video, in every preview mode: with the
+ * preview set to 不播放 or 播放一次 the clip stops on its own, and without a
+ * control there would be no way to see it again short of leaving the dialog.
+ * When nothing is loaded yet, the press loads the clip.
+ */
+function togglePreviewPause(photo) {
   const video = $("previewVideo");
   const btn = $("previewVideoPauseBtn");
   if (!video || !btn) return;
+  const id = state.currentPreviewId;
+  if (!id) return;
+  const loaded = (video.getAttribute("src") || "").length > 0;
+  if (!loaded) {
+    // Nothing has been requested yet (preview off, or it never started).
+    const target = photo || photoById(id);
+    if (target) playPreviewClip(target, { force: true });
+    return;
+  }
   if (video.paused) {
-    video.play();
-    btn.innerHTML = `<span class="btn-icon">${ICONS.pause}</span>`;
-    btn.title = "暂停";
+    video.play().catch(() => {});
   } else {
     video.pause();
-    btn.innerHTML = `<span class="btn-icon">${ICONS.play}</span>`;
-    btn.title = "播放";
   }
+  paintPauseButton();
 }
 
 /**
@@ -2884,7 +2971,7 @@ function updatePreview(options = {}) {
       // play button's job, on the corner of the picture.
       specItems.push(`
         <div class="spec-badge live-spec" title="实况照片：这张照片带一段动态">
-          <span class="live-spec-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
+          ${ICONS.live}
           <span class="spec-val">Live</span>
         </div>
       `);
@@ -3150,8 +3237,8 @@ async function openSettings() {
     $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
     $("setMergeLivePhotos").checked = cfg.merge_live_photos !== false;
     setSelectValue($("setVideoPreviewMode"), cfg.video_preview_mode || "once");
-    setRangeValue("setVideoPreviewVolume", cfg.video_preview_volume ?? 50);
-    setRangeValue("setLiveVolume", cfg.live_volume ?? 0);
+    setVolume("video", cfg.video_preview_volume ?? 50);
+    setVolume("live", cfg.live_volume ?? 0);
     state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
     state.videoPreviewMode = cfg.video_preview_mode || "once";
     state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
@@ -3193,8 +3280,8 @@ async function saveSettings() {
     video_pregenerate: $("setVideoPregenerate").checked,
     merge_live_photos: $("setMergeLivePhotos").checked,
     video_preview_mode: $("setVideoPreviewMode").value,
-    video_preview_volume: parseInt($("setVideoPreviewVolume").value, 10) || 0,
-    live_volume: parseInt($("setLiveVolume").value, 10) || 0,
+    video_preview_volume: clampVolume($("setVideoPreviewVolume").value),
+    live_volume: clampVolume($("setLiveVolume").value),
   };
   try {
     await api("/api/config", {
@@ -3224,6 +3311,62 @@ const SCORE_EDITORS = [
   { key: "memory", numberId: "editMemory", rangeId: "editMemoryRange" },
   { key: "uniqueness", numberId: "editUniqueness", rangeId: "editUniquenessRange" },
 ];
+
+/**
+ * Volume rows in the settings dialog.
+ *
+ * Same shape as the score editors: a label, a themed slider and a number box
+ * that stay in step, so a value can be dragged for feel or typed for precision.
+ */
+const VOLUME_EDITORS = [
+  { key: "video", rangeId: "setVideoPreviewVolume", numberId: "setVideoPreviewVolumeNumber" },
+  { key: "live", rangeId: "setLiveVolume", numberId: "setLiveVolumeNumber" },
+];
+
+function clampVolume(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(num)));
+}
+
+/** Paint the slider's filled portion. */
+function paintVolumeRange(rangeEl, value) {
+  if (!rangeEl) return;
+  rangeEl.style.setProperty("--volume-pct", `${clampVolume(value)}%`);
+}
+
+/** Write one volume to both inputs of its row. */
+function setVolumeValue(editor, value, source) {
+  const rounded = clampVolume(value);
+  const rangeEl = $(editor.rangeId);
+  const numberEl = $(editor.numberId);
+  if (rangeEl && source !== "range") rangeEl.value = String(rounded);
+  if (numberEl && source !== "number") numberEl.value = String(rounded);
+  paintVolumeRange(rangeEl, rounded);
+}
+
+function initVolumeEditors() {
+  for (const editor of VOLUME_EDITORS) {
+    const rangeEl = $(editor.rangeId);
+    const numberEl = $(editor.numberId);
+    if (!rangeEl || !numberEl) continue;
+    rangeEl.addEventListener("input", () => {
+      setVolumeValue(editor, rangeEl.value, "range");
+    });
+    numberEl.addEventListener("input", () => {
+      // Keep typing usable: only mirror once the value parses.
+      if (numberEl.value === "" || numberEl.value === "-") return;
+      const parsed = parseFloat(numberEl.value);
+      if (!Number.isFinite(parsed)) return;
+      paintVolumeRange(rangeEl, parsed);
+      if (clampVolume(parsed) === parsed) rangeEl.value = String(clampVolume(parsed));
+    });
+    numberEl.addEventListener("blur", () => {
+      // Typing "250" is clamped on the way out rather than under the cursor.
+      setVolumeValue(editor, numberEl.value);
+    });
+  }
+}
 
 function clampScore(value, fallback = 0) {
   const num = Number(value);
@@ -3335,7 +3478,7 @@ async function saveEditedPhoto() {
     if (idx >= 0 && updated) {
       // A hand-edit rewrites one row; repaint that card, not the whole grid.
       Object.assign(state.photos[idx], updated);
-      state.detailFetched.delete(id);
+      invalidatePhotoDetail(id);
       refreshCard(id);
     }
     if (state.currentPreviewId === id) updatePreview({ skipImage: true });
@@ -3366,7 +3509,8 @@ async function removeCurrentFolder() {
     state.folder = "";
     indexPhotos([]);
     state.selected.clear();
-    state.detailFetched.clear();
+    state.details.clear();
+    state.detailRequested.clear();
     state.folder = await selectBestFolder();
     saveUiState({ folder: state.folder });
     $("folderInput").value = state.folder;
@@ -4157,7 +4301,7 @@ function init() {
   });
   $("previewVideoPauseBtn").addEventListener("click", (e) => {
     e.stopPropagation();
-    togglePreviewPause();
+    togglePreviewPause(photoById(state.currentPreviewId));
   });
   $("previewInfo").addEventListener("click", handlePreviewInfoClick);
   $("previewLiveBtn").addEventListener("click", (e) => {
@@ -4258,6 +4402,7 @@ function init() {
   $("editSaveBtn").addEventListener("click", saveEditedPhoto);
   $("editCancelBtn").addEventListener("click", () => closeModal("editModal"));
   initScoreEditors();
+  initVolumeEditors();
   $("emptyTrashBtn").addEventListener("click", emptyTrash);
   document.querySelectorAll(".preset-btn").forEach((btn) => {
     btn.addEventListener("click", () => handlePromptPresetClick(btn.dataset.preset));

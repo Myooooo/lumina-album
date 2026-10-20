@@ -405,8 +405,8 @@ def _remove_photo_cache(photo: dict[str, Any]) -> None:
 #: search indexer and Explorer's preview handler all open files briefly, and a
 #: delete that lands in that window fails with WinError 32 rather than because
 #: anything is actually wrong.
-_REMOVE_ATTEMPTS = 4
-_REMOVE_BACKOFF = 0.08
+_REMOVE_ATTEMPTS = 6
+_REMOVE_BACKOFF = 0.12
 
 
 def _remove_file(path: str) -> None:
