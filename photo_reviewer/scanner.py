@@ -15,7 +15,7 @@ from pathlib import Path
 from . import video
 from .cache import cleanup_folder_cache, ensure_cache_dirs
 from .config import Config
-from .db import Database, utc_now
+from .db import Database
 from .exif import extract_exif
 from .geocode import geocoding_enabled, reverse_geocode
 from .paths import canonical_path
@@ -28,6 +28,7 @@ from .pipeline import (
     prepare_for_analysis,
     prepare_proxy,
     prepare_video,
+    prepared_from_row,
 )
 
 IMAGE_EXTENSIONS = (
@@ -177,6 +178,7 @@ def discover_photo_pairs(
     raw_extensions: set | None = None,
     skip_dirs=None,
     video_extensions=None,
+    merge_live: bool = True,
 ) -> list[tuple[str, str | None]]:
     """Return ``(image_path, raw_sibling_or_None)`` for every item to index.
 
@@ -187,10 +189,10 @@ def discover_photo_pairs(
     A raw file without a same-named counterpart is indexed on its own; it is
     rendered from its embedded JPEG preview.
 
-    Videos are their own items. The single exception is a Live Photo, where the
-    iPhone writes ``IMG_1234.HEIC`` next to ``IMG_1234.MOV``: the movie is the
-    moving part of that still rather than a second memory, so the still is what
-    gets indexed and ``livephoto.detect`` finds the movie beside it later.
+    Videos are their own items. The exception is a Live Photo, where the iPhone
+    writes ``IMG_1234.HEIC`` next to ``IMG_1234.MOV``: with ``merge_live`` on,
+    the movie is the moving part of that still and only the still is indexed;
+    with it off, the two are separate items so the user can see both.
 
     Files whose name starts with ``._`` are skipped: those are macOS
     AppleDouble resource forks (``._DSC_0001.NEF``), not photographs. They
@@ -246,7 +248,11 @@ def discover_photo_pairs(
         image = entry.get("image")
         raw = entry.get("raw")
         clip = entry.get("video")
-        if image:
+        if image and clip and not merge_live:
+            # Split view: the movie is a memory of its own.
+            pairs.append((image, raw))
+            pairs.append((clip, None))
+        elif image:
             pairs.append((image, raw))
         elif raw:
             # Raw file with no same-named image: it becomes the photo itself.
@@ -387,14 +393,20 @@ def _analyze_one(image_path: str, folder: str, db: Database, config: Config) -> 
     """Analyze one photo and persist the result; errors are recorded per photo."""
     try:
         existing = db.get_photo_by_path(image_path)
-        prepared = prepare_for_analysis(
-            image_path,
-            folder,
-            config,
-            existing.get("location") if existing else None,
-            raw_path=existing.get("raw_path") if existing else None,
-            already_geocoded=bool(existing and existing.get("geocoded")),
-        )
+        if existing and (existing.get("media_kind") or "photo") == "video":
+            # A video is read from the poster frame that indexing already
+            # produced: there is nothing to decode and no reason to touch the
+            # movie itself.
+            prepared = prepared_from_row(existing)
+        else:
+            prepared = prepare_for_analysis(
+                image_path,
+                folder,
+                config,
+                existing.get("location") if existing else None,
+                raw_path=existing.get("raw_path") if existing else None,
+                already_geocoded=bool(existing and existing.get("geocoded")),
+            )
         if existing:
             db.update_exif(existing["id"], prepared.location, prepared.exif)
         result = analyze_prepared(prepared, config)
@@ -439,17 +451,21 @@ def _index_one(
                 exif["geocoded"] = True
             prepared.location = location
             prepared.exif = exif or {}
-        if prepared.media_kind == "video":
-            # Videos are not sent to the model, so they never pass through the
-            # pending -> analyzed transition: they belong in "已收录" the moment
-            # they are indexed.
-            status = "analyzed"
-        else:
-            status = existing.get("status") if existing else "pending"
+        # A video is analysed from its poster frame, so it walks the same
+        # pending -> analyzed path as a photo. Once it has a poster it is just a
+        # picture as far as the rest of the pipeline is concerned.
+        has_picture = bool(prepared.thumb_path or prepared.proxy_path)
+        status = existing.get("status") if existing else "pending"
+        if prepared.media_kind == "video" and not has_picture:
+            # No ffmpeg, so there is nothing to send: keep it out of the queue
+            # rather than failing it on every scan.
+            status = "error"
         record = base_record(prepared, existing=existing, status=status)
-        if prepared.media_kind == "video":
-            record["analyzed_at"] = (existing or {}).get("analyzed_at") or utc_now()
-            record["error"] = None
+        # Written unconditionally: turning "合并显示实况照片" off has to be able to
+        # *clear* a live_path an earlier scan attached.
+        record["live_path"] = prepared.live_path
+        if prepared.media_kind == "video" and not has_picture:
+            record["error"] = "未安装 ffmpeg 或无法读取封面，暂时无法解读这段视频。"
         record["geocoded"] = 1 if geocoded else 0
         if refresh_exif and prepared.media_kind != "video":
             record["location"] = prepared.location
@@ -630,6 +646,7 @@ def _scan_worker(
             config.raw_extensions,
             skip_dirs=skip_dirs,
             video_extensions=config.video_extensions,
+            merge_live=config.merge_live_photos,
         )
         if only_paths is not None:
             # Keep the primary file of each group plus its raw sibling, so a
@@ -757,6 +774,7 @@ def _rebuild_worker(
             config.raw_extensions,
             skip_dirs=skip_dirs,
             video_extensions=config.video_extensions,
+            merge_live=config.merge_live_photos,
         )
         images = [image_path for image_path, _raw in pairs]
         current_set = set(images)
@@ -854,14 +872,17 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
 
     folder = photo.get("folder") or os.path.dirname(image_path)
     try:
-        prepared = prepare_for_analysis(
-            image_path,
-            folder,
-            config,
-            photo.get("location"),
-            raw_path=photo.get("raw_path"),
-            already_geocoded=bool(photo.get("geocoded")),
-        )
+        if (photo.get("media_kind") or "photo") == "video":
+            prepared = prepared_from_row(photo)
+        else:
+            prepared = prepare_for_analysis(
+                image_path,
+                folder,
+                config,
+                photo.get("location"),
+                raw_path=photo.get("raw_path"),
+                already_geocoded=bool(photo.get("geocoded")),
+            )
         # Sync metadata first so camera/EXIF/location are refreshed even if
         # the model call fails afterwards.
         db.update_exif(photo_id, prepared.location, prepared.exif)

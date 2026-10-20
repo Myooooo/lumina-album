@@ -58,6 +58,7 @@ PERSISTED_FIELDS = (
     "video_clip_audio",
     "video_pregenerate",
     "video_poster_ratio",
+    "merge_live_photos",
 )
 
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
@@ -235,7 +236,7 @@ class Config:
     # decide how long it is and how hard it is compressed. They are editable
     # from the settings dialog because the right answer depends on the machine.
     video_clip_seconds: float = field(
-        default_factory=lambda: float(os.getenv("PHOTO_VIDEO_CLIP_SECONDS", "5"))
+        default_factory=lambda: float(os.getenv("PHOTO_VIDEO_CLIP_SECONDS", "3"))
     )
     video_clip_max_edge: int = field(
         default_factory=lambda: int(os.getenv("PHOTO_VIDEO_CLIP_MAX_EDGE", "960"))
@@ -250,6 +251,12 @@ class Config:
     #: ~200 ms per video up front, and makes the first click instant.
     video_pregenerate: bool = field(
         default_factory=lambda: _env_bool("PHOTO_VIDEO_PREGENERATE", False)
+    )
+    #: Show a Live Photo as one item (photo with its motion attached) or as two
+    #: (the still and the movie side by side). Read at scan time, so changing it
+    #: takes effect on the next "重新整理".
+    merge_live_photos: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_MERGE_LIVE_PHOTOS", True)
     )
     #: Where the poster frame is taken from, as a fraction of the duration.
     video_poster_ratio: float = field(
@@ -295,6 +302,7 @@ class Config:
             "video_clip_audio": self.video_clip_audio,
             "video_pregenerate": self.video_pregenerate,
             "video_poster_ratio": self.video_poster_ratio,
+            "merge_live_photos": self.merge_live_photos,
         }
 
 

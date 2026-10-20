@@ -26,7 +26,7 @@ const state = {
   detailFetched: new Set(),
   //: Length of the video preview clip, filled from /api/config so the dialog
   //: label matches what the server actually produced.
-  videoClipSeconds: 5,
+  videoClipSeconds: 3,
   //: ``id -> position`` in ``state.photos``, for the few callers that splice by
   //: index instead of by row.
   photoIndex: new Map(),
@@ -302,6 +302,7 @@ function applyStatFilter(filter) {
 }
 
 const FILTER_DEFAULTS = {
+  kind: "",
   min_score: "",
   sort: "score_desc",
   tag: "",
@@ -312,6 +313,7 @@ const FILTER_DEFAULTS = {
 
 function currentFilterValue(key) {
   switch (key) {
+    case "kind": return $("kindFilter").value;
     case "min_score": return $("minScoreFilter").value;
     case "sort": return $("sortFilter").value;
     case "tag": return $("tagFilter").value;
@@ -408,48 +410,51 @@ function liveBadgeHtml(photo) {
 }
 
 /**
- * The technical rows for a video: runtime, codec, frame rate, bitrates.
+ * The extra metadata rows a video needs.
  *
- * Built as plain rows so they line up with the size and path rows above, and
- * skipped entirely for anything that is empty - a container that never stored
- * its bitrate should not print a dash where a number belongs.
+ * The four headline numbers (resolution, codec, bitrate, frame rate) sit in the
+ * spec-badge row above, next to the camera and aperture chips of a photo. What
+ * is left is folded into two rows - the rest of the video track, and the audio
+ * track - so the list does not turn into a wall of one-value-per-line.
+ *
+ * Rows carry an icon and a value only: the icon already says what the number
+ * is, and a repeated word beside every value reads as clutter.
  */
 function videoDetailRows(photo) {
-  if (photo.media_kind !== "video") {
-    if (!photo.has_live) return "";
-    return `
-      <div class="meta-item-row" title="实况视频">
-        ${ICONS.video}
-        <div class="meta-content">这张照片带一段实况短片，点画面下方的「实况」播放</div>
-      </div>
-    `;
-  }
+  if (photo.media_kind !== "video") return "";
   const info = photo.video_info || {};
-  const rows = [];
-  // Video rows name what they show. The photo rows above rely on their icons
-  // because "文件大小" is obvious from a scale icon; "编码" and "帧率" are not.
-  const push = (icon, label, value) => {
-    if (!value) return;
-    rows.push(`
-      <div class="meta-item-row" title="${escapeHtml(label)}：${escapeHtml(value)}">
-        ${icon}
-        <div class="meta-content"><span class="meta-label">${escapeHtml(label)}</span>${escapeHtml(value)}</div>
-      </div>
-    `);
-  };
 
-  push(ICONS.hourglass, "时长", formatDuration(photo.duration_ms));
-  push(ICONS.video, "编码", [info.video_codec, info.video_profile].filter(Boolean).join(" · "));
-  push(ICONS.imageSize, "帧率", formatFps(info.fps));
-  push(ICONS.fileSize, "视频码率", formatBitrate(info.video_bitrate));
-  const audio = info.has_audio
-    ? [info.audio_codec, formatBitrate(info.audio_bitrate)].filter(Boolean).join(" · ")
-    : "无音轨";
-  push(ICONS.volume, "音频", audio);
+  const videoParts = [];
+  const duration = formatDuration(photo.duration_ms);
+  if (duration) videoParts.push(duration);
   if (info.container) {
-    push(ICONS.archive, "封装格式", String(info.container).replace(/^\./, "").toUpperCase());
+    videoParts.push(String(info.container).replace(/^\./, "").toUpperCase());
   }
-  return rows.join("");
+
+  const audioParts = [];
+  if (info.has_audio) {
+    if (info.audio_codec) audioParts.push(info.audio_codec);
+    const audioBitrate = formatBitrate(info.audio_bitrate);
+    if (audioBitrate) audioParts.push(audioBitrate);
+    if (Number(info.audio_channels) > 0) {
+      audioParts.push(`${info.audio_channels} 声道`);
+    }
+  } else {
+    audioParts.push("无音轨");
+  }
+
+  const row = (icon, title, text) =>
+    text
+      ? `<div class="meta-item-row" title="${escapeHtml(title)}">
+          ${icon}
+          <div class="meta-content">${escapeHtml(text)}</div>
+        </div>`
+      : "";
+
+  return (
+    row(ICONS.hourglass, "时长与封装", videoParts.join(" · ")) +
+    row(ICONS.volume, "音频", audioParts.join(" · "))
+  );
 }
 
 function escapeHtml(s) {
@@ -671,6 +676,8 @@ function getFilterParams(offset = 0) {
   if (fav) params.set("favorite", fav);
   const year = $("yearFilter").value;
   if (year) params.set("year", year);
+  const kind = $("kindFilter").value;
+  if (kind) params.set("kind", kind);
   const sort = $("sortFilter").value;
   params.set("sort", sort);
   const search = $("searchInput").value.trim();
@@ -972,9 +979,10 @@ function cardHtml(photo) {
         ${rawBadge}
         ${liveBadgeHtml(photo)}
         <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" />${
-          isVideo ? `<span class="video-play-mark">${ICONS.play || ""}</span>` : ""
+          isVideo
+            ? `<span class="video-play-mark">${ICONS.play || ""}</span>${videoDurationBadge(photo)}`
+            : ""
         }</div>
-        ${videoDurationBadge(photo)}
         <div class="polaroid-body">
           ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
           ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
@@ -1557,20 +1565,20 @@ function smoothEta(seconds) {
   return previous + (seconds - previous) * ETA_DISPLAY_ALPHA;
 }
 
-/** How a duration reads at a glance: "剩 12 秒" / "剩 3 分 20 秒" / "剩 1 小时 5 分". */
+/** How a duration reads at a glance: "预计 12 秒" / "预计 3 分 20 秒". */
 function formatEta(seconds) {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "";
   const total = Math.max(0, Math.round(seconds));
   if (total < 5) return "即将完成";
-  if (total < 60) return `剩 ${total} 秒`;
+  if (total < 60) return `预计 ${total} 秒`;
   if (total < 3600) {
     const minutes = Math.floor(total / 60);
     const rest = total % 60;
-    return rest ? `剩 ${minutes} 分 ${rest} 秒` : `剩 ${minutes} 分`;
+    return rest ? `预计 ${minutes} 分 ${rest} 秒` : `预计 ${minutes} 分`;
   }
   const hours = Math.floor(total / 3600);
   const minutes = Math.round((total % 3600) / 60);
-  return minutes ? `剩 ${hours} 小时 ${minutes} 分` : `剩 ${hours} 小时`;
+  return minutes ? `预计 ${hours} 小时 ${minutes} 分` : `预计 ${hours} 小时`;
 }
 
 /**
@@ -2449,8 +2457,10 @@ async function ensurePhotoDetail(id) {
    the user only opened to look at something must not start talking. The speaker
    button is the opt-in, and its state is remembered for the session.
 
-   A Live Photo is the opposite: the still is the point, so the motion stays put
-   until the little badge is pressed.
+   A Live Photo plays its motion once on its own as the dialog opens, then fades
+   back to the still - the same gesture an iPhone makes. It is muted because
+   browsers only allow that automatically; pressing the 实况 chip replays it with
+   sound, which is a deliberate act and therefore allowed.
    ========================================================================== */
 
 //: Whether the user asked for sound in the preview clip. Session-wide.
@@ -2461,6 +2471,7 @@ function stopPreviewVideo() {
   const video = $("previewVideo");
   if (!video) return;
   video.pause();
+  video.classList.remove("is-fading", "is-live-motion");
   // Clearing the source releases the decoder; without it every visited video
   // would keep a pipeline alive until the dialog closed.
   video.removeAttribute("src");
@@ -2479,32 +2490,26 @@ function stopPreviewVideo() {
 function applyPreviewMedia(photo, options = {}) {
   const video = $("previewVideo");
   const soundBtn = $("previewSoundBtn");
-  const liveBtn = $("previewLiveBtn");
-  const tag = $("previewVideoTag");
-  const tagText = $("previewVideoTagText");
   if (!video) return;
 
   const isVideo = photo.media_kind === "video";
   const hasLive = !!photo.has_live;
 
+  // The dialog is painted twice: once from the list row, again when the detail
+  // payload lands. That second pass must not restart what the first one began -
+  // for a Live Photo it would cut the motion off a fraction of a second in.
+  if (options.skipImage && video.dataset.photoId === String(photo.id)) {
+    return;
+  }
+
   // Reset first, then decide: switching from a video to a photo must not leave
   // the previous clip running underneath.
   stopPreviewVideo();
   if (soundBtn) soundBtn.classList.add("hidden");
-  if (liveBtn) liveBtn.classList.add("hidden");
-  if (tag) tag.classList.add("hidden");
   $("previewImage").classList.toggle("hidden", false);
 
   if (isVideo) {
-    if (options.skipImage && video.dataset.photoId === String(photo.id) && !video.classList.contains("hidden")) {
-      return;
-    }
     video.dataset.photoId = String(photo.id);
-    if (tag) {
-      const seconds = Math.round(Number(state.videoClipSeconds) || 5);
-      if (tagText) tagText.textContent = `${seconds} 秒预览`;
-      tag.classList.remove("hidden");
-    }
     if (soundBtn) {
       soundBtn.classList.remove("hidden");
       paintSoundButton();
@@ -2514,7 +2519,11 @@ function applyPreviewMedia(photo, options = {}) {
   }
 
   delete video.dataset.photoId;
-  if (hasLive && liveBtn) liveBtn.classList.remove("hidden");
+  // A Live Photo shows itself off: the still is on screen, the motion fades in
+  // over it, plays once, and fades back out.
+  if (hasLive) {
+    playLiveMotion(photo, { muted: true });
+  }
 }
 
 /** Load and start the silent preview loop for ``photo``. */
@@ -2597,47 +2606,62 @@ function togglePreviewPause() {
  */
 let livePlaying = false;
 
-function toggleLiveVideo(photo) {
+/**
+ * Play the short video a still carries, once, then fade back to the picture.
+ *
+ * The fade is the whole point: iOS turns a Live Photo into motion and back
+ * without a cut, and a hard appear/disappear would look like a glitch. The
+ * element is the same one the video preview uses, so there is only ever one
+ * decoder alive.
+ *
+ * ``muted`` is true for the automatic play (browsers demand it) and false when
+ * the user pressed the 实况 chip themselves.
+ */
+function playLiveMotion(photo, options = {}) {
   const video = $("previewVideo");
-  const liveBtn = $("previewLiveBtn");
-  if (!video || !liveBtn) return;
-  if (livePlaying) {
-    stopPreviewVideo();
-    livePlaying = false;
-    liveBtn.classList.remove("playing");
-    $("previewImage").classList.remove("hidden");
-    return;
-  }
+  if (!video || !photo || !photo.has_live) return;
+  const wanted = `/api/photo/${photo.id}/live`;
   livePlaying = true;
-  liveBtn.classList.add("playing");
   video.dataset.photoId = String(photo.id);
   video.loop = false;
-  video.muted = false;
-  video.classList.add("hidden");
-  video.src = `/api/photo/${photo.id}/live`;
-  const reveal = () => {
-    video.classList.remove("hidden");
-    video.play().catch(() => {
+  video.muted = options.muted !== false;
+  video.classList.remove("is-fading");
+  video.classList.add("hidden", "is-live-motion");
+  video.src = wanted;
+
+  const fadeOut = () => {
+    livePlaying = false;
+    video.classList.add("is-fading");
+    // Matches the .is-fading transition in style.css.
+    setTimeout(() => {
+      if (video.dataset.photoId !== String(photo.id)) return;
       video.classList.add("hidden");
-    });
+      video.classList.remove("is-fading");
+    }, 420);
   };
-  video.addEventListener("canplay", reveal, { once: true });
+
   video.addEventListener(
-    "ended",
+    "canplay",
     () => {
-      livePlaying = false;
-      liveBtn.classList.remove("playing");
-      video.classList.add("hidden");
-      $("previewImage").classList.remove("hidden");
+      if (video.dataset.photoId !== String(photo.id)) return;
+      video.classList.remove("hidden");
+      const played = video.play();
+      if (played && typeof played.catch === "function") {
+        played.catch(() => video.classList.add("hidden"));
+      }
     },
     { once: true }
   );
+  video.addEventListener("ended", fadeOut, { once: true });
   video.addEventListener(
     "error",
     () => {
       livePlaying = false;
-      liveBtn.classList.remove("playing");
-      showToast("这段实况视频无法播放。", "error");
+      video.classList.add("hidden");
+      // Autoplay is allowed to fail quietly (a motion that will not decode
+      // should not throw an error at someone who just opened a photo), but a
+      // press deserves an answer.
+      if (options.muted === false) showToast("这段实况视频无法播放。", "error");
     },
     { once: true }
   );
@@ -2681,16 +2705,14 @@ function updatePreview(options = {}) {
   $("previewDeleteBtn").classList.toggle("hidden", isDeleted);
   $("previewRestoreBtn").classList.toggle("hidden", !isDeleted);
   $("previewPermanentDeleteBtn").classList.toggle("hidden", !isDeleted);
-  // A trashed photo is not analysed again, so the action is not offered either.
-  // Videos never go through the model, so they do not offer it either.
-  const isVideo = photo.media_kind === "video";
-  $("previewReanalyzeBtn").classList.toggle("hidden", isDeleted || isVideo);
+  // A trashed item is not analysed again, so the action is not offered either.
+  // A video *is* analysed now (from its poster frame), so it keeps the button.
+  $("previewReanalyzeBtn").classList.toggle("hidden", isDeleted);
 
   // Media: a video loops a short silent preview over its poster, a Live Photo
-  // waits for a deliberate press, and a plain photo is just the picture.
+  // plays its motion once by itself, and a plain photo is just the picture.
   applyPreviewMedia(photo, options);
 
-  
   const favBtn = $("previewFavoriteBtn");
   favBtn.classList.toggle("active", !!photo.favorite);
   favBtn.innerHTML = `${photo.favorite ? ICONS.heartFilled : ICONS.heart}<span>${photo.favorite ? "已珍藏" : "珍藏"}</span>`;
@@ -2698,8 +2720,12 @@ function updatePreview(options = {}) {
 
   const exif = photo.exif || {};
   const cameraText = [exif.make, exif.model].filter(Boolean).join(" ");
-  
-  // Optical Specs Grid - Compact row with icons only
+  const isVideo = photo.media_kind === "video";
+  const info = photo.video_info || {};
+
+  // Optical Specs Grid - Compact row with icons only.
+  // A video uses the same row for its own four numbers (resolution, codec,
+  // bitrate, frame rate) so the two kinds of item read alike at a glance.
   const specItems = [];
   if (cameraText) {
     specItems.push(`
@@ -2709,37 +2735,90 @@ function updatePreview(options = {}) {
       </div>
     `);
   }
-  if (exif.fnumber) {
-    specItems.push(`
-      <div class="spec-badge" title="光圈：f/${formatFnumber(exif.fnumber)}">
-        ${ICONS.aperture}
-        <span class="spec-val">f/${formatFnumber(exif.fnumber)}</span>
-      </div>
-    `);
-  }
-  if (exif.exposure) {
-    specItems.push(`
-      <div class="spec-badge" title="快门速度：${formatExposure(exif.exposure)}">
-        ${ICONS.shutter}
-        <span class="spec-val">${formatExposure(exif.exposure)}</span>
-      </div>
-    `);
-  }
-  if (exif.iso) {
-    specItems.push(`
-      <div class="spec-badge" title="感光度：ISO ${formatIso(exif.iso)}">
-        ${ICONS.iso}
-        <span class="spec-val">ISO ${formatIso(exif.iso)}</span>
-      </div>
-    `);
-  }
-  if (exif.focal_length) {
-    specItems.push(`
-      <div class="spec-badge" title="焦距：${formatFocalLength(exif.focal_length)}">
-        ${ICONS.focal}
-        <span class="spec-val">${formatFocalLength(exif.focal_length)}</span>
-      </div>
-    `);
+  if (isVideo) {
+    if (photo.width && photo.height) {
+      specItems.push(`
+        <div class="spec-badge" title="分辨率：${photo.width} × ${photo.height}">
+          ${ICONS.imageSize}
+          <span class="spec-val">${photo.width} × ${photo.height}</span>
+        </div>
+      `);
+    }
+    const codecText = [info.video_codec, info.video_profile].filter(Boolean).join(" · ");
+    if (codecText) {
+      specItems.push(`
+        <div class="spec-badge" title="编码格式：${escapeHtml(codecText)}">
+          ${ICONS.video}
+          <span class="spec-val">${escapeHtml(codecText)}</span>
+        </div>
+      `);
+    }
+    const bitrateText = formatBitrate(info.video_bitrate);
+    if (bitrateText) {
+      specItems.push(`
+        <div class="spec-badge" title="视频码率：${bitrateText}">
+          ${ICONS.fileSize}
+          <span class="spec-val">${bitrateText}</span>
+        </div>
+      `);
+    }
+    const fpsText = formatFps(info.fps);
+    if (fpsText) {
+      specItems.push(`
+        <div class="spec-badge" title="帧率：${fpsText}">
+          ${ICONS.hourglass}
+          <span class="spec-val">${fpsText}</span>
+        </div>
+      `);
+    }
+  } else {
+    if (exif.fnumber) {
+      specItems.push(`
+        <div class="spec-badge" title="光圈：f/${formatFnumber(exif.fnumber)}">
+          ${ICONS.aperture}
+          <span class="spec-val">f/${formatFnumber(exif.fnumber)}</span>
+        </div>
+      `);
+    }
+    if (exif.exposure) {
+      specItems.push(`
+        <div class="spec-badge" title="快门速度：${formatExposure(exif.exposure)}">
+          ${ICONS.shutter}
+          <span class="spec-val">${formatExposure(exif.exposure)}</span>
+        </div>
+      `);
+    }
+    if (exif.iso) {
+      specItems.push(`
+        <div class="spec-badge" title="感光度：ISO ${formatIso(exif.iso)}">
+          ${ICONS.iso}
+          <span class="spec-val">ISO ${formatIso(exif.iso)}</span>
+        </div>
+      `);
+    }
+    // A phone reports a 4.2 mm lens and a 26 mm equivalent; only the second
+    // one says what the picture looks like, so it is the one shown.
+    const focalText = exif.focal_length_35mm || exif.focal_length;
+    if (focalText) {
+      const equivalent = !!exif.focal_length_35mm;
+      specItems.push(`
+        <div class="spec-badge" title="${equivalent ? "等效焦距" : "焦距"}：${formatFocalLength(focalText)}">
+          ${ICONS.focal}
+          <span class="spec-val">${formatFocalLength(focalText)}</span>
+        </div>
+      `);
+    }
+    if (photo.has_live) {
+      // The Live Photo mark doubles as the replay button: the motion plays by
+      // itself when the dialog opens, so this is for watching it again - and
+      // this time with sound, because a press is a deliberate act.
+      specItems.push(`
+        <button type="button" class="spec-badge live-badge-chip" id="previewLiveChip" title="重播实况">
+          <span class="live-badge-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
+          <span class="spec-val">实况</span>
+        </button>
+      `);
+    }
   }
 
   const captureTime = formatCaptureTime(exif.datetime_original);
@@ -2776,10 +2855,12 @@ function updatePreview(options = {}) {
           <div class="meta-content">${escapeHtml(photo.location)}</div>
         </div>
       ` : ""}
+      ${isVideo ? "" : `
       <div class="meta-item-row" title="尺寸分辨率">
         ${ICONS.imageSize}
         <div class="meta-content">${photo.width ? photo.width + " × " + photo.height : "-"}</div>
       </div>
+      `}
       <div class="meta-item-row" title="文件大小">
         ${ICONS.fileSize}
         <div class="meta-content">${fileSizeText(photo)}</div>
@@ -2792,7 +2873,6 @@ function updatePreview(options = {}) {
       ${rawDetailRow(photo)}
     </div>
 
-    ${photo.media_kind === "video" ? "" : `
     <div class="dimension-section">
       <div class="dimension-section-title">
         <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.score} 多维度评分</span>
@@ -2802,7 +2882,6 @@ function updatePreview(options = {}) {
         ${dimensionRows(photo.dimensions || {}, photo.score)}
       </div>
     </div>
-    `}
 
     ${photo.tags && photo.tags.length ? `
       <div class="meta-item-row" title="情感与场景标签">
@@ -2826,6 +2905,7 @@ function resetFilters() {
   setSelectValue($("minScoreFilter"), "");
   setSelectValue($("tagFilter"), "");
   setSelectValue($("yearFilter"), "");
+  setSelectValue($("kindFilter"), "");
   setSelectValue($("searchMode"), "smart");
   setSelectValue($("sortFilter"), "score_desc");
   $("searchInput").value = "";
@@ -2879,7 +2959,7 @@ function applyPromptPreset(name) {
    Settings dialog: tabs
    ========================================================================== */
 
-const SETTINGS_TABS = ["model", "image", "geo", "data"];
+const SETTINGS_TABS = ["model", "image", "video", "geo", "data"];
 
 /** Slide the "ink" behind the active tab and show its pane. */
 function showSettingsTab(name, options = {}) {
@@ -2992,13 +3072,14 @@ async function openSettings() {
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
-    $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 5;
+    $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 3;
     $("setVideoClipMaxEdge").value = cfg.video_clip_max_edge || 960;
     $("setVideoClipCrf").value = cfg.video_clip_crf ?? 28;
     $("setVideoPosterRatio").value = cfg.video_poster_ratio ?? 0.1;
     $("setVideoClipAudio").checked = cfg.video_clip_audio !== false;
     $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
-    state.videoClipSeconds = Number(cfg.video_clip_seconds) || 5;
+    $("setMergeLivePhotos").checked = cfg.merge_live_photos !== false;
+    state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
     paintFfmpegStatus();
     // Always open on the model tab: that is what most visits are for.
     showSettingsTab("model");
@@ -3028,12 +3109,13 @@ async function saveSettings() {
     geocoding_api_key: $("setGeocodingApiKey").value,
     geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
     geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
-    video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 5,
+    video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 3,
     video_clip_max_edge: parseInt($("setVideoClipMaxEdge").value, 10) || 960,
     video_clip_crf: parseInt($("setVideoClipCrf").value, 10) || 28,
     video_poster_ratio: parseFloat($("setVideoPosterRatio").value) || 0.1,
     video_clip_audio: $("setVideoClipAudio").checked,
     video_pregenerate: $("setVideoPregenerate").checked,
+    merge_live_photos: $("setMergeLivePhotos").checked,
   };
   try {
     await api("/api/config", {
@@ -3939,6 +4021,7 @@ function init() {
   });
 
   $("statusFilter").addEventListener("change", loadPhotos);
+  $("kindFilter").addEventListener("change", loadPhotos);
   $("minScoreFilter").addEventListener("change", loadPhotos);
   $("sortFilter").addEventListener("change", loadPhotos);
   $("searchInput").addEventListener("change", loadPhotos);
@@ -3977,12 +4060,16 @@ function init() {
     e.stopPropagation();
     togglePreviewPause();
   });
-  $("previewLiveBtn").addEventListener("click", (e) => {
+  $("previewInfo").addEventListener("click", handlePreviewInfoClick);
+  // The 实况 chip lives inside the info panel, so it is delegated: the panel is
+  // rebuilt every time the selection changes.
+  $("previewInfo").addEventListener("click", (e) => {
+    const chip = e.target.closest("#previewLiveChip");
+    if (!chip) return;
     e.stopPropagation();
     const photo = photoById(state.currentPreviewId);
-    if (photo) toggleLiveVideo(photo);
+    if (photo) playLiveMotion(photo, { muted: false });
   });
-  $("previewInfo").addEventListener("click", handlePreviewInfoClick);
 
   // Fullscreen Viewer Controls
   const fsCloseBtn = $("fsCloseBtn");

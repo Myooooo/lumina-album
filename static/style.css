@@ -792,34 +792,42 @@ select {
 .polaroid-card.is-video .polaroid-inner {
   background: #14120f;
   border: 1px solid #2b2620;
-  border-radius: 3px;
+  border-radius: 12px;
   box-shadow: 0 10px 26px rgba(18, 14, 10, 0.32);
-  padding: 12px 22px 16px;
+  /* Wide enough for the sprocket column on each side; the picture sits between
+     them, so the holes never land on the frame. */
+  padding: 12px 26px 16px;
+  overflow: hidden;
 }
 
 .polaroid-card.is-video:hover .polaroid-inner {
   box-shadow: 0 16px 34px rgba(18, 14, 10, 0.42);
 }
 
-/* The sprocket holes: two columns of soft squares down the stock. */
+/* The sprocket holes: two columns of soft dots down the black border, one on
+   each side of the picture. Rounded rectangles, the way a 35 mm strip reads.
+   The element is a child of ``.polaroid-front``, which sits inside the card's
+   padding; the negative inset pulls it back out to the card's own edges so the
+   columns are painted on the border rather than over the picture. */
 .film-strip {
   position: absolute;
-  inset: 6px 4px;
+  /* top / sides / bottom of the card padding + border, negated. */
+  inset: -13px -27px -17px;
   pointer-events: none;
-  border-radius: 2px;
+  z-index: 3;
+  opacity: .75;
   background-image:
-    radial-gradient(circle at 7px 50%, rgba(247, 239, 228, 0.82) 3.1px, transparent 3.4px),
-    radial-gradient(circle at calc(100% - 7px) 50%, rgba(247, 239, 228, 0.82) 3.1px, transparent 3.4px);
-  background-size: 100% 18px;
-  background-repeat: repeat-y;
-  z-index: 1;
-  opacity: .85;
+    radial-gradient(circle at 11px 50%, rgba(247, 239, 228, 0.5) 2.6px, transparent 3px),
+    radial-gradient(circle at calc(100% - 11px) 50%, rgba(247, 239, 228, 0.5) 2.6px, transparent 3px);
+  background-size: 100% 20px, 100% 20px;
+  background-repeat: repeat-y, repeat-y;
+  background-position: 0 12px, 0 12px;
 }
 
 .polaroid-card.is-video .polaroid-photo-frame {
   background: #0c0a08;
   box-shadow: inset 0 0 0 1px rgba(216, 201, 180, 0.16);
-  border-radius: 1px;
+  border-radius: 7px;
 }
 
 .polaroid-card.is-video .polaroid-body {
@@ -1561,39 +1569,27 @@ select {
   animation: previewVideoIn .36s ease both;
 }
 
+/* A Live Photo's motion fades in over the still and, when it ends, fades back
+   out - the way iOS turns a moment into movement and back. The clip loop uses
+   the entrance animation above; this is the one-shot motion's own curve. */
+.preview-video.is-live-motion {
+  animation: none;
+  opacity: 1;
+  transition: opacity .4s ease;
+}
+
+.preview-video.is-live-motion.is-fading {
+  opacity: 0;
+}
+
 @keyframes previewVideoIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-/* "5 秒预览" tag, top-left of the frame. */
-.preview-video-tag {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  letter-spacing: .04em;
-  padding: 4px 9px 4px 7px;
-  border-radius: 99px;
-  color: #f7efe4;
-  background: rgba(14, 12, 10, 0.6);
-  border: 1px solid rgba(247, 239, 228, 0.2);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  pointer-events: none;
-  z-index: 3;
-}
-
-.preview-video-tag .btn-icon,
-.preview-video-tag svg { width: 12px; height: 12px; }
-
 /* Round controls floating on the frame. */
 .preview-sound-btn,
-.preview-video-pause,
-.preview-live-btn {
+.preview-video-pause {
   position: absolute;
   display: inline-flex;
   align-items: center;
@@ -1644,32 +1640,47 @@ select {
   box-shadow: 0 0 0 4px rgba(179, 125, 86, 0.18);
 }
 
-.preview-live-btn {
-  bottom: 12px;
-  right: 12px;
-  padding: 8px 14px 8px 10px;
-  font-size: 12.5px;
+/* ---------- Live Photo chip ----------
+   Sits in the spec row beside the aperture and ISO badges. It is the replay
+   control: the motion already played when the dialog opened, so a press here
+   means "again, this time with sound". */
+.spec-badge.live-badge-chip {
+  border: 1px solid rgba(179, 125, 86, 0.28);
+  background: rgba(179, 125, 86, 0.08);
+  color: var(--primary-dark);
+  cursor: pointer;
+  font: inherit;
+  padding: 5px 11px 5px 7px;
+  transition: background-color .22s ease, transform .22s cubic-bezier(.2,.8,.2,1),
+              box-shadow .22s ease;
 }
 
-.preview-live-btn:hover {
-  background: rgba(24, 20, 16, 0.78);
-  transform: translateY(-2px);
+.spec-badge.live-badge-chip:hover {
+  background: rgba(179, 125, 86, 0.16);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(179, 125, 86, 0.18);
 }
 
-.preview-live-btn.playing {
-  border-color: rgba(179, 125, 86, 0.75);
-  background: rgba(179, 125, 86, 0.28);
-}
-
-.preview-live-mark {
+.live-badge-mark {
   position: relative;
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(247, 239, 228, 0.92);
+  background: rgba(179, 125, 86, 0.16);
+  flex: 0 0 auto;
+}
+
+.live-badge-mark .live-badge-ring {
+  inset: 2px;
+  border-width: 1.2px;
+}
+
+.live-badge-mark .live-badge-dot {
+  width: 4.5px;
+  height: 4.5px;
 }
 
 /* ---------- Fullscreen video ---------- */
@@ -1679,15 +1690,6 @@ select {
   border-radius: var(--radius-md);
   background: #000;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-}
-
-/* A dim name in front of a technical value ("编码 h264 · High"). */
-.meta-item-row .meta-label {
-  display: inline-block;
-  min-width: 52px;
-  margin-right: 8px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 /* ---------- Settings: video block ---------- */
@@ -1963,7 +1965,12 @@ select {
 
 .meta-item-row .meta-content {
   flex: 1;
-  word-break: break-all;
+  min-width: 0;
+  /* Break long unbroken strings (a path) but never split a word like "MP4" or
+     "kbps" down the middle - that is what made the merged video rows read as
+     gibberish. */
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
 
 /* Dimension Radar Bars */
@@ -3179,8 +3186,8 @@ select {
   .card-status.state-connected::before, .folder-history, .folder-history-item,
   .custom-select-menu, .settings-pane, .card-pending-dot, .toast,
   .back-to-top, .back-to-top-ring, .back-to-top .btn-icon,
-  .video-play-mark, .live-badge, .preview-video,
-  .preview-sound-btn, .preview-video-pause, .preview-live-btn {
+  .video-play-mark, .live-badge, .preview-video, .live-badge-chip,
+  .preview-sound-btn, .preview-video-pause {
     animation: none !important;
     transition: none !important;
   }

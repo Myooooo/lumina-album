@@ -36,6 +36,28 @@ def _rational_float(value) -> float | None:
         return None
 
 
+def _format_focal(value: float) -> str:
+    """A focal length as it reads on a lens: "35mm", "4.2mm", "8mm"."""
+    if abs(value - round(value)) < 0.05:
+        return f"{round(value)}mm"
+    return f"{value:.1f}mm"
+
+
+def _equivalent_focal(focal_35mm) -> float | None:
+    """The 35 mm-equivalent focal length, when the file records one.
+
+    A phone lens is 4.2 mm and a full-frame lens is 35 mm for the same picture,
+    so only the equivalent number means anything when comparing shots. Cameras
+    and phones both write it as ``FocalLengthIn35mmFilm`` (tag 41989); when the
+    tag is missing there is nothing honest to derive it from without the sensor
+    geometry, so the caller falls back to the physical value.
+    """
+    value = _rational_float(focal_35mm)
+    if value is None or value <= 0:
+        return None
+    return round(value, 1)
+
+
 def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
     """Return (location_string, exif_dict) from a photo file."""
     location = None
@@ -105,6 +127,13 @@ def extract_exif(image_path: str) -> tuple[str | None, dict[str, Any]]:
                 else:
                     focal_text = str(focal).replace("/1", "")
                 exif_data["focal_length"] = f"{focal_text}mm"
+
+            # Tag 41989: what the lens is worth in 35 mm terms. A phone writes
+            # "4.2mm" for the lens and "26mm" here; the second number is the one
+            # that says what the picture looks like, so the UI prefers it.
+            equivalent = _equivalent_focal(tag_value(41989))
+            if equivalent is not None:
+                exif_data["focal_length_35mm"] = _format_focal(equivalent)
 
             try:
                 gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo)

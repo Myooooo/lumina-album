@@ -81,6 +81,15 @@
   </section>
 
   <section class="filters">
+    <div class="filter-group" data-filter-key="kind">
+      <label><span class="label-icon" data-icon="video"></span>类型</label>
+      <select id="kindFilter">
+        <option value="">全部</option>
+        <option value="photo">照片</option>
+        <option value="video">视频</option>
+        <option value="live">实况</option>
+      </select>
+    </div>
     <div class="filter-group" data-filter-key="min_score">
       <label><span class="label-icon" data-icon="score"></span>总分</label>
       <select id="minScoreFilter">
@@ -172,15 +181,11 @@
       <div class="preview-body">
         <div class="preview-media-col">
           <img id="previewImage" alt="预览" />
-          <!-- Video: the poster shows immediately, the loop cross-fades in -->
+          <!-- Video: the poster shows immediately, the loop cross-fades in.
+               The same element plays a Live Photo's motion once, then fades. -->
           <video id="previewVideo" class="preview-video hidden" muted autoplay loop playsinline preload="metadata"></video>
-          <span id="previewVideoTag" class="preview-video-tag hidden"><span class="btn-icon" data-icon="video"></span><span id="previewVideoTagText">5 秒预览</span></span>
           <button id="previewSoundBtn" class="preview-sound-btn hidden" type="button" title="打开声音">
             <span class="btn-icon" data-icon="volumeOff"></span>
-          </button>
-          <button id="previewLiveBtn" class="preview-live-btn hidden" type="button" title="播放实况">
-            <span class="preview-live-mark" aria-hidden="true"><span class="live-badge-ring"></span><span class="live-badge-dot"></span></span>
-            <span>实况</span>
           </button>
           <button id="previewVideoPauseBtn" class="preview-video-pause hidden" type="button" title="暂停">
             <span class="btn-icon" data-icon="pause"></span>
@@ -280,6 +285,10 @@
                 aria-selected="false" aria-controls="tabImage" tabindex="-1">
           <span class="btn-icon" data-icon="imageSize"></span><span class="tab-label">图片处理</span>
         </button>
+        <button class="settings-tab" role="tab" data-tab="video" id="tabBtnVideo"
+                aria-selected="false" aria-controls="tabVideo" tabindex="-1">
+          <span class="btn-icon" data-icon="video"></span><span class="tab-label">视频</span>
+        </button>
         <button class="settings-tab" role="tab" data-tab="geo" id="tabBtnGeo"
                 aria-selected="false" aria-controls="tabGeo" tabindex="-1">
           <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地理编码</span>
@@ -345,9 +354,15 @@
             <label>索引线程数
               <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
             </label>
+            <label class="checkbox-row full-row">
+              <input id="setMergeLivePhotos" type="checkbox" />
+              <span>合并显示实况照片（重新整理后生效）</span>
+            </label>
           </div>
+        </section>
 
-          <h3 class="settings-subtitle">视频</h3>
+        <section class="settings-pane" id="tabVideo" role="tabpanel"
+                 aria-labelledby="tabBtnVideo" data-pane="video" hidden>
           <p class="settings-hint">详情页会循环播放一小段静音预览，全屏才是原片。预览越小越快，也越省缓存。</p>
           <div class="form-grid">
             <label>预览时长（秒）

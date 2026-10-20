@@ -1364,6 +1364,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         else:
             favorite = None
         sort = request.args.get("sort", "score_asc")
+        kind_raw = request.args.get("kind", "").strip()
+        kind = kind_raw if kind_raw in ("photo", "video", "live") else None
         try:
             min_score = (
                 float(request.args["min_score"])
@@ -1398,6 +1400,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             sort=sort,
             limit=fetch_limit,
             offset=offset,
+            kind=kind,
         )
         has_more = len(photos) > requested_limit
         photos = photos[:requested_limit]

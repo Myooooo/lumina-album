@@ -146,12 +146,19 @@ def attach_live_video(
     motion photo (the video is inside the JPEG/HEIC) or half of a Live Photo
     pair (a same-named MOV sits beside it). A plain photo is returned untouched,
     so this is safe to call for every still.
+
+    A *paired* movie is only attached when ``merge_live_photos`` is on: with the
+    setting off the movie is indexed as its own item, and attaching it here as
+    well would put the same footage on screen twice.
     """
     try:
         source = livephoto.detect(prepared.image_path)
     except OSError:
         return prepared
     if not source:
+        return prepared
+    if source.video_path and not config.merge_live_photos:
+        # Split view: ``discover_photo_pairs`` indexes the movie separately.
         return prepared
 
     if source.embedded:
@@ -330,6 +337,35 @@ def prepare_for_analysis(
         config,
         existing_location,
         already_geocoded=already_geocoded,
+    )
+
+
+def prepared_from_row(photo: dict) -> PreparedPhoto:
+    """Rebuild a ``PreparedPhoto`` from a database row.
+
+    Used when the picture to send to the model is already on disk and does not
+    need generating: a video's poster frame, or a re-analysis of a row whose
+    proxy is still valid. Everything the analysis needs is in the row, so this
+    is a pure reshuffle - no file is touched.
+    """
+    return PreparedPhoto(
+        image_path=photo.get("path") or photo.get("original_path") or "",
+        folder=photo.get("folder") or "",
+        filename=photo.get("filename") or "",
+        size=photo.get("size") or 0,
+        width=photo.get("width") or 0,
+        height=photo.get("height") or 0,
+        proxy_path=photo.get("proxy_path") or "",
+        thumb_path=photo.get("thumb_path") or "",
+        phash=photo.get("phash") or "",
+        exif=photo.get("exif") or {},
+        location=photo.get("location"),
+        raw_path=photo.get("raw_path"),
+        is_raw=Path(photo.get("path") or "").suffix.lower() in RAW_EXTENSIONS,
+        media_kind=photo.get("media_kind") or "photo",
+        duration_ms=photo.get("duration_ms"),
+        video_info=photo.get("video_info") or {},
+        live_path=photo.get("live_path"),
     )
 
 

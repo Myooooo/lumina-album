@@ -502,6 +502,7 @@ class Database:
         sort: str = "score_asc",
         limit: int = 1000,
         offset: int = 0,
+        kind: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
@@ -515,6 +516,18 @@ class Database:
             params.append(status)
         if exclude_deleted:
             clauses.append("status != 'deleted'")
+        # The type filter. "照片" deliberately includes the stills that carry a
+        # motion clip: from the user's side those are photographs that happen to
+        # move, and hiding them behind a fourth tab would be a surprise.
+        if kind == "video":
+            clauses.append("media_kind = 'video'")
+        elif kind == "photo":
+            clauses.append("(media_kind IS NULL OR media_kind != 'video')")
+        elif kind == "live":
+            clauses.append(
+                "(media_kind IS NULL OR media_kind != 'video') "
+                "AND live_path IS NOT NULL AND live_path != ''"
+            )
         if recommendation:
             clauses.append("recommendation = ?")
             params.append(recommendation)

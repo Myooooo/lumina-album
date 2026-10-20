@@ -191,12 +191,12 @@ check("no estimate yet", helpers.formatEta(null), "");
 check("garbage in", helpers.formatEta(NaN), "");
 check("zero", helpers.formatEta(0), "即将完成");
 check("a few seconds left", helpers.formatEta(3), "即将完成");
-check("seconds", helpers.formatEta(12), "剩 12 秒");
-check("just under a minute", helpers.formatEta(59), "剩 59 秒");
-check("exactly a minute", helpers.formatEta(60), "剩 1 分");
-check("minutes and seconds", helpers.formatEta(200), "剩 3 分 20 秒");
-check("exactly an hour", helpers.formatEta(3600), "剩 1 小时");
-check("hours and minutes", helpers.formatEta(3900), "剩 1 小时 5 分");
+check("seconds", helpers.formatEta(12), "预计 12 秒");
+check("just under a minute", helpers.formatEta(59), "预计 59 秒");
+check("exactly a minute", helpers.formatEta(60), "预计 1 分");
+check("minutes and seconds", helpers.formatEta(200), "预计 3 分 20 秒");
+check("exactly an hour", helpers.formatEta(3600), "预计 1 小时");
+check("hours and minutes", helpers.formatEta(3900), "预计 1 小时 5 分");
 check("negative clamps", helpers.formatEta(-9), "即将完成");
 
 /* ------------------------------------------------------------------- ETA -- */
@@ -207,13 +207,13 @@ helpers.reset();
 clock.set(1000);
 helpers.updateEta(10, 100, 2); // the server says 2s have passed
 check("the first estimate is seeded from the server's elapsed time", helpers.eta().rate, 5);
-check("so an estimate is available immediately", helpers.lastPainted(), "剩 18 秒");
+check("so an estimate is available immediately", helpers.lastPainted(), "预计 18 秒");
 
 clock.advance(1000);
 helpers.updateEta(15, 100, 3);
 clock.advance(1000);
 helpers.updateEta(20, 100, 4);
-check("a steady job keeps a steady estimate", helpers.lastPainted(), "剩 17 秒");
+check("a steady job keeps a steady estimate", helpers.lastPainted(), "预计 17 秒");
 
 // One slow tick: three seconds pass and a single file is processed. The instant
 // rate collapses from 5/s to 0.33/s. The old implementation followed it and the
@@ -283,7 +283,7 @@ section("a page refresh keeps the estimate");
 helpers.reset();
 clock.set(60000);
 helpers.updateEta(30, 120, 15);
-check("first poll after a refresh still has an estimate", helpers.lastPainted(), "剩 45 秒");
+check("first poll after a refresh still has an estimate", helpers.lastPainted(), "预计 45 秒");
 check("and it matches the whole-run speed", Math.round(helpers.eta().rate), 2);
 
 /* ------------------------------------------------------------------- labels */

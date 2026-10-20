@@ -3271,6 +3271,91 @@ class DeletionSafetyTests(unittest.TestCase):
         self.assertFalse(is_in_named_dir(inside, ""))
 
 
+class LivePhotoMergeSwitchTests(unittest.TestCase):
+    """「合并显示实况照片」 decides whether a pair is one item or two.
+
+    A Live Photo is an iPhone still plus a same-named movie. Merged (the
+    default) the movie belongs to the still and is what the 实况 button plays;
+    split, the two are separate items, which is the only way to see the movie on
+    its own.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        Image.new("RGB", (80, 60), (100, 120, 140)).save(
+            os.path.join(self.folder, "IMG_1.JPG"), "JPEG"
+        )
+        with open(os.path.join(self.folder, "IMG_1.MOV"), "wb") as fh:
+            fh.write(b"\x00" * 512)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _pairs(self, merge: bool) -> list[str]:
+        from photo_reviewer.scanner import discover_photo_pairs
+
+        return [
+            os.path.basename(path)
+            for path, _raw in discover_photo_pairs(
+                self.folder, (".jpg",), set(), merge_live=merge
+            )
+        ]
+
+    def test_merged_by_default(self) -> None:
+        self.assertEqual(self._pairs(True), ["IMG_1.JPG"])
+
+    def test_splitting_shows_both_files(self) -> None:
+        self.assertEqual(sorted(self._pairs(False)), ["IMG_1.JPG", "IMG_1.MOV"])
+
+    def test_the_default_config_merges(self) -> None:
+        cfg = Config(data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "l.db"))
+        self.assertTrue(cfg.merge_live_photos)
+
+    def test_the_switch_survives_a_round_trip(self) -> None:
+        from photo_reviewer.config import EDITABLE_FIELDS
+
+        self.assertIn("merge_live_photos", EDITABLE_FIELDS)
+
+
+class EquivalentFocalTests(unittest.TestCase):
+    """A phone lens says 4.2 mm; the picture looks like 26 mm."""
+
+    def test_a_recorded_equivalent_is_used(self) -> None:
+        from photo_reviewer.exif import _equivalent_focal
+
+        self.assertEqual(_equivalent_focal(26), 26.0)
+        self.assertEqual(_equivalent_focal("35.0"), 35.0)
+
+    def test_a_missing_tag_yields_nothing(self) -> None:
+        from photo_reviewer.exif import _equivalent_focal
+
+        for value in (None, 0, "nonsense"):
+            self.assertIsNone(_equivalent_focal(value), value)
+
+    def test_formatting_keeps_a_useful_precision(self) -> None:
+        from photo_reviewer.exif import _format_focal
+
+        self.assertEqual(_format_focal(26), "26mm")
+        self.assertEqual(_format_focal(4.2), "4.2mm")
+        self.assertEqual(_format_focal(23.5), "23.5mm")
+
+    def test_the_reader_prefers_the_equivalent(self) -> None:
+        """An EXIF block with both values exposes the equivalent separately."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "phone.jpg")
+            image = Image.new("RGB", (64, 48), (90, 90, 90))
+            exif = Image.Exif()
+            exif[37386] = (42, 10)  # 4.2 mm physical
+            exif[41989] = 26  # 35 mm equivalent
+            image.save(path, "JPEG", exif=exif)
+            from photo_reviewer.exif import extract_exif
+
+            _location, data = extract_exif(path)
+            self.assertEqual(data.get("focal_length_35mm"), "26mm")
+
+
 class OrientationTests(unittest.TestCase):
     """Portrait photos must be recorded - and rendered - the way viewers show them.
 
@@ -3981,6 +4066,24 @@ class VideoPayloadTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/video/999999/stream").status_code, 404)
         self.assertEqual(self.client.get("/api/video/999999/playable").status_code, 404)
 
+    def test_the_kind_filter_separates_videos_photos_and_live_photos(self) -> None:
+        """「照片」 includes motion photos; 「实况」 is the live subset."""
+        def names(query: str) -> set[str]:
+            resp = self.client.get(f"/api/photos?kind={query}")
+            return {row["filename"] for row in resp.get_json()["photos"]}
+
+        self.assertEqual(names("video"), {"trip.mp4"})
+        # A motion photo counts as a photo - that is the whole point of the
+        # "照片" tab: it is a picture that happens to move.
+        self.assertEqual(names("photo"), {"still.jpg"})
+        self.assertEqual(names("live"), {"still.jpg"})
+        self.assertEqual(names(""), {"trip.mp4", "still.jpg"})
+
+    def test_an_unknown_kind_is_ignored(self) -> None:
+        resp = self.client.get("/api/photos?kind=sounds")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.get_json()["photos"]), 2)
+
     def test_the_playable_endpoint_streams_what_is_already_there(self) -> None:
         ready = os.path.join(self.cache, "trip_play.mp4")
         Path(ready).write_bytes(b"\x33" * 1024)
@@ -4064,20 +4167,34 @@ class VideoPlaybackTests(unittest.TestCase):
         )
         return path
 
-    def test_indexing_a_video_writes_a_poster_and_marks_it_collected(self) -> None:
+    def test_indexing_a_video_writes_a_poster_and_queues_it_for_analysis(self) -> None:
         from photo_reviewer.scanner import _index_one
 
         path = self._make_video("trip.mp4")
         self.assertTrue(_index_one(path, self.folder, self.db, self.cfg))
         row = self.db.get_photo_by_path(path)
         self.assertEqual(row["media_kind"], "video")
-        # No model pass for videos, so they land in "已收录" immediately.
-        self.assertEqual(row["status"], "analyzed")
+        # A video is analysed like a photo, from its poster frame - so it waits
+        # in "待整理" until the model has looked at it.
+        self.assertEqual(row["status"], "pending")
         self.assertIsNone(row["score"])
         self.assertGreater(row["duration_ms"], 5000)
         self.assertAlmostEqual(row["width"], 320)
         self.assertTrue(row["thumb_path"] and os.path.exists(row["thumb_path"]))
         self.assertEqual(row["video_info"]["video_codec"], "h264")
+
+    def test_a_video_without_a_poster_is_not_queued_for_analysis(self) -> None:
+        """No ffmpeg means no frame to send, so the row carries the reason."""
+        from photo_reviewer.scanner import _index_one
+
+        path = self._make_video("trip.mp4")
+        with patch(
+            "photo_reviewer.pipeline.video.make_poster", return_value=False
+        ), patch("photo_reviewer.pipeline.video.probe", return_value=None):
+            self.assertTrue(_index_one(path, self.folder, self.db, self.cfg))
+        row = self.db.get_photo_by_path(path)
+        self.assertEqual(row["status"], "error")
+        self.assertIn("ffmpeg", row["error"] or "")
 
     def test_the_clip_endpoint_generates_and_caches(self) -> None:
         from photo_reviewer.scanner import _index_one
@@ -4097,7 +4214,7 @@ class VideoPlaybackTests(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(first.data, second.data)
 
-    def test_the_clip_is_about_five_seconds(self) -> None:
+    def test_the_clip_is_about_three_seconds(self) -> None:
         from photo_reviewer.scanner import _index_one
         from photo_reviewer.video import probe
 
@@ -4109,8 +4226,9 @@ class VideoPlaybackTests(unittest.TestCase):
         )
         clip = probe(self.db.get_photo(row["id"])["clip_path"])
         self.assertIsNotNone(clip)
-        self.assertLessEqual(clip.duration_ms, 5400)
-        self.assertGreater(clip.duration_ms, 4000)
+        # The default preview length is three seconds.
+        self.assertLessEqual(clip.duration_ms, 3400)
+        self.assertGreater(clip.duration_ms, 2400)
 
 
 if __name__ == "__main__":
