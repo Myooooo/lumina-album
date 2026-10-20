@@ -482,6 +482,20 @@ def _index_one(
         return False
 
 
+def video_scan_extensions(config) -> tuple:
+    """The video extensions a scan should look at.
+
+    "不处理" turns this into an empty tuple, which is all the discovery walk
+    needs to know: the video files are simply never paired, so they are not
+    indexed, not probed and not thumbnailed. Rows already in the database are
+    untouched - the setting describes what future scans collect, not what the
+    library is allowed to contain.
+    """
+    if (getattr(config, "video_processing", "ffmpeg") or "ffmpeg") == "none":
+        return ()
+    return config.video_extensions
+
+
 def _stalled_video_pairs(
     folder: str, db: Database, already: list[tuple[str, str | None]]
 ) -> list[tuple[str, str | None]]:
@@ -673,7 +687,7 @@ def _scan_worker(
             config.image_extensions,
             config.raw_extensions,
             skip_dirs=skip_dirs,
-            video_extensions=config.video_extensions,
+            video_extensions=video_scan_extensions(config),
             merge_live=config.merge_live_photos,
         )
         if only_paths is not None:
@@ -702,7 +716,8 @@ def _scan_worker(
         # empty ``video_info`` and never gets looked at again, because its path
         # is already in the database. Those rows are re-probed on every scan so
         # they heal as soon as the cause is gone.
-        to_index.extend(_stalled_video_pairs(folder, db, to_index))
+        if video_scan_extensions(config):
+            to_index.extend(_stalled_video_pairs(folder, db, to_index))
 
         if to_index and not _run_index_phase(
             job_id,
@@ -807,7 +822,7 @@ def _rebuild_worker(
             config.image_extensions,
             config.raw_extensions,
             skip_dirs=skip_dirs,
-            video_extensions=config.video_extensions,
+            video_extensions=video_scan_extensions(config),
             merge_live=config.merge_live_photos,
         )
         images = [image_path for image_path, _raw in pairs]

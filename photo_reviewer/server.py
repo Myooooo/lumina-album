@@ -44,7 +44,13 @@ from .cards import (
     restore_to_card,
     target_for,
 )
-from .config import EDITABLE_FIELDS, PERSISTED_FIELDS, PREVIEW_MODES, Config
+from .config import (
+    EDITABLE_FIELDS,
+    PERSISTED_FIELDS,
+    PREVIEW_MODES,
+    VIDEO_PROCESSING,
+    Config,
+)
 from .db import Database, sort_photos
 from .exif import extract_exif
 from .geocode import PROVIDERS as GEOCODING_PROVIDERS
@@ -1105,6 +1111,12 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             if mode not in PREVIEW_MODES:
                 return jsonify({"error": "video_preview_mode 参数不合法"}), 400
             staged["video_preview_mode"] = mode
+
+        if "video_processing" in data:
+            processing = str(data["video_processing"]).strip().lower()
+            if processing not in VIDEO_PROCESSING:
+                return jsonify({"error": "video_processing 参数不合法"}), 400
+            staged["video_processing"] = processing
 
         if "api_base_url" in data:
             staged["api_base_url"] = (

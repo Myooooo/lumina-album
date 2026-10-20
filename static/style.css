@@ -52,6 +52,36 @@
   --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-hand: "KaiTi", "STKaiti", "Songti SC", "Baskerville", "Segoe Script", cursive, serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Consolas", Menlo, monospace;
+
+  /* ---------- Motion ----------
+     Three curves cover the whole interface. The built-in `ease` and `ease-in`
+     are too weak to read as intentional, and `ease-in` in particular starts
+     slow exactly when the user is watching most closely, which makes a UI feel
+     sluggish. Everything below is a strong-out variant: fast off the mark,
+     long tail into place. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);      /* entrances, hover, press */
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);  /* on-screen movement */
+  --ease-soft: cubic-bezier(0.32, 0.72, 0, 1);     /* panels, sheets */
+
+  /* Durations. UI motion stays under 300ms: a 180ms select feels faster than a
+     400ms one even though the work is identical. */
+  --dur-press: 120ms;
+  --dur-fast: 160ms;
+  --dur-ui: 220ms;
+  --dur-panel: 320ms;
+  --dur-slow: 460ms;
+
+  /* ---------- Type scale ----------
+     Tracking and leading are size-specific, never one value everywhere: large
+     text reads too airy as it grows, so it tightens; small text opens up a
+     little for legibility. */
+  --tracking-title: -0.012em;
+  --tracking-body: 0;
+  --tracking-label: 0.015em;
+  --tracking-caps: 0.09em;
+  --leading-display: 1.12;
+  --leading-title: 1.32;
+  --leading-body: 1.65;
 }
 
 /* ---------- Global Reset & Body ---------- */
@@ -122,7 +152,9 @@ svg {
   margin: 0;
   font-size: 23px;
   font-weight: 600;
-  letter-spacing: 1.5px;
+  letter-spacing: 0.04em;
+  line-height: var(--leading-display);
+  font-optical-sizing: auto;
   color: var(--text);
   display: flex;
   align-items: baseline;
@@ -131,9 +163,9 @@ svg {
 
 .brand h1 .sub {
   font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 400;
-  letter-spacing: 2px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-caps);
   color: var(--muted);
   text-transform: uppercase;
 }
@@ -182,7 +214,9 @@ svg {
   font-family: inherit;
   color: var(--text);
   outline: none;
-  transition: all .2s ease;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
 }
 
 /* The folder-history toggle lives inside the field, at its right edge. */
@@ -306,7 +340,11 @@ svg {
   font-family: inherit;
   font-weight: 500;
   color: var(--text-secondary);
-  transition: all .2s cubic-bezier(.2,.8,.2,1);
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
   white-space: nowrap;
 }
 
@@ -317,7 +355,6 @@ svg {
 }
 
 .btn:hover {
-  transform: translateY(-1px);
   color: var(--text);
   background: #ffffff;
   border-color: var(--border-strong);
@@ -325,7 +362,7 @@ svg {
 }
 
 .btn:active {
-  transform: translateY(0) scale(0.98);
+  transform: scale(0.97);
 }
 
 .btn.primary {
@@ -454,7 +491,10 @@ svg {
   cursor: pointer;
   user-select: none;
   box-shadow: 0 2px 8px rgba(60, 40, 20, 0.02);
-  transition: all .2s cubic-bezier(.2,.8,.2,1);
+  transition: transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .stat svg {
@@ -475,11 +515,10 @@ svg {
 .stat-label {
   font-size: 12.5px;
   color: var(--muted);
-  letter-spacing: .3px;
+  letter-spacing: var(--tracking-label);
 }
 
 .stat:hover {
-  transform: translateY(-1px);
   background: #ffffff;
   border-color: var(--border-strong);
   box-shadow: var(--shadow-soft);
@@ -543,7 +582,8 @@ svg {
   font-family: inherit;
   color: var(--text);
   outline: none;
-  transition: all .2s;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .filter-group select:focus,
@@ -604,7 +644,9 @@ svg {
   color: var(--text);
   cursor: pointer;
   text-align: left;
-  transition: all .2s ease;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .custom-select-trigger:hover,
@@ -655,7 +697,7 @@ svg {
 
 .custom-select-menu.open {
   display: block;
-  animation: dropdownIn .18s ease;
+  animation: dropdownIn var(--dur-fast) var(--ease-out);
   transform-origin: top center;
 }
 
@@ -665,7 +707,8 @@ svg {
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
-  transition: all .15s;
+  transition: background-color var(--dur-press) var(--ease-out),
+              color var(--dur-press) var(--ease-out);
 }
 
 .custom-select-option:hover,
@@ -715,7 +758,7 @@ select {
   cursor: pointer;
   --rot: -0.6deg;
   transform: rotate(var(--rot));
-  transition: transform .4s cubic-bezier(.2,.8,.2,1), z-index .1s, box-shadow .4s ease;
+  transition: transform .4s var(--ease-out), z-index .1s, box-shadow .4s ease;
   position: relative;
   animation: cardPop .45s ease backwards;
 }
@@ -725,10 +768,8 @@ select {
 .polaroid-card:nth-child(4n+3) { --rot: -0.5deg; }
 .polaroid-card:nth-child(4n) { --rot: 0.9deg; }
 
-.polaroid-card:hover {
-  transform: rotate(0deg) translateY(-4px) scale(1.02);
-  z-index: 10;
-}
+/* Movement on hover lives in the pointer-gated block at the end of the file;
+   the raised shadow stays here so it still answers a pointer on touch. */
 
 /* Cards far outside the viewport are taken out of the render tree.
    `content-visibility: auto` skips layout, paint and compositing for them, and
@@ -817,7 +858,7 @@ select {
   object-fit: cover;
   opacity: 0;
   transform: scale(1.015);
-  transition: opacity .5s ease, transform .6s cubic-bezier(.2,.8,.2,1);
+  transition: opacity .5s ease, transform .6s var(--ease-out);
 }
 
 .polaroid-photo.is-loaded {
@@ -854,9 +895,6 @@ select {
   overflow: hidden;
 }
 
-.polaroid-card.is-video:hover .polaroid-inner {
-  box-shadow: 0 16px 34px rgba(18, 14, 10, 0.42);
-}
 
 /* The sprocket holes: two columns of *rounded rectangles* down the black
    border, one on each side of the picture - the way a 35 mm strip reads.
@@ -944,42 +982,6 @@ select {
 .polaroid-card.is-video .favorite-btn.active {
   background: rgba(247, 239, 228, 0.15);
   color: #f2b8b4;
-}
-
-/* Play mark: a soft disc over the frame, brightening on hover. */
-.video-play-mark {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 52px;
-  height: 52px;
-  margin: -26px 0 0 -26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: rgba(14, 12, 10, 0.46);
-  border: 1px solid rgba(247, 239, 228, 0.5);
-  color: #fdf8f1;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  pointer-events: none;
-  transition: transform .3s cubic-bezier(.2,.8,.2,1), background-color .3s ease,
-              box-shadow .3s ease;
-  z-index: 2;
-}
-
-.video-play-mark svg {
-  width: 20px;
-  height: 20px;
-  transform: translateZ(0);
-}
-
-.polaroid-card.is-video:hover .video-play-mark {
-  transform: scale(1.1);
-  background: rgba(20, 16, 12, 0.62);
-  box-shadow: 0 0 0 9px rgba(179, 125, 86, 0.16), 0 8px 22px rgba(0, 0, 0, 0.36);
 }
 
 /* Duration pill: bottom-right of the frame, the twin of the RAW badge. */
@@ -1070,7 +1072,11 @@ select {
   cursor: pointer;
   z-index: 6;
   box-shadow: 0 2px 8px rgba(60, 40, 20, 0.1);
-  transition: all .2s cubic-bezier(.2,.8,.2,1);
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .favorite-btn svg {
@@ -1216,7 +1222,11 @@ select {
   color: var(--muted);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all .2s cubic-bezier(.2,.8,.2,1);
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .path-open-btn svg {
@@ -1279,14 +1289,15 @@ select {
   font-family: var(--font-hand);
   font-size: 18px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--leading-body);
   margin: 12px 8px 12px;
   display: -webkit-box;
   text-align: center;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  letter-spacing: .5px;
+  letter-spacing: var(--tracking-body);
+  text-wrap: pretty;
 }
 
 .back-tags {
@@ -1330,6 +1341,19 @@ select {
   background: var(--primary-light);
   color: var(--primary-dark);
   font-weight: 700;
+}
+
+/* On the film card the paper palette has nowhere to sit: `--primary-light` is
+   almost white, so the total reads as a headlight on black. These are the same
+   chips, lowered to a translucent tint of the warm accent. */
+.polaroid-card.is-video .score-pill.total {
+  background: rgba(196, 148, 110, 0.2);
+  color: #eccfae;
+  box-shadow: inset 0 0 0 1px rgba(226, 190, 155, 0.14);
+}
+
+.polaroid-card.is-video .score-pill {
+  font-weight: 600;
 }
 
 .card-actions {
@@ -1406,7 +1430,8 @@ select {
 .empty-state p {
   font-family: var(--font-hand);
   font-size: 20px;
-  line-height: 1.8;
+  line-height: var(--leading-body);
+  text-wrap: pretty;
   color: var(--text-secondary);
 }
 
@@ -1414,11 +1439,18 @@ select {
 .selection-bar {
   position: fixed;
   bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Centred with auto margins rather than translateX(-50%): a transform-based
+     centre fights every entrance animation that also touches `transform`,
+     which made the bar appear half a width to the right and then snap home.
+     Margins leave `transform` free for motion. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: calc(100vw - 32px);
   background: rgba(44, 36, 29, 0.92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
   color: #ffffff;
   padding: 9px 20px;
   border-radius: 999px;
@@ -1428,8 +1460,22 @@ select {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
   z-index: 60;
   white-space: nowrap;
-  animation: fadeSlideIn .35s ease;
   border: 1px solid rgba(255, 255, 255, 0.12);
+  /* Its own curve and a shorter travel: the bar is a quiet confirmation, not a
+     notification. Materialising upward from the edge it lives on reads as the
+     shelf sliding into place. */
+  animation: selectionBarIn var(--dur-panel) var(--ease-soft) both;
+}
+
+@keyframes selectionBarIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .selection-bar span {
@@ -1487,7 +1533,7 @@ select {
   position: relative;
   box-shadow: var(--shadow-modal), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.7);
-  animation: modalPop .45s cubic-bezier(.2,.9,.25,1.1) both;
+  animation: modalPop var(--dur-panel) var(--ease-soft) both;
 }
 
 .modal-content::before {
@@ -1537,7 +1583,10 @@ select {
   cursor: pointer;
   color: var(--muted);
   box-shadow: 0 2px 8px rgba(60, 40, 20, 0.06);
-  transition: all .25s ease;
+  transition: transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .modal-close svg {
@@ -1634,23 +1683,40 @@ select {
 }
 
 /* A Live Photo's motion fades in over the still and, when it ends, fades back
-   out - the way iOS turns a moment into movement and back. The clip loop uses
-   the entrance animation above; this is the one-shot motion's own curve.
+   out - the way iOS turns a moment into movement and back.
+
+   The fade-in has to survive the element going from `display: none` to visible:
+   a plain `opacity` transition would be skipped, because there is no previous
+   value to interpolate from - the motion used to appear at full strength. The
+   `@starting-style` block below supplies that missing "before" state, so the
+   clip genuinely rises out of the still, with a whisper of blur and scale so it
+   reads as one photograph changing rather than two stacked layers.
 
    ``object-fit: cover`` rather than ``contain``: the motion is not always the
    same shape as its poster, and letterboxing it would paint bars down the sides
    of a photograph. Cropping a sliver is invisible; a black band is not. */
 .preview-video.is-live-motion {
   animation: none;
-  opacity: 1;
   object-fit: cover;
   background: transparent;
   box-shadow: none;
-  transition: opacity .4s ease;
+  transition: opacity var(--dur-slow) var(--ease-soft),
+              filter var(--dur-slow) var(--ease-soft),
+              scale var(--dur-slow) var(--ease-soft);
+}
+
+@starting-style {
+  .preview-video.is-live-motion {
+    opacity: 0;
+    filter: blur(3px);
+    scale: 1.015;
+  }
 }
 
 .preview-video.is-live-motion.is-fading {
   opacity: 0;
+  filter: blur(2px);
+  transition-duration: 380ms;
 }
 
 @keyframes previewVideoIn {
@@ -1672,7 +1738,7 @@ select {
   cursor: pointer;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  transition: transform .26s cubic-bezier(.2,.8,.2,1), background-color .2s ease,
+  transition: transform .26s var(--ease-out), background-color .2s ease,
               box-shadow .26s ease;
   z-index: 4;
 }
@@ -1739,7 +1805,7 @@ select {
   cursor: pointer;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  transition: transform .26s cubic-bezier(.2,.8,.2,1), background-color .2s ease;
+  transition: transform .26s var(--ease-out), background-color .2s ease;
   z-index: 4;
 }
 
@@ -1823,7 +1889,7 @@ select {
   border: 3px solid var(--volume-color);
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
   cursor: grab;
-  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+  transition: transform .2s var(--ease-out), box-shadow .2s ease;
 }
 
 .volume-range::-moz-range-thumb {
@@ -1834,7 +1900,7 @@ select {
   border: 3px solid var(--volume-color);
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
   cursor: grab;
-  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+  transition: transform .2s var(--ease-out), box-shadow .2s ease;
 }
 
 .volume-range:active::-webkit-slider-thumb,
@@ -1921,8 +1987,8 @@ select {
   background: rgba(120, 100, 84, 0.26);
   box-shadow: inset 0 0 0 1px rgba(120, 100, 84, 0.16);
   cursor: pointer;
-  transition: background-color .3s cubic-bezier(.2,.8,.2,1),
-              box-shadow .3s cubic-bezier(.2,.8,.2,1);
+  transition: background-color .3s var(--ease-out),
+              box-shadow .3s var(--ease-out);
 }
 
 /* The knob. Translation carries it across; a slight widening while pressed is
@@ -1937,7 +2003,7 @@ select {
   border-radius: 50%;
   background: #fffdf9;
   box-shadow: 0 1px 3px rgba(60, 40, 20, 0.28), 0 1px 1px rgba(60, 40, 20, 0.12);
-  transition: transform .3s cubic-bezier(.2,.8,.2,1), width .2s ease;
+  transition: transform .3s var(--ease-out), width .2s ease;
 }
 
 .checkbox-row input[type="checkbox"]:checked {
@@ -2021,7 +2087,11 @@ select {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all .2s;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 .fs-viewer-close:hover {
   background: rgba(217, 83, 79, 0.85);
@@ -2056,7 +2126,9 @@ select {
   display: flex;
   align-items: center;
   gap: 5px;
-  transition: all .15s;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-press) var(--ease-out),
+              color var(--dur-press) var(--ease-out);
 }
 .fs-viewer-toolbar button:hover {
   background: rgba(255, 255, 255, 0.2);
@@ -2116,8 +2188,9 @@ select {
   font-size: 24px;
   font-weight: 600;
   color: var(--text);
-  line-height: 1.35;
-  letter-spacing: .5px;
+  line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title);
+  font-optical-sizing: auto;
 }
 
 /* Poetic quote card */
@@ -2382,7 +2455,7 @@ select {
   border: 3px solid var(--score-color);
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
   cursor: grab;
-  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+  transition: transform .2s var(--ease-out), box-shadow .2s ease;
 }
 
 .score-range::-moz-range-thumb {
@@ -2393,7 +2466,7 @@ select {
   border: 3px solid var(--score-color);
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
   cursor: grab;
-  transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+  transition: transform .2s var(--ease-out), box-shadow .2s ease;
 }
 
 .score-range:hover::-webkit-slider-thumb,
@@ -2470,7 +2543,11 @@ select {
   align-items: center;
   justify-content: center;
   box-shadow: 0 10px 28px rgba(45, 30, 15, 0.18);
-  transition: all .2s cubic-bezier(.2,.8,.2,1);
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
   padding: 0;
 }
 
@@ -2495,10 +2572,10 @@ select {
 
 /* Image slide animations */
 .preview-switch-left {
-  animation: previewSwitchLeft .45s cubic-bezier(0.2, 0.85, 0.25, 1) both;
+  animation: previewSwitchLeft var(--dur-panel) var(--ease-in-out) both;
 }
 .preview-switch-right {
-  animation: previewSwitchRight .45s cubic-bezier(0.2, 0.85, 0.25, 1) both;
+  animation: previewSwitchRight var(--dur-panel) var(--ease-in-out) both;
 }
 
 @keyframes previewSwitchLeft {
@@ -2539,7 +2616,8 @@ select {
   gap: 8px;
   font-size: 13.5px;
   color: var(--text);
-  transition: all .15s ease;
+  transition: background-color var(--dur-press) var(--ease-out),
+              color var(--dur-press) var(--ease-out);
 }
 .dir-list li svg { width: 15px; height: 15px; color: var(--muted); }
 .dir-list li:hover, .dir-list li.active {
@@ -2597,7 +2675,9 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all .15s;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-press) var(--ease-out),
+              color var(--dur-press) var(--ease-out);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2728,7 +2808,7 @@ select {
   line-height: 17px;
   text-align: center;
   font-weight: 600;
-  animation: dotPop .3s cubic-bezier(.2,.9,.25,1.2);
+  animation: dotPop .3s var(--ease-soft);
 }
 
 @keyframes dotPop {
@@ -2811,7 +2891,11 @@ select {
   font-family: inherit;
   color: var(--text);
   outline: none;
-  transition: all .2s;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 .form-grid input:focus,
 .form-grid textarea:focus,
@@ -2831,7 +2915,7 @@ select {
 /* Replayed every time a tab is opened: the pane goes from display:none to
    displayed, so the animation restarts on its own without JS bookkeeping. */
 .settings-pane.active {
-  animation: paneIn .32s cubic-bezier(.2,.8,.2,1) both;
+  animation: paneIn var(--dur-ui) var(--ease-out) both;
 }
 
 @keyframes paneIn {
@@ -2895,7 +2979,7 @@ select {
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: color .22s ease, transform .22s cubic-bezier(.2,.8,.2,1);
+  transition: color .22s ease, transform .22s var(--ease-out);
 }
 
 /* The ink measures this box, so a label change must not shift the padding. */
@@ -3136,7 +3220,7 @@ select {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.5;
-  animation: toastIn .35s cubic-bezier(.2,.9,.3,1.2) both;
+  animation: toastIn .35s var(--ease-soft) both;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3234,7 +3318,12 @@ select {
   margin: 0;
 }
 
-/* ---------- Keyframe Animations ---------- */
+/* ---------- Keyframe Animations ----------
+   Entrances are ease-out: they arrive fast and settle. Exits are deliberately
+   shorter than entrances - the user has already decided to leave, and making
+   them wait through an exit animation is the most common way a UI feels slow.
+   Nothing starts from scale(0): an element that appears out of nothing reads as
+   a glitch, while one that grows from 0.96 reads as materialising. */
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -3247,25 +3336,29 @@ select {
   from { opacity: 1; }
   to { opacity: 0; }
 }
+/* Modals keep a centred origin - they are not anchored to a trigger - and the
+   travel is small: a dialog that flies in from 18px away reads as unsteady. */
 @keyframes modalPop {
-  0% { opacity: 0; transform: scale(0.92) translateY(18px); }
+  0% { opacity: 0; transform: scale(0.96) translateY(10px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 @keyframes modalPopOut {
   0% { opacity: 1; transform: scale(1) translateY(0); }
-  100% { opacity: 0; transform: scale(0.96) translateY(10px); }
+  100% { opacity: 0; transform: scale(0.985) translateY(6px); }
 }
 @keyframes cardPop {
-  from { opacity: 0; transform: scale(0.95) rotate(0deg); }
+  from { opacity: 0; transform: scale(0.96) rotate(0deg); }
   to { opacity: 1; transform: scale(1) rotate(var(--rot)); }
 }
+/* Menus grow from their trigger's edge, so the vertical scale is anchored at
+   the top rather than the middle. */
 @keyframes dropdownIn {
-  from { opacity: 0; transform: translateY(-6px) scaleY(0.96); }
+  from { opacity: 0; transform: translateY(-4px) scaleY(0.97); }
   to { opacity: 1; transform: translateY(0) scaleY(1); }
 }
 @keyframes dropdownOut {
   from { opacity: 1; transform: translateY(0) scaleY(1); }
-  to { opacity: 0; transform: translateY(-5px) scaleY(0.97); }
+  to { opacity: 0; transform: translateY(-3px) scaleY(0.98); }
 }
 
 /* ---------- Exit animations ---------- */
@@ -3287,7 +3380,7 @@ select {
 }
 .custom-select-menu.closing {
   display: block;
-  animation: dropdownOut .19s ease both;
+  animation: dropdownOut var(--dur-press) var(--ease-out) both;
   pointer-events: none;
 }
 
@@ -3325,7 +3418,7 @@ select {
   cursor: pointer;
   z-index: 120;
   box-shadow: 0 10px 28px rgba(45, 30, 15, 0.18);
-  transition: transform .28s cubic-bezier(.2,.8,.2,1), box-shadow .28s ease,
+  transition: transform .28s var(--ease-out), box-shadow .28s ease,
               color .2s ease, background-color .2s ease;
   animation: backToTopIn .34s cubic-bezier(.34, 1.28, .64, 1) both;
 }
@@ -3335,7 +3428,7 @@ select {
   width: 20px;
   height: 20px;
   transform: translateY(1px);
-  transition: transform .28s cubic-bezier(.2,.8,.2,1);
+  transition: transform .28s var(--ease-out);
 }
 
 .back-to-top .btn-icon svg { width: 20px; height: 20px; }
@@ -3348,7 +3441,7 @@ select {
   border: 1px solid var(--primary);
   opacity: 0;
   transform: scale(.82);
-  transition: opacity .28s ease, transform .28s cubic-bezier(.2,.8,.2,1);
+  transition: opacity .28s ease, transform .28s var(--ease-out);
   pointer-events: none;
 }
 
@@ -3356,7 +3449,6 @@ select {
   background: #fffdf9;
   color: var(--primary);
   box-shadow: 0 14px 34px rgba(45, 30, 15, 0.24);
-  transform: translateY(-3px);
 }
 
 .back-to-top:hover .btn-icon { transform: translateY(-1px); }
@@ -3426,14 +3518,100 @@ select {
   .card-status.state-connected::before, .folder-history, .folder-history-item,
   .custom-select-menu, .settings-pane, .card-pending-dot, .toast,
   .back-to-top, .back-to-top-ring, .back-to-top .btn-icon,
-  .video-play-mark, .live-badge, .preview-video, .live-badge-chip,
+  .live-badge, .live-badge-chip,
   .preview-sound-btn, .preview-video-pause {
     animation: none !important;
     transition: none !important;
+  }
+  /* Reduced motion means fewer, gentler animations - not none at all. The
+     preview still has to say "this is playing now", so it keeps a short opacity
+     cross-fade and drops the scale and blur that carry the movement. */
+  .preview-video {
+    animation: none !important;
+  }
+  .preview-video.is-live-motion {
+    transition: opacity 180ms linear !important;
+    filter: none !important;
+    scale: 1 !important;
+  }
+  @starting-style {
+    .preview-video.is-live-motion {
+      opacity: 0;
+      filter: none;
+      scale: 1;
+    }
   }
   /* Exit animations are skipped entirely; js/ui-kit.js hides immediately. */
   .modal.closing, .custom-select-menu.closing, .folder-history.closing,
   .modal.closing > .modal-content, .modal.closing > .preview-content {
     animation: none !important;
   }
+}
+
+/* A translucent material is decoration; with transparency reduced it has to
+   become a solid surface so the text on it stays legible. */
+@media (prefers-reduced-transparency: reduce) {
+  .selection-bar,
+  .settings-tabs,
+  .folder-history,
+  .custom-select-menu,
+  .toast {
+    background: #2c241d;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .modal {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(40, 28, 18, 0.72);
+  }
+}
+
+/* ---------- Pointer-gated motion ----------
+   Only a device with a hovering, precise pointer gets movement on hover. On
+   touch, `:hover` sticks after a tap, so a lifted card would stay lifted and
+   the next tap would read as "put it back" instead of "open it". Colour and
+   shadow feedback stay ungated: they cost nothing and never stick. */
+@media (hover: hover) and (pointer: fine) {
+  .polaroid-card:hover {
+    transform: rotate(0deg) translateY(-4px) scale(1.02);
+    z-index: 10;
+  }
+
+  .polaroid-card.is-video:hover .polaroid-inner {
+    box-shadow: 0 16px 34px rgba(18, 14, 10, 0.42);
+  }
+
+  .btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .stat:hover {
+    transform: translateY(-1px);
+  }
+
+  .back-to-top:hover {
+    transform: translateY(-3px);
+  }
+}
+
+/* ---------- Press ----------
+   Feedback has to land on pointer-down: waiting for the click to finish makes
+   the interface feel like it is thinking. 0.97 is small enough to read as
+   physical rather than bouncy. */
+.btn:active,
+.preset-btn:active,
+.settings-tab:active,
+.force-label:active,
+.preview-sound-btn:active,
+.preview-video-pause:active,
+.preview-live-btn:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-press);
+}
+
+.card-actions .btn:active,
+.favorite-btn:active,
+.card-check:active {
+  transform: scale(0.94);
 }

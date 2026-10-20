@@ -632,6 +632,14 @@ const DIMENSION_COLORS = {
   memory: "#d96b7b",
   uniqueness: "#6f9e7a",
 };
+//: The same three hues, lifted for the near-black film card. A 10% tint of the
+//: paper palette disappears on black, and the "总分" chip in its light-theme
+//: cream reads as a headlight; these are the versions that sit quietly on film.
+const DIMENSION_COLORS_ON_DARK = {
+  technical: "#9dc2e8",
+  memory: "#ecabb4",
+  uniqueness: "#a9cbae",
+};
 
 /**
  * Score rows that participate in the "the model did not fill this in" check.
@@ -672,13 +680,22 @@ function dimensionRows(dims, score) {
   }).join("");
 }
 
-function dimensionValues(dims, score) {
+/**
+ * The three dimension pills.
+ *
+ * ``onDark`` picks the lightened palette and a stronger tint: the film card is
+ * near-black, so the paper theme's 10%-alpha backgrounds and mid-tone hues lose
+ * both contrast and hue there.
+ */
+function dimensionValues(dims, score, onDark = false) {
   if (!hasDimensionScores(dims, score)) return "";
   const d = dims || {};
+  const palette = onDark ? DIMENSION_COLORS_ON_DARK : DIMENSION_COLORS;
+  const tint = onDark ? "26" : "1a";
   return Object.keys(DIMENSION_NAMES).map((key) => {
     const val = d[key] ?? 0;
-    const color = DIMENSION_COLORS[key] || "#b3815a";
-    return `<span class="score-pill" style="color:${color};background-color:${color}1a">${DIMENSION_NAMES[key]} ${Number(val).toFixed(1)}</span>`;
+    const color = palette[key] || (onDark ? "#e0c6a8" : "#b3815a");
+    return `<span class="score-pill" style="color:${color};background-color:${color}${tint}">${DIMENSION_NAMES[key]} ${Number(val).toFixed(1)}</span>`;
   }).join("");
 }
 
@@ -983,7 +1000,7 @@ function cardHtml(photo) {
   const scorePills = hasScore
     ? `<div class="score-pills">
             <span class="score-pill total">总分 ${scoreText(photo.score)}</span>
-            ${dimensionValues(dims, photo.score)}
+            ${dimensionValues(dims, photo.score, isVideo)}
           </div>`
     : "";
 
@@ -1017,9 +1034,7 @@ function cardHtml(photo) {
         ${rawBadge}
         ${liveBadgeHtml(photo)}
         <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" />${
-          isVideo
-            ? `<span class="video-play-mark">${ICONS.play || ""}</span>${videoDurationBadge(photo)}`
-            : ""
+          isVideo ? videoDurationBadge(photo) : ""
         }</div>
         <div class="polaroid-body">
           ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
@@ -2785,13 +2800,19 @@ function playLiveMotion(photo, options = {}) {
 
   const fadeOut = () => {
     livePlaying = false;
-    video.classList.add("is-fading");
-    // Matches the .is-fading transition in style.css.
+    // A short hold on the last frame before fading. Cutting to the fade the
+    // instant the clip ends reads as a truncation rather than a finish.
     setTimeout(() => {
       if (video.dataset.photoId !== String(photo.id)) return;
-      video.classList.add("hidden");
-      video.classList.remove("is-fading");
-    }, 420);
+      video.classList.add("is-fading");
+      // Slightly longer than the fade in style.css so the element is never
+      // hidden mid-transition.
+      setTimeout(() => {
+        if (video.dataset.photoId !== String(photo.id)) return;
+        video.classList.add("hidden");
+        video.classList.remove("is-fading");
+      }, 420);
+    }, 240);
   };
 
   video.addEventListener(
@@ -3237,6 +3258,7 @@ async function openSettings() {
     $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
     $("setMergeLivePhotos").checked = cfg.merge_live_photos !== false;
     setSelectValue($("setVideoPreviewMode"), cfg.video_preview_mode || "once");
+    setSelectValue($("setVideoProcessing"), cfg.video_processing || "ffmpeg");
     setVolume("video", cfg.video_preview_volume ?? 50);
     setVolume("live", cfg.live_volume ?? 0);
     state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
@@ -3280,6 +3302,7 @@ async function saveSettings() {
     video_pregenerate: $("setVideoPregenerate").checked,
     merge_live_photos: $("setMergeLivePhotos").checked,
     video_preview_mode: $("setVideoPreviewMode").value,
+    video_processing: $("setVideoProcessing").value,
     video_preview_volume: clampVolume($("setVideoPreviewVolume").value),
     live_volume: clampVolume($("setLiveVolume").value),
   };

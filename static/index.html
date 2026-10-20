@@ -384,6 +384,13 @@
                  aria-labelledby="tabBtnVideo" data-pane="video" hidden>
           <p class="settings-hint">详情页播放预览，全屏播放原片。预览越小处理越快，也越省缓存。</p>
           <div class="form-grid">
+            <label class="full-row">视频处理方式
+              <select id="setVideoProcessing">
+                <option value="ffmpeg">用 ffmpeg 处理（读取时长与编码、生成封面与预览）</option>
+                <option value="none">不处理（之后的同步跳过视频文件）</option>
+              </select>
+            </label>
+            <p class="full-row settings-hint compact">选择「不处理」后，之后的相册同步会忽略所有视频文件；已建立的索引不受影响。</p>
             <label>预览时长（秒）
               <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
             </label>
@@ -507,7 +514,7 @@
           <input id="editUniqueness" class="score-number" type="number" min="0" max="10" step="0.1" />
         </div>
 
-        <label>拍摄地点
+        <label class="full-row">拍摄地点
           <input id="editLocation" type="text" placeholder="例如：杭州，西湖断桥边" />
         </label>
         <label class="full-row">标签

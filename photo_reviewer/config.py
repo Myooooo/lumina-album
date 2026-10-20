@@ -58,6 +58,7 @@ PERSISTED_FIELDS = (
     "video_clip_audio",
     "video_pregenerate",
     "video_poster_ratio",
+    "video_processing",
     "video_preview_volume",
     "video_preview_mode",
     "live_volume",
@@ -67,6 +68,10 @@ PERSISTED_FIELDS = (
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
 # must never be able to move the cache/trash directories or rebind the server.
 EDITABLE_FIELDS = frozenset(PERSISTED_FIELDS) - {"trash_dir_name", "cache_dir_name"}
+
+#: How the scan treats video files.
+#: ``ffmpeg`` indexes them; ``none`` walks past them entirely.
+VIDEO_PROCESSING = ("ffmpeg", "none")
 
 #: What the detail-page preview does when a video is opened. ``off`` keeps the
 #: poster, ``once`` plays the clip and leaves the last frame, ``loop`` repeats.
@@ -286,6 +291,13 @@ class Config:
     live_volume: int = field(
         default_factory=lambda: int(os.getenv("PHOTO_LIVE_VOLUME", "0"))
     )
+    #: How videos are handled on a scan: ``ffmpeg`` indexes them (probe, poster,
+    #: preview), ``none`` skips them entirely. Read when the folder is walked, so
+    #: turning it off only affects later scans - rows already in the database
+    #: keep working, and their files stay untouched either way.
+    video_processing: str = field(
+        default_factory=lambda: os.getenv("PHOTO_VIDEO_PROCESSING", "ffmpeg")
+    )
     #: Directory holding ffmpeg/ffprobe. Environment only: it describes the
     #: machine, not the album, so it must not be pinned by a database row.
     ffmpeg_path: str = field(default_factory=lambda: os.getenv("PHOTO_FFMPEG_PATH", ""))
@@ -326,6 +338,7 @@ class Config:
             "video_clip_audio": self.video_clip_audio,
             "video_pregenerate": self.video_pregenerate,
             "video_poster_ratio": self.video_poster_ratio,
+            "video_processing": self.video_processing,
             "video_preview_volume": self.video_preview_volume,
             "video_preview_mode": self.video_preview_mode,
             "live_volume": self.live_volume,

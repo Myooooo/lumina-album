@@ -1282,6 +1282,21 @@ class ServerApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(self.cfg.video_preview_mode, before)
 
+    def test_video_processing_defaults_to_ffmpeg_and_saves(self) -> None:
+        cfg = Config(data_dir=self.tmp.name)
+        self.assertEqual(cfg.video_processing, "ffmpeg")
+        resp = self.client.post("/api/config", json={"video_processing": "none"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/config").get_json()["video_processing"], "none"
+        )
+
+    def test_an_unknown_video_processing_mode_is_rejected(self) -> None:
+        before = self.cfg.video_processing
+        resp = self.client.post("/api/config", json={"video_processing": "magic"})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.cfg.video_processing, before)
+
     def test_all_three_preview_modes_are_accepted(self) -> None:
         for mode in ("off", "once", "loop"):
             resp = self.client.post("/api/config", json={"video_preview_mode": mode})
@@ -3434,6 +3449,60 @@ class StalledVideoTests(unittest.TestCase):
             }
         )
         self.assertEqual(_stalled_video_pairs(self.folder, self.db, []), [])
+
+
+class VideoProcessingModeTests(unittest.TestCase):
+    """「视频处理方式」 decides what a scan picks up, not what the library holds.
+
+    Turning it off must not touch rows that already exist: the folder may be on
+    a slow drive, and re-walking it to delete videos would be a surprising,
+    irreversible side effect of a settings toggle.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        Image.new("RGB", (40, 30), (1, 2, 3)).save(
+            os.path.join(self.folder, "a.jpg"), "JPEG"
+        )
+        with open(os.path.join(self.folder, "b.mp4"), "wb") as fh:
+            fh.write(b"\x00" * 32)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _pairs(self, mode: str) -> list[str]:
+        from photo_reviewer.scanner import discover_photo_pairs, video_scan_extensions
+
+        cfg = Config(
+            data_dir=os.path.join(self.tmp.name, mode),
+            db_path=os.path.join(self.tmp.name, f"{mode}.db"),
+            video_processing=mode,
+        )
+        return [
+            os.path.basename(path)
+            for path, _raw in discover_photo_pairs(
+                self.folder,
+                cfg.image_extensions,
+                cfg.raw_extensions,
+                video_extensions=video_scan_extensions(cfg),
+            )
+        ]
+
+    def test_ffmpeg_mode_collects_videos(self) -> None:
+        self.assertEqual(self._pairs("ffmpeg"), ["a.jpg", "b.mp4"])
+
+    def test_none_mode_walks_past_them(self) -> None:
+        self.assertEqual(self._pairs("none"), ["a.jpg"])
+
+    def test_the_helper_reads_the_setting(self) -> None:
+        from photo_reviewer.scanner import video_scan_extensions
+
+        cfg = Config(data_dir=self.tmp.name)
+        self.assertTrue(video_scan_extensions(cfg))
+        cfg.video_processing = "none"
+        self.assertEqual(video_scan_extensions(cfg), ())
 
 
 class LivePhotoMergeSwitchTests(unittest.TestCase):
