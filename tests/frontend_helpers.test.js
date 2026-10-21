@@ -36,7 +36,7 @@ function extractConst(name) {
   return match[0];
 }
 
-const PHASE_LABELS = { plan: "正在比对", copy: "正在拷贝", index: "正在索引", analyze: "正在解读" };
+const PHASE_LABELS = { plan: "正在比对", copy: "正在拷贝", index: "正在索引", analyze: "正在解读", video: "正在准备视频" };
 
 /* --------------------------------------------------------------- harness ---
    ``updateEta`` reads the module-level ``state`` and calls ``performance.now``
@@ -306,9 +306,14 @@ check(
   "正在清空回收站…"
 );
 check(
-  "a scan phase names the current file",
+  "a scan phase names the current file, basename only",
   helpers.progressLabel({ phase: "copy", processed: 2, total: 8, current: "DCIM/a.jpg" }),
-  "正在拷贝 2/8：DCIM/a.jpg"
+  "正在拷贝 2/8：a.jpg"
+);
+check(
+  "a video job keeps its own label",
+  helpers.progressLabel({ phase: "video", processed: 1, total: 1, current: "/x/y/clip.mp4" }),
+  "正在准备视频 1/1：clip.mp4"
 );
 check(
   "an unknown total does not print 0/0",

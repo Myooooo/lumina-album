@@ -109,6 +109,21 @@ class ScanJob:
 
 
 class JobManager:
+    """In-memory registry of running and finished jobs.
+
+    Nothing used to leave this dict. Every scan, every transcode and every
+    "empty the trash" adds a job, so a long-lived process grew without bound and
+    ``/api/scan/jobs`` kept returning ancient runs. Finished jobs are pruned on
+    creation: keep the most recent few so a page refresh can still find the job
+    it was watching, and drop anything that finished long enough ago that nobody
+    is polling it any more.
+    """
+
+    #: How many finished jobs to keep for a page that reloads mid-run.
+    KEEP_FINISHED = 50
+    #: And how long a finished job stays findable at all.
+    FINISHED_TTL = 3600.0
+
     def __init__(self) -> None:
         self._jobs: dict[str, ScanJob] = {}
         self._lock = threading.Lock()
@@ -116,8 +131,35 @@ class JobManager:
     def create(self, folder: str, force: bool = False) -> ScanJob:
         job = ScanJob(id=uuid.uuid4().hex[:12], folder=folder, force=force)
         with self._lock:
+            self._prune_locked()
             self._jobs[job.id] = job
         return job
+
+    def _prune_locked(self) -> None:
+        """Drop finished jobs, keeping the newest few. Caller holds the lock."""
+        now = time.time()
+        finished = [
+            job
+            for job in self._jobs.values()
+            if job.status in ("completed", "cancelled", "error")
+        ]
+        # Old enough that no open page is still polling for it.
+        stale = [
+            job for job in finished if now - job.started_at > self.FINISHED_TTL
+        ]
+        for job in stale:
+            self._jobs.pop(job.id, None)
+
+        finished = [
+            job
+            for job in self._jobs.values()
+            if job.status in ("completed", "cancelled", "error")
+        ]
+        if len(finished) <= self.KEEP_FINISHED:
+            return
+        finished.sort(key=lambda item: item.started_at, reverse=True)
+        for job in finished[self.KEEP_FINISHED :]:
+            self._jobs.pop(job.id, None)
 
     def get(self, job_id: str) -> ScanJob | None:
         with self._lock:
@@ -918,8 +960,15 @@ def _scan_worker(
         # A video with no poster has nothing to send: queueing it would call the
         # model with an empty path and overwrite the "no ffmpeg" explanation with
         # a generic error, so it is skipped either way.
+        #
+        # The decision needs four columns from every row, and asking for them one
+        # path at a time meant a SELECT plus a full row decode (tags, exif,
+        # dimensions) per photo - thousands of round trips to answer a question
+        # one query can answer.
+        rows = db.analysis_state_for_folder(folder)
+
         def _analysable(image_path: str) -> bool:
-            row = db.get_photo_by_path(image_path)
+            row = rows.get(image_path)
             if not row:
                 return False
             has_picture = bool(row.get("proxy_path") or row.get("thumb_path"))
@@ -931,7 +980,7 @@ def _scan_worker(
         else:
             to_analyze = []
             for image_path in images:
-                existing = db.get_photo_by_path(image_path)
+                existing = rows.get(image_path)
                 if not existing:
                     continue
                 already_done = (

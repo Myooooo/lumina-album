@@ -340,17 +340,37 @@ class VideoInfo:
 
     @property
     def play_mode(self) -> str:
-        """How this file has to be prepared before a browser can play it."""
+        """How this file has to be prepared before a browser can play it.
+
+        Audio counts. A file whose video track is plain H.264 but whose audio is
+        AC-3 or DTS plays as a picture with no sound in every browser, which is
+        worse than a short remux: the user sees a video that "works" and wonders
+        why it is silent. An audio track the browser cannot decode therefore
+        costs the same remux the container check does - the video stream is still
+        copied, so it is just as fast.
+        """
         codec = self.video_codec.lower()
         container = self.container.lower()
         browser_container = not container or container in BROWSER_CONTAINERS
         browser_codec = codec in BROWSER_CODECS or codec in CONDITIONAL_CODECS
-        if browser_container and browser_codec:
+        audio_ok = self._audio_playable()
+        if browser_container and browser_codec and audio_ok:
             return PLAY_ORIGINAL
         if codec in BROWSER_CODECS or codec in CONDITIONAL_CODECS:
-            # Same bits, different wrapper: a copy remux is enough.
+            # Same bits, different wrapper - or the same video with an audio
+            # track that has to be re-encoded. Either way a remux is enough for
+            # the picture, so this stays a fast path.
             return PLAY_REMUX
         return PLAY_TRANSCODE
+
+    def _audio_playable(self) -> bool:
+        """True when there is no audio, or the audio track needs no re-encoding."""
+        if not self.has_audio:
+            return True
+        codec = (self.audio_codec or "").lower()
+        if not codec:
+            return True
+        return codec in BROWSER_AUDIO
 
     @property
     def needs_transcode(self) -> bool:
@@ -616,12 +636,19 @@ def clip_args(
     return args
 
 
-def remux_args(source: str, dest: str, codec: str = "") -> list[str]:
+def remux_args(
+    source: str, dest: str, codec: str = "", transcode_audio: bool = False
+) -> list[str]:
     """ffmpeg arguments for a stream copy into MP4.
 
-    No re-encode: the frames are copied, so this costs milliseconds and loses
-    nothing. ``hvc1`` is the tag Apple devices and some Chrome builds require;
-    HEVC files muxed as ``hev1`` play back as a black screen without it.
+    The video is never re-encoded: the frames are copied, so this costs
+    milliseconds and loses nothing. ``hvc1`` is the tag Apple devices and some
+    Chrome builds require; HEVC files muxed as ``hev1`` play back as a black
+    screen without it.
+
+    ``transcode_audio`` re-encodes just the audio track, for the case where the
+    picture plays but the sound does not (AC-3, DTS, PCM in an MP4). That is a
+    cheap fix for a silent video, and it keeps the video stream untouched.
     """
     args = [
         "-v",
@@ -633,11 +660,12 @@ def remux_args(source: str, dest: str, codec: str = "") -> list[str]:
         "0:v:0",
         "-map",
         "0:a:0?",
-        "-c",
-        "copy",
-        "-movflags",
-        "+faststart",
     ]
+    if transcode_audio:
+        args += ["-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ac", "2"]
+    else:
+        args += ["-c", "copy"]
+    args += ["-movflags", "+faststart"]
     if str(codec).lower() == "hevc":
         args += ["-tag:v", "hvc1"]
     args.append(dest)
@@ -808,8 +836,11 @@ def make_playable(
     _discard(dest)
 
     temp = _temp_target(dest)
+    # A picture that plays with no sound is a bug the user notices; re-encoding
+    # just the audio track fixes it without touching a single video frame.
+    audio_needs_recode = bool(info and info.has_audio and not info._audio_playable())
     if mode != PLAY_TRANSCODE and _run_ffmpeg(
-        tools, remux_args(source, temp, codec), 900
+        tools, remux_args(source, temp, codec, transcode_audio=audio_needs_recode), 900
     ):
         try:
             os.replace(temp, dest)

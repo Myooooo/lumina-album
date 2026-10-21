@@ -3526,8 +3526,14 @@ class StalledVideoTests(unittest.TestCase):
     def test_a_healthy_video_is_left_alone(self) -> None:
         from photo_reviewer.scanner import _stalled_video_pairs
 
+        # Healthy means it was read *and* has a poster: a row with metadata but
+        # no picture has nothing to show, so it legitimately needs another pass.
         self._video_row(
-            "fine.mp4", video_info={"video_codec": "h264"}, status="analyzed"
+            "fine.mp4",
+            video_info={"video_codec": "h264"},
+            status="analyzed",
+            thumb_path=os.path.join(self.folder, "fine_thumb.jpg"),
+            proxy_path=os.path.join(self.folder, "fine_proxy.jpg"),
         )
         self.assertEqual(_stalled_video_pairs(self.folder, self.db, []), [])
 
@@ -3911,6 +3917,8 @@ class StalledVideoRetryTests(unittest.TestCase):
                 "status": "analyzed",
                 "media_kind": "video",
                 "video_info": {"video_codec": "h264"},
+                "thumb_path": os.path.join(self.folder, "fine_thumb.jpg"),
+                "proxy_path": os.path.join(self.folder, "fine_proxy.jpg"),
             }
         )
         rows = self.db.stalled_video_rows(self.folder)
@@ -4026,6 +4034,130 @@ class LivePhotoPairTrashTests(unittest.TestCase):
             os.path.exists(embedded),
             "a cache file is not the user's footage and is left for the sweeper",
         )
+
+
+class JobPruningTests(unittest.TestCase):
+    """Finished jobs must not accumulate for the life of the process.
+
+    Every scan, transcode and bin-emptying created an entry that was never
+    removed, so a long-running instance grew without bound and the jobs endpoint
+    kept returning ancient runs.
+    """
+
+    def setUp(self) -> None:
+        from photo_reviewer.scanner import JobManager
+
+        self.manager = JobManager()
+        self.manager.KEEP_FINISHED = 3
+
+    def _finish(self, offset: float = 0.0) -> str:
+        job = self.manager.create("folder")
+        job.status = "completed"
+        job.started_at = time.time() + offset
+        return job.id
+
+    def test_finished_jobs_are_capped(self) -> None:
+        ids = [self._finish(offset=i) for i in range(10)]
+        self.manager.create("trigger")
+        kept = {job.id for job in self.manager.list()}
+        self.assertLessEqual(len(kept), 4, "cap plus the new job")
+        self.assertIn(ids[-1], kept, "the newest finished job is kept")
+        self.assertNotIn(ids[0], kept, "the oldest is dropped")
+
+    def test_running_jobs_are_never_pruned(self) -> None:
+        running = self.manager.create("folder")
+        running.status = "running"
+        for i in range(10):
+            self._finish(offset=i)
+        self.manager.create("trigger")
+        self.assertIn(running.id, {job.id for job in self.manager.list()})
+
+    def test_an_old_finished_job_expires(self) -> None:
+        job = self.manager.create("folder")
+        job.status = "completed"
+        job.started_at = time.time() - (self.manager.FINISHED_TTL + 10)
+        self.manager.create("trigger")
+        self.assertNotIn(job.id, {j.id for j in self.manager.list()})
+
+
+class AnalysisStateQueryTests(unittest.TestCase):
+    """The queue decision is one query, not one per photo."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+
+    def tearDown(self) -> None:
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def _add(self, name: str, **extra) -> None:
+        record = {
+            "path": os.path.join(self.folder, name),
+            "folder": self.folder,
+            "filename": name,
+            "status": "analyzed",
+            "score": 8.0,
+        }
+        record.update(extra)
+        self.db.upsert_photo(record)
+
+    def test_rows_are_keyed_by_path_for_one_query(self) -> None:
+        self._add("a.jpg")
+        self._add("b.jpg", status="pending")
+        rows = self.db.analysis_state_for_folder(self.folder)
+        self.assertEqual(set(rows), {
+            os.path.join(self.folder, "a.jpg"),
+            os.path.join(self.folder, "b.jpg"),
+        })
+        self.assertEqual(rows[os.path.join(self.folder, "b.jpg")]["status"], "pending")
+
+    def test_only_the_needed_columns_come_back(self) -> None:
+        self._add("a.jpg", tags=["x"], reason="r")
+        row = self.db.analysis_state_for_folder(self.folder)[
+            os.path.join(self.folder, "a.jpg")
+        ]
+        for heavy in ("tags", "exif", "dimensions", "video_info"):
+            self.assertNotIn(heavy, row, f"{heavy} should not be decoded here")
+
+    def test_a_pictureless_video_is_a_stalled_row(self) -> None:
+        """Metadata present but no poster still needs another pass."""
+        self._add(
+            "clip.mp4",
+            media_kind="video",
+            status="analyzed",
+            video_info={"video_codec": "h264"},
+            thumb_path=None,
+            proxy_path=None,
+        )
+        paths = [row["path"] for row in self.db.stalled_video_rows(self.folder)]
+        self.assertEqual(paths, [os.path.join(self.folder, "clip.mp4")])
+
+    def test_the_column_default_fills_in_a_missing_kind(self) -> None:
+        """A row written without a kind is a photo, not an unknown."""
+        self._add("old.jpg", media_kind=None)
+        rows = self.db.analysis_state_for_folder(self.folder)
+        self.assertEqual(
+            rows[os.path.join(self.folder, "old.jpg")]["media_kind"], "photo"
+        )
+
+    def test_a_video_that_lost_its_poster_is_retried(self) -> None:
+        """Analyzed but with no picture: nothing to show, so another pass."""
+        self._add(
+            "lost.mp4",
+            media_kind="video",
+            status="analyzed",
+            video_info={"video_codec": "h264"},
+            thumb_path=None,
+            proxy_path=None,
+        )
+        paths = [row["path"] for row in self.db.stalled_video_rows(self.folder)]
+        self.assertIn(os.path.join(self.folder, "lost.mp4"), paths)
 
 
 class LivePhotoMergeSwitchTests(unittest.TestCase):

@@ -28,6 +28,7 @@ from .api_client import (
     strip_json_format,
 )
 from .cache import (
+    DERIVED_PATH_FIELDS,
     cache_dir_for_folder,
     cleanup_folder_cache,
     ensure_cache_dirs,
@@ -510,7 +511,7 @@ def _remove_photo_cache(photo: dict[str, Any], config: Config | None = None) -> 
     directory first, so a stale column can never point this at an original.
     """
     folder = photo.get("folder") or ""
-    for key in ("thumb_path", "proxy_path", "clip_path", "play_path", "live_path"):
+    for key in DERIVED_PATH_FIELDS:
         path = photo.get(key)
         if not path or not os.path.exists(path):
             continue
@@ -2210,11 +2211,16 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             _remove_photo_cache(photo, cfg)
             database.delete_rows([pid])
             purged.append({"id": pid, "file_removed": file_removed})
-        for folder in touched_folders:
-            try:
-                cleanup_folder_cache(folder, database, cfg.cache_dir_name)
-            except (OSError, sqlite3.Error):
-                logger.warning("cache cleanup failed for %s", folder, exc_info=True)
+        # One photo's own files were just deleted by name; sweeping the whole
+        # cache directory afterwards would only re-stat every file in it to find
+        # nothing. The sweep earns its cost when several rows went away at once,
+        # because then there may be orphans this request did not name.
+        if len(purged) > 1:
+            for folder in touched_folders:
+                try:
+                    cleanup_folder_cache(folder, database, cfg.cache_dir_name)
+                except (OSError, sqlite3.Error):
+                    logger.warning("cache cleanup failed for %s", folder, exc_info=True)
         return jsonify(
             {
                 "purged": purged,

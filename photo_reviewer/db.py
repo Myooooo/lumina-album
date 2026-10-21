@@ -520,7 +520,7 @@ class Database:
         # motion clip: from the user's side those are photographs that happen to
         # move, and hiding them behind a fourth tab would be a surprise.
         if kind == "video":
-            clauses.append("media_kind = 'video'")
+            clauses.append("COALESCE(media_kind, 'photo') = 'video'")
         elif kind == "photo":
             clauses.append("(media_kind IS NULL OR media_kind != 'video')")
         elif kind == "live":
@@ -911,6 +911,28 @@ class Database:
             finally:
                 conn.close()
 
+    def analysis_state_for_folder(self, folder: str) -> dict[str, dict[str, Any]]:
+        """The five columns the analysis queue needs, keyed by path.
+
+        One query instead of one per photo: deciding what still has to be
+        analysed only needs the status, the score and whether a picture exists,
+        and asking for those with ``get_photo_by_path`` meant a SELECT plus a
+        full row decode (tags, exif, dimensions, video_info) per file - on a
+        four-thousand-photo album that is thousands of JSON parses to answer a
+        question this query answers once.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT path, status, score, media_kind, proxy_path, thumb_path "
+                    "FROM photos WHERE folder=?",
+                    (folder,),
+                ).fetchall()
+                return {row["path"]: dict(row) for row in rows}
+            finally:
+                conn.close()
+
     def stalled_video_rows(self, folder: str) -> list[dict[str, Any]]:
         """Videos in one folder that were indexed but never read successfully.
 
@@ -919,15 +941,29 @@ class Database:
         the folder - EXIF, tags, dimensions and all - to find the few videos that
         still have no metadata. On an album of a few thousand photos that walk
         happened on every scan.
+
+        A row also counts as stalled when it lost its poster: without one there
+        is nothing to show and nothing to send to the model, so it needs another
+        pass whichever status it currently holds.
         """
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
                     "SELECT path, raw_path, status, video_info FROM photos "
-                    "WHERE folder=? AND status IN ('error', 'pending') "
-                    "AND media_kind = 'video' "
-                    "AND (video_info IS NULL OR video_info IN ('', '{}', 'null'))",
+                    "WHERE folder=? "
+                    # COALESCE, not a bare comparison: rows written before the
+                    # column existed carry NULL and would otherwise be invisible
+                    # to this query while still counting as videos elsewhere.
+                    "AND COALESCE(media_kind, 'photo') = 'video' "
+                    "AND ("
+                    # Never read: an error or pending row with no metadata.
+                    "  (status IN ('error', 'pending') "
+                    "   AND (video_info IS NULL OR video_info IN ('', '{}', 'null')))"
+                    # Or read once, but the poster it needs is gone.
+                    "  OR thumb_path IS NULL OR thumb_path = ''"
+                    "  OR proxy_path IS NULL OR proxy_path = ''"
+                    ")",
                     (folder,),
                 ).fetchall()
                 return [
@@ -1591,7 +1627,7 @@ class Database:
             try:
                 rows = conn.execute(
                     "SELECT id, path, thumb_path, proxy_path, clip_path, play_path "
-                    "FROM photos WHERE folder=? AND media_kind = 'video' "
+                    "FROM photos WHERE folder=? AND COALESCE(media_kind, 'photo') = 'video' "
                     "AND status != 'deleted'",
                     (folder,),
                 ).fetchall()

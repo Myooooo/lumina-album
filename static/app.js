@@ -1824,8 +1824,11 @@ function progressLabel(job) {
     return `正在清空回收站 ${job.processed}/${total}${name}`;
   }
   const total = Number(job.total) || 0;
+  // A video job works on one file and names it: "正在准备视频 1/1：a.mp4". The
+  // basename alone keeps the toolbar from showing a full album path.
+  const current = job.current ? String(job.current).split(/[\\/]/).pop() : "";
   if (!total) return `${phaseLabel(job.phase)}…`;
-  return `${phaseLabel(job.phase)} ${job.processed}/${total}${job.current ? "：" + job.current : ""}`;
+  return `${phaseLabel(job.phase)} ${job.processed}/${total}${current ? "：" + current : ""}`;
 }
 
 const PHASE_LABELS = {
@@ -1833,6 +1836,10 @@ const PHASE_LABELS = {
   copy: "正在拷贝",
   index: "正在索引",
   analyze: "正在解读",
+  // A transcode is a single-item job that can run for minutes. Without its own
+  // label it fell through to "整理照片", which describes nothing the user is
+  // actually waiting for.
+  video: "正在准备视频",
 };
 
 function phaseLabel(phase) {
@@ -2761,8 +2768,12 @@ function playPreviewClip(photo, options = {}) {
   // Both endings leave the button showing "play" again; the clip itself stays
   // on its last frame so the dialog still shows a picture.
   video.addEventListener("ended", paintPauseButton, { once: true });
-  video.addEventListener("pause", paintPauseButton);
-  video.addEventListener("play", paintPauseButton);
+  // Assigned rather than added: `playPreviewClip` runs once per opened video, so
+  // `addEventListener` accumulated one more pair of listeners every time and an
+  // old one would repaint for whichever video was on screen by then. Assignment
+  // replaces the handler instead of stacking a new one.
+  video.onpause = paintPauseButton;
+  video.onplay = paintPauseButton;
   video.addEventListener(
     "error",
     () => {
@@ -3100,7 +3111,7 @@ function updatePreview(options = {}) {
       </div>
     ` : ""}
 
-    <div class="meta-list-block" style="display:flex;flex-direction:column;gap:8px;margin:4px 0;">
+    <div class="meta-list-block">
       ${captureTime ? `
         <div class="meta-item-row" title="拍摄时间">
           ${ICONS.calendar}
@@ -3133,7 +3144,7 @@ function updatePreview(options = {}) {
 
     <div class="dimension-section">
       <div class="dimension-section-title">
-        <span style="display:inline-flex;align-items:center;gap:6px;">${ICONS.score} 多维度评分</span>
+        <span class="dimension-section-heading">${ICONS.score} 多维度评分</span>
         <span class="badge score">总分 ${scoreText(photo.score)}</span>
       </div>
       <div class="dimension-list">
@@ -3149,7 +3160,7 @@ function updatePreview(options = {}) {
     ` : ""}
 
     ${photo.error ? `
-      <div class="meta-item-row" style="color:var(--danger)" title="解析错误">
+      <div class="meta-item-row is-error" title="解析错误">
         ${ICONS.error}
         <div class="meta-content">${escapeHtml(photo.error)}</div>
       </div>

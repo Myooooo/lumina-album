@@ -40,6 +40,19 @@ def ensure_cache_dirs(folder: str, cache_dir_name: str = ".photo-review-cache") 
     return cache_dir
 
 
+#: Every column that points at a file the app rendered for a row. A preview, a
+#: play copy and a Live Photo's motion part all live in the cache directory and
+#: all have to be swept when the row goes; listing them once is what keeps the
+#: sweep and the per-row delete from drifting apart when a new kind is added.
+DERIVED_PATH_FIELDS = (
+    "thumb_path",
+    "proxy_path",
+    "clip_path",
+    "play_path",
+    "live_path",
+)
+
+
 def cleanup_folder_cache(
     folder: str, db, cache_dir_name: str = ".photo-review-cache"
 ) -> dict[str, int]:
@@ -52,7 +65,7 @@ def cleanup_folder_cache(
     cache_dir = cache_dir_for_folder(folder, cache_dir_name)
     referenced = []
     for item in db.cache_paths_for_folder(folder):
-        for key in ("thumb_path", "proxy_path", "clip_path", "play_path", "live_path"):
+        for key in DERIVED_PATH_FIELDS:
             if item.get(key):
                 referenced.append(item[key])
     return cleanup_cache(referenced, str(cache_dir))

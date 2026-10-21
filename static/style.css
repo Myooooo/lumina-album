@@ -497,6 +497,11 @@ svg {
               box-shadow var(--dur-fast) var(--ease-out);
 }
 
+/* ``.stat-icon`` / ``.label-icon`` / ``.empty-icon`` / ``.modal-title-icon`` are
+   semantic hooks, not styled classes: each holds a ``data-icon`` that the icon
+   renderer replaces with an <svg>, and the size and colour come from the
+   element-level rules below (``.stat svg``, ``.filter-group label svg``, …).
+   They exist so the markup says what an icon means, not what it looks like. */
 .stat svg {
   width: 15px;
   height: 15px;
@@ -3681,3 +3686,29 @@ select {
 .card-check:active {
   transform: scale(0.94);
 }
+
+/* The detail panel's rows: one per line, a small gap between them. */
+.meta-list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+/* The label inside the score section's title bar. It sits in a flex row that
+   already aligns its children, so only the icon-to-text gap is needed here. */
+.dimension-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dimension-section-heading svg {
+  flex-shrink: 0;
+}
+
+/* A row that reports a problem rather than a fact. */
+.meta-item-row.is-error {
+  color: var(--danger);
+}
+
