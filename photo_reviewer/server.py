@@ -105,6 +105,13 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
     JPEG counterpart exists.
     """
     raw_path = photo.get("raw_path")
+    # A trashed pair keeps saying it has a raw half, so the permanent-delete
+    # dialog can offer to remove both. Rows trashed by an older build cleared
+    # that column; for those the file is looked for beside the image, and only
+    # for deleted rows - this is the one place the list may touch the disk, and
+    # the trash view is small.
+    if not raw_path and photo.get("status") == "deleted":
+        raw_path = _trashed_raw_candidate(photo)
     payload = {
         "id": photo["id"],
         "path": photo["path"],
@@ -280,12 +287,16 @@ def _trash_destination(day_dir: Path, source: str) -> Path:
 
 def _move_to_trash(
     photo: dict[str, Any], config: Config, move_raw: bool = True
-) -> str:
+) -> tuple[str, str | None]:
     """Move a photo into a trash directory under its folder.
 
     When the photo has a same-named raw sibling, the raw file is moved with it
-    so the pair never gets split across the album and the trash. Returns the
-    trashed path of the primary file.
+    so the pair never gets split across the album and the trash.
+
+    Returns ``(image_path_in_trash, raw_path_in_trash)``. The raw location is
+    kept so the row can go on saying "this pair has a raw half": without it the
+    permanent-delete dialog had no way to know the pair was still a pair, and
+    could not offer to delete both.
     """
     src = photo["path"]
     if not os.path.exists(src):
@@ -296,11 +307,14 @@ def _move_to_trash(
     day_dir = trash_root / datetime.now().astimezone().strftime("%Y%m%d")
     day_dir.mkdir(parents=True, exist_ok=True)
 
+    trashed_raw: str | None = None
     if move_raw:
         raw_path = photo.get("raw_path")
         if raw_path and os.path.exists(raw_path) and not same_path(raw_path, src):
             try:
-                shutil.move(raw_path, str(_trash_destination(day_dir, raw_path)))
+                raw_dest = _trash_destination(day_dir, raw_path)
+                shutil.move(raw_path, str(raw_dest))
+                trashed_raw = str(raw_dest)
             except OSError:
                 logger.warning(
                     "could not move raw sibling %s to trash", raw_path, exc_info=True
@@ -321,7 +335,7 @@ def _move_to_trash(
 
     dest = _trash_destination(day_dir, src)
     shutil.move(src, str(dest))
-    return str(dest)
+    return str(dest), trashed_raw
 
 
 def _restore_from_trash(
@@ -392,12 +406,16 @@ def _uniquify(path: str) -> str:
 def _trashed_raw_candidate(photo: dict[str, Any]) -> str | None:
     """Find the raw file that was moved to trash together with ``photo``.
 
-    ``raw_path`` is cleared when the photo is trashed (the raw no longer sits
-    next to the image), so the file is located by scanning the photo's trash day
-    folder for a raw file sharing the image's file name stem. Files from
-    different source folders land in different day folders, so a stem match is
-    unambiguous in practice.
+    A row trashed by this version records the raw's location, so it is returned
+    directly. Rows trashed by an older one cleared that column, so they are
+    located by scanning the photo's trash day folder for a raw file sharing the
+    image's file name stem. Files from different source folders land in
+    different day folders, so a stem match is unambiguous in practice.
     """
+    recorded = photo.get("raw_path")
+    if recorded and os.path.exists(recorded) and _is_raw_file(recorded):
+        return recorded
+
     trashed_image = photo.get("path") or ""
     if not trashed_image:
         return None
@@ -2018,12 +2036,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 logger.warning("card sync failed for photo %s", pid, exc_info=True)
                 card_result = None
             try:
-                new_path = _move_to_trash(photo, cfg)
-                # The raw sibling followed the photo into the trash, so it no
-                # longer sits next to the image and must not be reported as one.
+                new_path, trashed_raw = _move_to_trash(photo, cfg)
                 database.mark_deleted([photo["id"]], {photo["id"]: new_path})
                 if photo.get("raw_path"):
-                    database.update_raw_path(photo["id"], None)
+                    # The raw is no longer beside the image, but the row keeps
+                    # pointing at where it went: the pair is still a pair, and
+                    # "彻底移除" has to be able to offer deleting both halves.
+                    database.update_raw_path(photo["id"], trashed_raw)
                 moved.append({"id": photo["id"], "path": new_path})
                 touched_folders.add(
                     photo.get("folder") or os.path.dirname(photo["path"])

@@ -1401,6 +1401,115 @@ class ServerApiTests(unittest.TestCase):
         detail = self.client.get(f"/api/photo/{photo_id}").get_json()
         self.assertEqual(detail["dimensions"], listing["dimensions"])
 
+    def test_a_trashed_pair_still_reports_its_raw_half(self) -> None:
+        """The list payload must know a trashed pair is a pair.
+
+        The permanent-delete dialog shows "同时删除 RAW" only when the row says
+        it has a raw. Trashing the photo used to clear ``raw_path``, so the
+        option silently disappeared for exactly the case that needs it.
+        """
+        source = os.path.join(self.folder, "pair.jpg")
+        raw = os.path.join(self.folder, "pair.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "pair.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+
+        rows = self.client.get(
+            "/api/photos", query_string={"status": "deleted", "folder": self.folder}
+        ).get_json()["photos"]
+        row = next(r for r in rows if r["id"] == photo_id)
+        self.assertTrue(row["has_raw"], "the dialog would hide its raw option")
+        self.assertEqual(row["raw_ext"], "NEF")
+
+    def test_a_row_trashed_by_an_older_build_is_still_detected(self) -> None:
+        """Old rows cleared ``raw_path``; the file is found beside the image."""
+        source = os.path.join(self.folder, "old.jpg")
+        trash_day = Path(self.folder) / self.cfg.trash_dir_name / "20260101"
+        trash_day.mkdir(parents=True, exist_ok=True)
+        trashed_image = trash_day / "old.jpg"
+        Image.new("RGB", (16, 16)).save(str(trashed_image))
+        (trash_day / "old.NEF").write_bytes(b"raw-bytes")
+        photo_id = self.db.upsert_photo(
+            {
+                "path": str(trashed_image),
+                "original_path": source,
+                "folder": self.folder,
+                "filename": "old.jpg",
+                "status": "deleted",
+                "raw_path": None,
+            }
+        )
+
+        rows = self.client.get(
+            "/api/photos", query_string={"status": "deleted", "folder": self.folder}
+        ).get_json()["photos"]
+        row = next(r for r in rows if r["id"] == photo_id)
+        self.assertTrue(row["has_raw"], "an older trashed pair must still offer RAW")
+        self.assertEqual(row["raw_path"], str(trash_day / "old.NEF"))
+
+    def test_purging_a_pair_deletes_both_halves(self) -> None:
+        source = os.path.join(self.folder, "both.jpg")
+        raw = os.path.join(self.folder, "both.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "both.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        resp = self.client.post(
+            "/api/delete/permanent", json={"ids": [photo_id], "delete_raw": True}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["raw_removed"], 1)
+        self.assertIsNone(self.db.get_photo(photo_id))
+        day_dir = os.path.join(self.folder, self.cfg.trash_dir_name)
+        leftovers = [
+            name
+            for _root, _dirs, names in os.walk(day_dir)
+            for name in names
+            if name.lower().endswith(".nef")
+        ]
+        self.assertEqual(leftovers, [], "the raw was left in the trash")
+
+    def test_purging_can_keep_the_raw(self) -> None:
+        source = os.path.join(self.folder, "keep.jpg")
+        raw = os.path.join(self.folder, "keep.NEF")
+        Image.new("RGB", (16, 16)).save(source)
+        Path(raw).write_bytes(b"raw-bytes")
+        self.db.upsert_photo(
+            {
+                "path": source,
+                "folder": self.folder,
+                "filename": "keep.jpg",
+                "status": "analyzed",
+                "raw_path": raw,
+            }
+        )
+        photo_id = self.db.get_photo_by_path(source)["id"]
+        self.client.post("/api/delete", json={"ids": [photo_id]})
+        resp = self.client.post(
+            "/api/delete/permanent", json={"ids": [photo_id], "delete_raw": False}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["raw_removed"], 0)
+
     def test_trash_roundtrip_carries_the_raw_sibling(self) -> None:
         """A raw file must follow its photo into and out of the trash."""
         source = os.path.join(self.folder, "a.jpg")
@@ -1424,8 +1533,11 @@ class ServerApiTests(unittest.TestCase):
         self.assertFalse(os.path.exists(raw), "raw sibling stayed in the album")
         trashed = self.db.get_photo(photo_id)
         day_dir = os.path.dirname(trashed["path"])
-        self.assertTrue(os.path.exists(os.path.join(day_dir, "a.NEF")))
-        self.assertIsNone(trashed["raw_path"])
+        trashed_raw = os.path.join(day_dir, "a.NEF")
+        self.assertTrue(os.path.exists(trashed_raw))
+        # The row keeps pointing at the raw, now inside the trash: the pair is
+        # still a pair, and the permanent-delete dialog needs to know that.
+        self.assertEqual(trashed["raw_path"], trashed_raw)
 
         resp = self.client.post("/api/restore", json={"ids": [photo_id]})
         self.assertEqual(resp.status_code, 200)
