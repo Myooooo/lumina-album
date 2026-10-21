@@ -38,6 +38,9 @@ const state = {
   videoPreviewVolume: 50,
   //: Live Photo motion volume, 0-100. Silent by default.
   liveVolume: 0,
+  //: Whether the server found ffmpeg. Known from startup, so a full redo can
+  //: warn about blanking video metadata before it starts rather than after.
+  ffmpegAvailable: true,
   //: ``id -> position`` in ``state.photos``, for the few callers that splice by
   //: index instead of by row.
   photoIndex: new Map(),
@@ -1428,23 +1431,140 @@ function updateSelectionBar() {
   else bar.classList.add("hidden");
 }
 
+/* ==========================================================================
+   Confirming a destructive or expensive scan
+
+   "重新整理全部" turns a cheap catch-up into something much bigger, and what it
+   means depends on which button is pressed. The two are different enough that
+   the checkbox alone cannot say it, so each run asks first - and the dialog is
+   the only place that names the consequence before the model starts working.
+   ========================================================================== */
+
+/**
+ * Ask one question with a confirm dialog.
+ *
+ * ``fields`` renders extra controls above the buttons; the answer comes back as
+ * ``{confirmed, values}``. Resolves rather than throwing, so a caller can await
+ * it in a straight line.
+ */
+function askConfirm(options) {
+  return new Promise((resolve) => {
+    const modal = $("confirmModal");
+    if (!modal) {
+      // No dialog in the page means no way to ask; take the safe answer.
+      resolve({ confirmed: false, values: {} });
+      return;
+    }
+    $("confirmTitle").textContent = options.title || "确认";
+    $("confirmBody").innerHTML = options.body || "";
+    const fields = $("confirmFields");
+    fields.innerHTML = options.fieldsHtml || "";
+    fields.classList.toggle("hidden", !options.fieldsHtml);
+    const okBtn = $("confirmOkBtn");
+    okBtn.textContent = options.okText || "继续";
+    okBtn.classList.toggle("danger", !!options.danger);
+    okBtn.classList.toggle("primary", !options.danger);
+
+    const finish = (confirmed) => {
+      okBtn.removeEventListener("click", onOk);
+      $("confirmCancelBtn").removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+      const values = {};
+      fields.querySelectorAll("input[type=checkbox]").forEach((el) => {
+        values[el.id] = el.checked;
+      });
+      closeModal("confirmModal");
+      resolve({ confirmed, values });
+    };
+    const onOk = () => finish(true);
+    const onCancel = () => finish(false);
+    const onBackdrop = (e) => {
+      if (e.target === modal) finish(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") finish(false);
+    };
+    okBtn.addEventListener("click", onOk);
+    $("confirmCancelBtn").addEventListener("click", onCancel);
+    modal.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+    showModal(modal);
+  });
+}
+
+/**
+ * The "ffmpeg is not installed" question.
+ *
+ * Returns ``{confirmed, skipVideos}``. Only asked on a full redo: an ordinary
+ * scan merely picks up new files, while a redo re-reads everything - and with no
+ * ffmpeg that would replace the duration, resolution and codec of every video
+ * already in the library with blanks.
+ */
+async function askMissingFfmpeg() {
+  const answer = await askConfirm({
+    title: "没有检测到 ffmpeg",
+    body:
+      "<p>本次整理会重新读取整个文件夹，但本机没有 ffmpeg，视频的时长、分辨率与编码读不出来。</p>" +
+      "<p>如果不跳过已索引的视频，它们已有的这些信息会被清空（评分与标签不受影响）。</p>",
+    okText: "继续整理",
+    fieldsHtml: `
+      <label class="checkbox-row">
+        <input id="confirmSkipVideos" type="checkbox" checked />
+        <span>跳过已索引的视频</span>
+      </label>
+    `,
+  });
+  return {
+    confirmed: answer.confirmed,
+    skipVideos: answer.values.confirmSkipVideos !== false,
+  };
+}
+
+/** The consequence of "重新整理全部", stated per button. */
+async function askForceScan(mode) {
+  const isScan = mode === "scan";
+  const body = isScan
+    ? "<p>将先重新读取整个文件夹的文件信息，然后把<strong>每一张照片、每一段视频</strong>重新送交大模型解读。</p>" +
+      "<p>评分、标签、标题与简评会被新结果覆盖，手动编辑过的内容同样会被覆盖（珍藏状态保留）。</p>" +
+      "<p>这会按张数消耗模型调用，耗时可能很长。</p>"
+    : "<p>将重新读取整个文件夹的文件信息：文件大小、EXIF、拍摄地点，以及视频的时长、分辨率与编码。</p>" +
+      "<p>不调用大模型，评分、标签与简评保持不变。</p>";
+  const answer = await askConfirm({
+    title: isScan ? "重新整理全部并重新解读？" : "重新整理全部？",
+    body,
+    okText: isScan ? "重新整理并解读" : "重新整理",
+    danger: isScan,
+  });
+  return answer.confirmed;
+}
+
 async function startScan() {
   const folder = $("folderInput").value.trim();
   if (!folder) {
     showToast("先告诉我们照片文件夹在哪里吧", "error");
     return;
   }
+  const force = $("forceScan").checked;
+  let skipVideos = false;
+  if (force) {
+    if (!(await askForceScan("scan"))) return;
+    if (!state.ffmpegAvailable) {
+      const answer = await askMissingFfmpeg();
+      if (!answer.confirmed) return;
+      skipVideos = answer.skipVideos;
+    }
+  }
   state.folder = folder;
   rememberFolder(folder);
   saveUiState({ folder });
-  const force = $("forceScan").checked;
   try {
     const data = await api("/api/scan", {
       method: "POST",
-      body: JSON.stringify({ folder, force }),
+      body: JSON.stringify({ folder, force, skip_indexed_videos: skipVideos }),
     });
     state.currentJobId = data.job_id;
-    showProgress("开始整理…");
+    showProgress(force ? "重新整理并解读…" : "开始整理…");
     pollScan();
   } catch (e) {
     showToast("开始整理失败：" + e.message, "error");
@@ -1457,17 +1577,26 @@ async function startRebuildIndex() {
     showToast("先选择一份回忆文件夹吧", "error");
     return;
   }
+  const force = $("forceScan").checked;
+  let skipVideos = false;
+  if (force) {
+    if (!(await askForceScan("rebuild"))) return;
+    if (!state.ffmpegAvailable) {
+      const answer = await askMissingFfmpeg();
+      if (!answer.confirmed) return;
+      skipVideos = answer.skipVideos;
+    }
+  }
   state.folder = folder;
   rememberFolder(folder);
   saveUiState({ folder });
-  const force = $("forceScan").checked;
   try {
     const data = await api("/api/rebuild-index", {
       method: "POST",
-      body: JSON.stringify({ folder, force }),
+      body: JSON.stringify({ folder, force, skip_indexed_videos: skipVideos }),
     });
     state.currentJobId = data.job_id;
-    showProgress("正在同步相册…");
+    showProgress(force ? "重新整理文件信息…" : "正在同步相册…");
     pollScan();
   } catch (e) {
     showToast("同步相册失败：" + e.message, "error");
@@ -2632,7 +2761,11 @@ function applyPreviewMedia(photo, options = {}) {
   // A Live Photo shows itself off: the still is on screen, the motion fades in
   // over it, plays once, and fades back out. The corner button is there to see
   // it again.
-  if (hasLive && state.videoPreviewMode !== "off") {
+  //
+  // Deliberately not tied to the video preview mode: that setting lives on the
+  // 视频处理 tab and talks about video previews. Letting it silence Live Photos
+  // meant a switch labelled "video" quietly changed how photographs behave.
+  if (hasLive) {
     playLiveMotion(photo);
   }
   if (hasLive && liveBtn) liveBtn.classList.remove("hidden");
@@ -3216,6 +3349,7 @@ async function paintFfmpegStatus() {
   el.textContent = "正在检测 ffmpeg…";
   try {
     const data = await api("/api/video/status");
+    state.ffmpegAvailable = !!data.available;
     if (data.available) {
       el.classList.add("ok");
       el.textContent = `已检测到 ffmpeg：${data.version || "版本未知"}`;
@@ -4230,6 +4364,16 @@ async function loadPlaybackConfig() {
   } catch (e) {
     // Defaults are sensible, so a failure here changes nothing visible.
     console.warn("读取播放设置失败", e);
+  }
+  try {
+    // A full redo has to warn before it starts, which means the answer has to be
+    // known before the settings dialog is ever opened.
+    const status = await api("/api/video/status");
+    state.ffmpegAvailable = !!status.available;
+  } catch (e) {
+    // Unknown is treated as available: refusing to scan because a status call
+    // failed would be worse than the warning appearing late.
+    state.ffmpegAvailable = true;
   }
 }
 

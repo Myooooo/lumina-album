@@ -81,6 +81,18 @@
   </section>
 
   <section class="filters">
+    <div class="filter-group sort-group" data-filter-key="sort">
+      <label><span class="label-icon" data-icon="dimensions"></span>排序方式</label>
+      <select id="sortFilter">
+        <option value="score_desc" selected>总分从高到低</option>
+        <option value="score_asc">总分从低到高</option>
+        <option value="time_desc">拍摄时间从晚到早</option>
+        <option value="time_asc">拍摄时间从早到晚</option>
+        <option value="filename">按文件名</option>
+        <option value="recent">按分析时间</option>
+        <option value="size">按文件大小</option>
+      </select>
+    </div>
     <div class="filter-group" data-filter-key="kind">
       <label><span class="label-icon" data-icon="video"></span>类型</label>
       <select id="kindFilter">
@@ -98,18 +110,6 @@
         <option value="4">4+</option>
         <option value="6">6+</option>
         <option value="8">8+</option>
-      </select>
-    </div>
-    <div class="filter-group sort-group" data-filter-key="sort">
-      <label><span class="label-icon" data-icon="dimensions"></span>排序方式</label>
-      <select id="sortFilter">
-        <option value="score_desc" selected>总分从高到低</option>
-        <option value="score_asc">总分从低到高</option>
-        <option value="time_desc">拍摄时间从晚到早</option>
-        <option value="time_asc">拍摄时间从早到晚</option>
-        <option value="filename">按文件名</option>
-        <option value="recent">按分析时间</option>
-        <option value="size">按文件大小</option>
       </select>
     </div>
     <div class="filter-group tag-group" data-filter-key="tag">
@@ -382,12 +382,12 @@
 
         <section class="settings-pane" id="tabVideo" role="tabpanel"
                  aria-labelledby="tabBtnVideo" data-pane="video" hidden>
-          <p class="settings-hint">详情页播放预览，全屏播放原片。预览越小处理越快，也越省缓存。</p>
+          <p class="settings-hint">详情页播放预览，全屏播放原片。预览越小处理越快，也越省缓存。预览相关设置在下一次同步或整理时生效。</p>
           <div class="form-grid">
             <label class="full-row">视频处理方式
               <select id="setVideoProcessing">
                 <option value="ffmpeg">用 ffmpeg 处理（读取参数、生成封面与预览）</option>
-                <option value="none">不处理（之后的同步跳过视频文件，现有视频不受影响）</option>
+                <option value="none">不处理（重新同步后生效）</option>
               </select>
             </label>
             <label>预览时长（秒）
@@ -543,6 +543,20 @@
     <div class="modal-content loading-content">
       <div class="spinner"></div>
       <p id="loadingText">正在用大模型寻找相关回忆…</p>
+    </div>
+  </div>
+
+  <!-- Confirmation dialog. One dialog serves every "are you sure" question the
+       toolbar needs, so the wording and the button order stay consistent. -->
+  <div id="confirmModal" class="modal hidden">
+    <div class="modal-content confirm-content">
+      <h2 id="confirmTitle">确认</h2>
+      <div id="confirmBody" class="confirm-body"></div>
+      <div id="confirmFields" class="confirm-fields hidden"></div>
+      <div class="modal-actions">
+        <button id="confirmCancelBtn" class="btn"><span class="btn-icon" data-icon="close"></span>取消</button>
+        <button id="confirmOkBtn" class="btn primary">继续</button>
+      </div>
     </div>
   </div>
 

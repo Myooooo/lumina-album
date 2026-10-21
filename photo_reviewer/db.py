@@ -911,6 +911,37 @@ class Database:
             finally:
                 conn.close()
 
+    def stalled_video_rows(self, folder: str) -> list[dict[str, Any]]:
+        """Videos in one folder that were indexed but never read successfully.
+
+        Only the four columns the caller needs are selected, and the filter runs
+        in SQL rather than in Python: the previous version loaded every row of
+        the folder - EXIF, tags, dimensions and all - to find the few videos that
+        still have no metadata. On an album of a few thousand photos that walk
+        happened on every scan.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT path, raw_path, status, video_info FROM photos "
+                    "WHERE folder=? AND status IN ('error', 'pending') "
+                    "AND media_kind = 'video' "
+                    "AND (video_info IS NULL OR video_info IN ('', '{}', 'null'))",
+                    (folder,),
+                ).fetchall()
+                return [
+                    {
+                        "path": row["path"],
+                        "raw_path": row["raw_path"],
+                        "status": row["status"],
+                        "video_info": row["video_info"],
+                    }
+                    for row in rows
+                ]
+            finally:
+                conn.close()
+
     def get_settings(self) -> dict[str, str]:
         with self._lock:
             conn = self._connect()
@@ -1530,6 +1561,41 @@ class Database:
                         (thumb_path, proxy_path, photo_id),
                     )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def clear_video_paths(self, photo_id: int) -> None:
+        """Forget every derived file for one video, after they were deleted.
+
+        Unlike ``set_video_paths`` this writes NULLs on purpose: the columns must
+        stop pointing at files that no longer exist, so the next index pass
+        regenerates them instead of serving a 404 from the cache.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE photos SET clip_path=NULL, play_path=NULL, "
+                    "play_state=NULL, thumb_path=NULL, proxy_path=NULL "
+                    "WHERE id=?",
+                    (photo_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def video_rows_for_folder(self, folder: str) -> list[dict[str, Any]]:
+        """Every video row in one folder, with just the derived-file columns."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, path, thumb_path, proxy_path, clip_path, play_path "
+                    "FROM photos WHERE folder=? AND media_kind = 'video' "
+                    "AND status != 'deleted'",
+                    (folder,),
+                ).fetchall()
+                return [dict(row) for row in rows]
             finally:
                 conn.close()
 

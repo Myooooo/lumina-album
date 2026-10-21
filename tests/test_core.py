@@ -74,11 +74,13 @@ from photo_reviewer.repair import (
     repair_dimension_keys,
     repair_orientation_sizes,
     run_startup_repairs,
+    wait_for_repairs,
 )
 from photo_reviewer.scanner import (
     JOBS,
     discover_images,
     discover_photo_pairs,
+    start_rebuild_index,
     start_scan,
 )
 from photo_reviewer.server import _remove_file, create_app
@@ -3503,6 +3505,415 @@ class VideoProcessingModeTests(unittest.TestCase):
         self.assertTrue(video_scan_extensions(cfg))
         cfg.video_processing = "none"
         self.assertEqual(video_scan_extensions(cfg), ())
+
+
+class ForceScanSemanticsTests(unittest.TestCase):
+    """A forced run redoes the index first, then hands everything to the model.
+
+    Before this the two buttons disagreed: 开始整理 re-analysed without
+    re-reading the files, 同步相册 re-read without analysing. A full redo now
+    means the same thing on both, and the difference is only whether the model
+    is called afterwards.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+        self.cfg = Config(data_dir=self.tmp.name, db_path=self.db.path)
+        self.cfg.scan_concurrency = 1
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, "1")
+        self.db.set_meta(DIMENSIONS_REPAIR_KEY, "1")
+
+    def tearDown(self) -> None:
+        wait_for_repairs(timeout=30)
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def _photo(self, name: str) -> str:
+        path = os.path.join(self.folder, name)
+        img = Image.new("RGB", (48, 36), (10, 20, 30))
+        exif = Image.Exif()
+        exif[271] = "Maker"
+        exif[272] = name
+        img.save(path, exif=exif)
+        return path
+
+    def test_a_forced_scan_reindexes_before_analysing(self) -> None:
+        from photo_reviewer import scanner as scanner_mod
+
+        path = self._photo("a.jpg")
+        with patch(
+            "photo_reviewer.scanner.analyze_prepared", side_effect=fake_analysis
+        ):
+            wait_for_job(start_scan(self.folder, self.db, self.cfg).id)
+
+        # Change what the file says on disk, then force.
+        img = Image.new("RGB", (64, 48), (200, 10, 10))
+        exif = Image.Exif()
+        exif[271] = "Maker"
+        exif[272] = "renamed-by-exif"
+        img.save(path, exif=exif)
+
+        indexed = []
+        real_index = scanner_mod._index_one
+
+        def spy(*args, **kwargs):
+            indexed.append(args[0])
+            return real_index(*args, **kwargs)
+
+        with (
+            patch("photo_reviewer.scanner._index_one", side_effect=spy),
+            patch("photo_reviewer.scanner.analyze_prepared", side_effect=fake_analysis),
+        ):
+            wait_for_job(start_scan(self.folder, self.db, self.cfg, force=True).id)
+
+        self.assertIn(path, indexed, "a forced run must re-read the file")
+        row = self.db.get_photo_by_path(path)
+        self.assertEqual(row["exif"].get("model"), "renamed-by-exif")
+        self.assertIsNotNone(row["score"], "and must still analyse it")
+
+    def test_skip_indexed_videos_leaves_their_rows_alone(self) -> None:
+        from photo_reviewer.scanner import _index_one
+
+        path = os.path.join(self.folder, "clip.mp4")
+        Path(path).write_bytes(b"\x00" * 64)
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": "clip.mp4",
+                "status": "analyzed",
+                "media_kind": "video",
+                "video_info": {"video_codec": "h264", "duration_ms": 5000},
+                "duration_ms": 5000,
+                "score": 7.0,
+            }
+        )
+
+        indexed = []
+
+        def spy(*args, **kwargs):
+            indexed.append(args[0])
+            return _index_one(*args, **kwargs)
+
+        with (
+            patch("photo_reviewer.scanner._index_one", side_effect=spy),
+            patch("photo_reviewer.scanner.video_scan_extensions", return_value=(".mp4",)),
+        ):
+            wait_for_job(start_scan(
+                    self.folder, self.db, self.cfg, force=True, skip_indexed_videos=True
+                ).id,
+            )
+
+        self.assertNotIn(path, indexed)
+        row = self.db.get_photo_by_path(path)
+        self.assertEqual(row["video_info"].get("video_codec"), "h264")
+        self.assertEqual(row["score"], 7.0)
+
+
+class VideoProcessingNoneTests(unittest.TestCase):
+    """「不处理」 stops collecting videos and cleans up their derived files.
+
+    The files themselves are never touched - only what the app rendered from
+    them - and the rule applies from the next sync, which is what the option
+    now says.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cache = os.path.join(self.folder, ".photo-review-cache")
+        os.makedirs(self.cache)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+        self.cfg = Config(data_dir=self.tmp.name, db_path=self.db.path)
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, "1")
+        self.db.set_meta(DIMENSIONS_REPAIR_KEY, "1")
+
+        self.video = os.path.join(self.folder, "clip.mp4")
+        Path(self.video).write_bytes(b"original-video-bytes")
+        self.clip = os.path.join(self.cache, "abc_clip.mp4")
+        Path(self.clip).write_bytes(b"rendered-clip")
+        self.thumb = os.path.join(self.cache, "abc_thumb.jpg")
+        Path(self.thumb).write_bytes(b"poster")
+        self.video_id = self.db.upsert_photo(
+            {
+                "path": self.video,
+                "folder": self.folder,
+                "filename": "clip.mp4",
+                "status": "analyzed",
+                "media_kind": "video",
+                "thumb_path": self.thumb,
+                "clip_path": self.clip,
+                "duration_ms": 4000,
+                "video_info": {"video_codec": "h264"},
+            }
+        )
+
+    def tearDown(self) -> None:
+        wait_for_repairs(timeout=30)
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def test_the_switch_removes_the_index_and_its_cache(self) -> None:
+        self.cfg.video_processing = "none"
+        wait_for_job(start_rebuild_index(self.folder, self.db, self.cfg).id)
+
+        self.assertIsNone(self.db.get_photo(self.video_id))
+        self.assertFalse(os.path.exists(self.clip))
+        self.assertFalse(os.path.exists(self.thumb))
+        # The footage itself is untouched.
+        self.assertTrue(os.path.exists(self.video))
+        self.assertEqual(Path(self.video).read_bytes(), b"original-video-bytes")
+
+    def test_the_switch_keeps_videos_when_it_is_off(self) -> None:
+        wait_for_job(start_rebuild_index(self.folder, self.db, self.cfg).id)
+        self.assertIsNotNone(self.db.get_photo(self.video_id))
+        self.assertTrue(os.path.exists(self.video))
+
+
+class VideoRenderSignatureTests(unittest.TestCase):
+    """Changing the preview settings invalidates renders at the next sync."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.cache = os.path.join(self.folder, ".photo-review-cache")
+        os.makedirs(self.cache)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+        self.cfg = Config(data_dir=self.tmp.name, db_path=self.db.path)
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, "1")
+        self.db.set_meta(DIMENSIONS_REPAIR_KEY, "1")
+        self.video = os.path.join(self.folder, "clip.mp4")
+        Path(self.video).write_bytes(b"v" * 32)
+        self.clip = os.path.join(self.cache, "abc_clip.mp4")
+        Path(self.clip).write_bytes(b"old-clip")
+        self.video_id = self.db.upsert_photo(
+            {
+                "path": self.video,
+                "folder": self.folder,
+                "filename": "clip.mp4",
+                "status": "analyzed",
+                "media_kind": "video",
+                "clip_path": self.clip,
+                "thumb_path": os.path.join(self.cache, "abc_thumb.jpg"),
+                "duration_ms": 4000,
+                "video_info": {"video_codec": "h264"},
+            }
+        )
+
+    def tearDown(self) -> None:
+        wait_for_repairs(timeout=30)
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def test_the_signature_tracks_the_rendering_settings(self) -> None:
+        from photo_reviewer.scanner import video_render_signature
+
+        first = video_render_signature(self.cfg)
+        self.cfg.video_clip_seconds = 9
+        self.assertNotEqual(first, video_render_signature(self.cfg))
+
+    def test_an_unchanged_signature_keeps_the_existing_clip(self) -> None:
+        from photo_reviewer.scanner import _invalidate_stale_video_renders
+
+        self.assertEqual(_invalidate_stale_video_renders(self.folder, self.db, self.cfg), [])
+        self.assertTrue(os.path.exists(self.clip))
+
+    def test_a_changed_setting_drops_the_clip_and_reports_the_video(self) -> None:
+        from photo_reviewer.scanner import _invalidate_stale_video_renders
+
+        # Prime the stored signature with the current settings.
+        _invalidate_stale_video_renders(self.folder, self.db, self.cfg)
+        self.cfg.video_clip_seconds = 12
+        affected = _invalidate_stale_video_renders(self.folder, self.db, self.cfg)
+
+        self.assertEqual(affected, [self.video])
+        self.assertFalse(os.path.exists(self.clip))
+        self.assertIsNone(self.db.get_photo(self.video_id)["clip_path"])
+        self.assertTrue(os.path.exists(self.video), "the original is never touched")
+
+    def test_only_files_inside_the_cache_are_removed(self) -> None:
+        from photo_reviewer.scanner import _invalidate_stale_video_renders
+
+        # A stale column pointing at an original must not be followed.
+        self.db.set_video_paths(self.video_id, clip_path=self.video)
+        _invalidate_stale_video_renders(self.folder, self.db, self.cfg)
+        self.cfg.video_clip_seconds = 15
+        _invalidate_stale_video_renders(self.folder, self.db, self.cfg)
+        self.assertTrue(os.path.exists(self.video))
+
+
+class StalledVideoRetryTests(unittest.TestCase):
+    """A broken video is retried once per version of the file, not every scan."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+        self.path = os.path.join(self.folder, "broken.mp4")
+        Path(self.path).write_bytes(b"\x00" * 64)
+        self.db.upsert_photo(
+            {
+                "path": self.path,
+                "folder": self.folder,
+                "filename": "broken.mp4",
+                "status": "error",
+                "media_kind": "video",
+                "video_info": {},
+            }
+        )
+
+    def tearDown(self) -> None:
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def test_the_row_is_found_by_a_targeted_query(self) -> None:
+        rows = self.db.stalled_video_rows(self.folder)
+        self.assertEqual([os.path.basename(r["path"]) for r in rows], ["broken.mp4"])
+
+    def test_a_healthy_video_is_not_returned(self) -> None:
+        other = os.path.join(self.folder, "fine.mp4")
+        Path(other).write_bytes(b"\x00" * 16)
+        self.db.upsert_photo(
+            {
+                "path": other,
+                "folder": self.folder,
+                "filename": "fine.mp4",
+                "status": "analyzed",
+                "media_kind": "video",
+                "video_info": {"video_codec": "h264"},
+            }
+        )
+        rows = self.db.stalled_video_rows(self.folder)
+        self.assertEqual([os.path.basename(r["path"]) for r in rows], ["broken.mp4"])
+
+    def test_the_same_broken_file_is_only_retried_once(self) -> None:
+        from photo_reviewer import scanner as scanner_mod
+
+        scanner_mod._STALLED_PROBE_STAMPS.clear()
+        first = scanner_mod._stalled_video_pairs(self.folder, self.db, [])
+        self.assertEqual(len(first), 1)
+        second = scanner_mod._stalled_video_pairs(self.folder, self.db, [])
+        self.assertEqual(second, [], "an unchanged broken file is not retried")
+
+    def test_touching_the_file_earns_another_attempt(self) -> None:
+        from photo_reviewer import scanner as scanner_mod
+
+        scanner_mod._STALLED_PROBE_STAMPS.clear()
+        scanner_mod._stalled_video_pairs(self.folder, self.db, [])
+        Path(self.path).write_bytes(b"\x00" * 128)
+        st = os.stat(self.path)
+        os.utime(self.path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+        again = scanner_mod._stalled_video_pairs(self.folder, self.db, [])
+        self.assertEqual(len(again), 1, "a changed file is worth another look")
+
+
+class LivePhotoPairTrashTests(unittest.TestCase):
+    """A merged Live Photo moves to the trash as a pair, and comes back as one."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.still = os.path.join(self.folder, "IMG_9.JPG")
+        Image.new("RGB", (60, 80), (90, 120, 150)).save(self.still, "JPEG")
+        self.movie = os.path.join(self.folder, "IMG_9.MOV")
+        Path(self.movie).write_bytes(b"movie-bytes")
+        self.photo_id = self.db.upsert_photo(
+            {
+                "path": self.still,
+                "folder": self.folder,
+                "filename": "IMG_9.JPG",
+                "status": "analyzed",
+                "media_kind": "photo",
+                "live_path": self.movie,
+                "score": 8.0,
+            }
+        )
+        self.client = create_app(self.cfg, self.db).test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def test_deleting_moves_both_files(self) -> None:
+        resp = self.client.post("/api/delete", json={"ids": [self.photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(os.path.exists(self.still))
+        self.assertFalse(os.path.exists(self.movie), "the movie follows the still")
+
+        row = self.db.get_photo(self.photo_id)
+        self.assertEqual(row["status"], "deleted")
+        day_dir = os.path.dirname(row["path"])
+        names = sorted(os.listdir(day_dir))
+        self.assertIn("IMG_9.MOV", names)
+        self.assertTrue(any(n.startswith("IMG_9") and n.upper().endswith(".JPG") for n in names))
+
+    def test_restoring_brings_both_back(self) -> None:
+        self.client.post("/api/delete", json={"ids": [self.photo_id]})
+        resp = self.client.post("/api/restore", json={"ids": [self.photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(os.path.exists(self.still))
+        self.assertTrue(os.path.exists(self.movie))
+        self.assertEqual(Path(self.movie).read_bytes(), b"movie-bytes")
+
+    def test_purging_removes_both(self) -> None:
+        self.client.post("/api/delete", json={"ids": [self.photo_id]})
+        resp = self.client.post(
+            "/api/delete/permanent", json={"ids": [self.photo_id]}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(self.db.get_photo(self.photo_id))
+        self.assertFalse(os.path.exists(self.still))
+        self.assertFalse(os.path.exists(self.movie))
+        self.assertEqual(resp.get_json().get("live_removed"), 1)
+
+    def test_a_motion_photo_has_nothing_extra_to_move(self) -> None:
+        # Its video is inside the image, so live_path points into the cache.
+        cache = os.path.join(self.folder, ".photo-review-cache")
+        os.makedirs(cache, exist_ok=True)
+        embedded = os.path.join(cache, "abc_motion.mp4")
+        Path(embedded).write_bytes(b"extracted")
+        self.db.upsert_photo(
+            {
+                "path": self.still,
+                "folder": self.folder,
+                "filename": "IMG_9.JPG",
+                "status": "analyzed",
+                "media_kind": "photo",
+                "live_path": embedded,
+            }
+        )
+        resp = self.client.post("/api/delete", json={"ids": [self.photo_id]})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(
+            os.path.exists(embedded),
+            "a cache file is not the user's footage and is left for the sweeper",
+        )
 
 
 class LivePhotoMergeSwitchTests(unittest.TestCase):

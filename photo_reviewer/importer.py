@@ -291,6 +291,10 @@ def plan_import(
     if target.lower().startswith(source.lower() + os.sep):
         raise ImportError_("目标文件夹位于来源文件夹内部，请换一个目标目录")
 
+    # Videos are always copied, whatever "视频处理方式" says: the copy is about
+    # not losing footage, and the setting is about not indexing it. The indexing
+    # step after the copy uses the gated extension list, so with the setting off
+    # the files land on disk and simply never get a row.
     groups, scanned = scan_source(
         source,
         config.image_extensions,

@@ -279,7 +279,11 @@ def discover_images(
 
 
 def start_scan(
-    folder: str, db: Database, config: Config, force: bool = False
+    folder: str,
+    db: Database,
+    config: Config,
+    force: bool = False,
+    skip_indexed_videos: bool = False,
 ) -> ScanJob:
     job = JOBS.create(folder, force)
     # Existing folders start in analysis phase; the worker indexes any
@@ -287,7 +291,7 @@ def start_scan(
     job.phase = "analyze" if db.paths_for_folder(folder) else "index"
     thread = threading.Thread(
         target=_scan_worker,
-        args=(job.id, folder, db, config, force),
+        args=(job.id, folder, db, config, force, None, True, skip_indexed_videos),
         daemon=True,
     )
     thread.start()
@@ -370,12 +374,21 @@ def _resolve_location(
     existing: dict | None,
     config: Config,
 ) -> str | None:
-    """Resolve coordinates to a place name, preserving an older address on failure."""
+    """Resolve coordinates to a place name, preserving an older address on failure.
+
+    An address that has already been resolved is reused. The coordinates do not
+    move and the provider answers the same way, so asking again on every pass
+    would be a network round trip (and a rate-limit token) for a known answer -
+    which is exactly what a full redo would otherwise do for every photo that
+    has GPS.
+    """
     if exif.get("latitude") is not None and exif.get("longitude") is not None:
         if not geocoding_enabled(config.geocoding_provider):
             # No reverse geocoding: keep the raw coordinates rather than a
             # previously resolved address, so the setting is visible right away.
             return location or exif.get("location")
+        if existing and existing.get("geocoded") and existing.get("location"):
+            return existing["location"]
         place = reverse_geocode(
             exif["latitude"],
             exif["longitude"],
@@ -496,8 +509,30 @@ def video_scan_extensions(config) -> tuple:
     return config.video_extensions
 
 
+#: ``path -> stamp`` of stalled-video probes already attempted in this process.
+#: A file that cannot be read is otherwise retried on every single scan, which
+#: costs one ffprobe (and one failed poster grab) each time for as long as the
+#: broken file sits in the folder. The stamp is the file's mtime, size and the
+#: ffmpeg build, so the retry happens again as soon as any of those change -
+#: replacing the file, re-saving it, or installing ffmpeg all count.
+_STALLED_PROBE_STAMPS: dict[str, str] = {}
+
+
+def _stalled_stamp(path: str) -> str:
+    """Fingerprint a stalled video attempt: file identity plus the tool build."""
+    try:
+        stat = os.stat(path)
+        identity = f"{stat.st_mtime_ns}:{stat.st_size}"
+    except OSError:
+        identity = "missing"
+    return f"{identity}:{video.tools_version()[:40]}"
+
+
 def _stalled_video_pairs(
-    folder: str, db: Database, already: list[tuple[str, str | None]]
+    folder: str,
+    db: Database,
+    already: list[tuple[str, str | None]],
+    skip_existing: bool = False,
 ) -> list[tuple[str, str | None]]:
     """Video items already in the database that still have nothing to show.
 
@@ -506,22 +541,115 @@ def _stalled_video_pairs(
     ``video_info`` and an error, and the incremental scan would skip it forever
     because its path is already known. Re-indexing it is cheap (one ffprobe) and
     turns "this video has no information" into a self-healing state.
+
+    The lookup is a targeted query rather than a walk over every row: on a large
+    album the old version parsed the EXIF and tags of thousands of photos just to
+    find the handful of videos that need another look.
     """
+    if skip_existing:
+        return []
     queued = {os.path.normcase(canonical_path(path)) for path, _raw in already}
     stalled: list[tuple[str, str | None]] = []
-    for row in db.list_photos(folder=folder, limit=100000):
-        if (row.get("media_kind") or "photo") != "video":
-            continue
-        if row.get("video_info") or row.get("status") not in ("error", "pending"):
-            continue
+    for row in db.stalled_video_rows(folder):
         path = row.get("path")
         if not path or not os.path.exists(path):
             continue
         key = os.path.normcase(canonical_path(path))
         if key in queued:
             continue
+        stamp = _stalled_stamp(path)
+        if _STALLED_PROBE_STAMPS.get(key) == stamp:
+            # Already tried this exact file with this exact ffmpeg; the outcome
+            # will not change, so do not pay for it again.
+            continue
+        _STALLED_PROBE_STAMPS[key] = stamp
         stalled.append((path, row.get("raw_path")))
     return stalled
+
+
+def _inside_cache(path: str, folder: str, config: Config) -> bool:
+    """True when ``path`` lives inside this album's cache directory.
+
+    Derived files are only ever written there, so this is the guard that lets the
+    index cleanup delete freely without ever being able to reach a photograph or
+    a movie the user owns.
+    """
+    try:
+        cache_root = os.path.abspath(os.path.join(folder, config.cache_dir_name))
+        target = os.path.abspath(path)
+    except (TypeError, ValueError):
+        return False
+    return target == cache_root or target.startswith(cache_root + os.sep)
+
+
+#: The settings that decide what a derived video file looks like. When any of
+#: them changes, everything already rendered is stale: a 3-second preview does
+#: not become 7 seconds because a number in the dialog changed.
+def video_render_signature(config: Config) -> str:
+    parts = [
+        config.video_clip_seconds,
+        config.video_clip_max_edge,
+        config.video_clip_crf,
+        config.video_clip_audio,
+        config.video_poster_ratio,
+        config.proxy_max_edge,
+        config.gallery_thumb_size,
+        config.proxy_quality,
+        config.thumb_quality,
+    ]
+    return "|".join(str(part) for part in parts)
+
+
+def _invalidate_stale_video_renders(
+    folder: str, db: Database, config: Config
+) -> list[str]:
+    """Drop derived video files rendered with settings that no longer apply.
+
+    Called at the start of a scan. The rule is the one the dialog promises: a
+    change takes effect on the next sync. Existing previews and play copies are
+    deleted and their columns cleared, so the index phase regenerates them with
+    the current numbers instead of serving a stale file for ever.
+
+    Returns the paths that need re-indexing (the videos whose files were
+    dropped), so the caller can make sure they are actually rebuilt.
+    """
+    signature = video_render_signature(config)
+    stored = db.get_meta(VIDEO_RENDER_KEY) or ""
+    if stored == signature:
+        return []
+    if not stored:
+        # First run with this rule - including the upgrade from a version that
+        # had no signature at all. Adopt the current settings as the baseline
+        # instead of invalidating: nothing has changed as far as the user is
+        # concerned, and throwing away every preview on upgrade would cost a
+        # full re-render for no reason.
+        db.set_meta(VIDEO_RENDER_KEY, signature)
+        return []
+    affected: list[str] = []
+    for row in db.video_rows_for_folder(folder):
+        path = row.get("path")
+        dropped = False
+        for key in ("clip_path", "play_path", "thumb_path", "proxy_path"):
+            cached = row.get(key)
+            if cached and _inside_cache(cached, folder, config):
+                try:
+                    os.remove(cached)
+                    dropped = True
+                except OSError:
+                    logger.debug("stale render already gone: %s", cached)
+        db.clear_video_paths(row["id"])
+        if path and dropped:
+            affected.append(path)
+    db.set_meta(VIDEO_RENDER_KEY, signature)
+    if affected:
+        logger.info(
+            "video render settings changed; re-rendering %d video(s)", len(affected)
+        )
+    return affected
+
+
+#: ``app_meta`` key holding the render signature the cache was built with.
+VIDEO_RENDER_KEY = "video_render_signature"
 
 
 def _raw_owner_map(
@@ -662,6 +790,7 @@ def _scan_worker(
     force: bool,
     only_paths: list[str] | None = None,
     analyze: bool = True,
+    skip_indexed_videos: bool = False,
 ) -> None:
     """Index (and optionally analyse) a folder.
 
@@ -669,6 +798,11 @@ def _scan_worker(
     an import uses so that adding a card's worth of photos never re-queues the
     rest of the library. ``analyze=False`` stops after indexing, so the caller
     can bring photos in without calling the vision model.
+
+    ``force`` means "redo the whole folder": every known file is re-indexed
+    first, then every item is analysed. ``skip_indexed_videos`` leaves videos
+    that already have a row alone - the answer to "ffmpeg is missing, do not
+    blank out the metadata of the videos I already indexed".
     """
     job = JOBS.get(job_id)
     if not job:
@@ -682,6 +816,12 @@ def _scan_worker(
             error=None,
         )
         skip_dirs = [config.data_dir, config.trash_dir_name, config.cache_dir_name]
+        # A change to the preview settings takes effect here, at the next scan:
+        # every derived file rendered with the old numbers is dropped so the
+        # index phase rebuilds it. This also returns the videos that need to be
+        # re-indexed, which matters because a normal scan would otherwise only
+        # look at files it has never seen.
+        stale_renders = _invalidate_stale_video_renders(folder, db, config)
         pairs = discover_photo_pairs(
             folder,
             config.image_extensions,
@@ -703,21 +843,47 @@ def _scan_worker(
             active_paths &= {image for image, _raw in pairs}
         images = [image_path for image_path, _raw in pairs]
 
-        # Index every photo we have not seen yet. This also covers files added
-        # after a previous scan, including a forced re-scan.
-        if not active_paths:
+        # Index every photo we have not seen yet - or every photo at all when
+        # the user asked for a full redo. A forced run re-reads the file first
+        # and only then hands everything to the model, so a video whose file
+        # changed, a photo whose EXIF was edited, or a Live Photo that gained its
+        # MOV all arrive at the model with fresh metadata.
+        if force or not active_paths:
             to_index = list(pairs)
         else:
             to_index = [
                 pair for pair in pairs if pair[0] not in active_paths
             ]
+            if stale_renders:
+                # Their previews were just deleted, so they have to go through
+                # the index phase again to get new ones - even though the file
+                # itself has been here all along.
+                stale = {os.path.normcase(canonical_path(p)) for p in stale_renders}
+                known = {os.path.normcase(canonical_path(pair[0])) for pair in to_index}
+                for pair in pairs:
+                    key = os.path.normcase(canonical_path(pair[0]))
+                    if key in stale and key not in known:
+                        to_index.append(pair)
+        if skip_indexed_videos:
+            # "跳过已索引的视频": leave the rows that already describe a video
+            # untouched. Without this a full redo on a machine with no ffmpeg
+            # would blank out the duration, resolution and codec of every video
+            # it has ever read.
+            to_index = [
+                pair
+                for pair in to_index
+                if not (video.looks_like_video(pair[0]) and pair[0] in active_paths)
+            ]
         # A video whose probe failed - ffmpeg was not installed yet, the file was
         # on a disconnected drive, a codec ffprobe could not read - keeps an
         # empty ``video_info`` and never gets looked at again, because its path
         # is already in the database. Those rows are re-probed on every scan so
-        # they heal as soon as the cause is gone.
+        # they heal as soon as the cause is gone, but only once per version of
+        # the file: a file that cannot be read is not retried forever.
         if video_scan_extensions(config):
-            to_index.extend(_stalled_video_pairs(folder, db, to_index))
+            to_index.extend(
+                _stalled_video_pairs(folder, db, to_index, skip_existing=skip_indexed_videos)
+            )
 
         if to_index and not _run_index_phase(
             job_id,
@@ -746,20 +912,33 @@ def _scan_worker(
             return
 
         # Analyze pending photos, or every photo when the user forced a full
-        # re-analysis. Corrupted files stay in the queue so they can be retried
-        # after the file is repaired.
+        # redo. Corrupted files stay in the queue so they can be retried after
+        # the file is repaired.
+        #
+        # A video with no poster has nothing to send: queueing it would call the
+        # model with an empty path and overwrite the "no ffmpeg" explanation with
+        # a generic error, so it is skipped either way.
+        def _analysable(image_path: str) -> bool:
+            row = db.get_photo_by_path(image_path)
+            if not row:
+                return False
+            has_picture = bool(row.get("proxy_path") or row.get("thumb_path"))
+            is_video = (row.get("media_kind") or "photo") == "video"
+            return has_picture or not is_video
+
         if force:
-            to_analyze = [
-                image_path for image_path in images if db.get_photo_by_path(image_path)
-            ]
+            to_analyze = [image_path for image_path in images if _analysable(image_path)]
         else:
             to_analyze = []
             for image_path in images:
                 existing = db.get_photo_by_path(image_path)
-                if existing and not (
+                if not existing:
+                    continue
+                already_done = (
                     existing.get("status") == "analyzed"
                     and existing.get("score") is not None
-                ):
+                )
+                if not already_done and _analysable(image_path):
                     to_analyze.append(image_path)
 
         JOBS.update(
@@ -796,12 +975,16 @@ def _scan_worker(
 
 
 def start_rebuild_index(
-    folder: str, db: Database, config: Config, force: bool = False
+    folder: str,
+    db: Database,
+    config: Config,
+    force: bool = False,
+    skip_indexed_videos: bool = False,
 ) -> ScanJob:
     job = JOBS.create(folder, force)
     thread = threading.Thread(
         target=_rebuild_worker,
-        args=(job.id, folder, db, config, force),
+        args=(job.id, folder, db, config, force, skip_indexed_videos),
         daemon=True,
     )
     thread.start()
@@ -809,7 +992,12 @@ def start_rebuild_index(
 
 
 def _rebuild_worker(
-    job_id: str, folder: str, db: Database, config: Config, force: bool = False
+    job_id: str,
+    folder: str,
+    db: Database,
+    config: Config,
+    force: bool = False,
+    skip_indexed_videos: bool = False,
 ) -> None:
     job = JOBS.get(job_id)
     if not job:
@@ -817,6 +1005,10 @@ def _rebuild_worker(
     JOBS.update(job_id, status="running", phase="index", error=None)
     try:
         skip_dirs = [config.data_dir, config.trash_dir_name, config.cache_dir_name]
+        # Same rule as the scan: changed preview settings apply from the next
+        # sync, and the files rendered with the old ones are thrown away so this
+        # pass can rebuild them.
+        stale_renders = _invalidate_stale_video_renders(folder, db, config)
         pairs = discover_photo_pairs(
             folder,
             config.image_extensions,
@@ -833,6 +1025,23 @@ def _rebuild_worker(
         # With the "重新整理全部" checkbox enabled, every current photo is
         # refreshed (EXIF/GPS/location) while analysis results are preserved.
         to_index = list(pairs) if force else added
+        if not force and stale_renders:
+            # Their renders were just dropped, so they need another index pass
+            # even though the files themselves are old news.
+            stale = {os.path.normcase(canonical_path(p)) for p in stale_renders}
+            known = {os.path.normcase(canonical_path(pair[0])) for pair in to_index}
+            for pair in pairs:
+                key = os.path.normcase(canonical_path(pair[0]))
+                if key in stale and key not in known:
+                    to_index.append(pair)
+        if skip_indexed_videos:
+            # Keep the metadata of videos that are already indexed: on a machine
+            # without ffmpeg a full redo would otherwise blank them out.
+            to_index = [
+                pair
+                for pair in to_index
+                if not (video.looks_like_video(pair[0]) and pair[0] in active_paths)
+            ]
         total_work = len(removed) + len(to_index)
         JOBS.update(
             job_id,
@@ -865,6 +1074,17 @@ def _rebuild_worker(
                                 os.remove(cached)
                             except OSError:
                                 logger.debug("proxy file is already gone: %s", cached)
+                    # Videos carry three more derived files. They are inside the
+                    # cache directory by construction, so removing them can
+                    # never touch an original - but leaving them behind would
+                    # keep a preview alive for a row that no longer exists.
+                    for key in ("clip_path", "play_path", "live_path"):
+                        cached = row.get(key)
+                        if cached and _inside_cache(cached, folder, config):
+                            try:
+                                os.remove(cached)
+                            except OSError:
+                                logger.debug("derived file is already gone: %s", cached)
                     db.delete_rows([row["id"]])
             except sqlite3.Error:
                 logger.warning(

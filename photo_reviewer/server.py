@@ -306,18 +306,33 @@ def _move_to_trash(
                     "could not move raw sibling %s to trash", raw_path, exc_info=True
                 )
 
+    # A merged Live Photo is one memory made of two files: the movie goes to the
+    # trash with the still, or the next scan would list it as a new video card.
+    live_path = _live_sibling(photo, config)
+    if live_path and not same_path(live_path, src):
+        try:
+            shutil.move(live_path, str(_trash_destination(day_dir, live_path)))
+        except OSError:
+            logger.warning(
+                "could not move the live photo's movie %s to trash",
+                live_path,
+                exc_info=True,
+            )
+
     dest = _trash_destination(day_dir, src)
     shutil.move(src, str(dest))
     return str(dest)
 
 
 def _restore_from_trash(
-    photo: dict[str, Any], restore_raw: bool = True
+    photo: dict[str, Any], restore_raw: bool = True, config: Config | None = None
 ) -> tuple[str, str | None]:
     """Move a deleted photo from trash back to its original path.
 
     A raw sibling that was trashed alongside the photo is put back as well, so
-    the pair is reunited in the album. Returns ``(image_path, raw_path)``.
+    the pair is reunited in the album. A Live Photo's movie comes back too - it
+    was moved with the still, and leaving it in the trash would break the pair.
+    Returns ``(image_path, raw_path)``.
     """
     trash_path = photo["path"]
     original = photo.get("original_path") or trash_path
@@ -343,6 +358,25 @@ def _restore_from_trash(
             except OSError:
                 logger.warning(
                     "could not restore raw sibling %s", raw_trashed, exc_info=True
+                )
+
+    # The movie a Live Photo carried was moved to the trash alongside the still;
+    # bring it back to the same folder so the pair is whole again. A motion photo
+    # keeps its video inside the image, so there is nothing to look for.
+    if config is not None:
+        live_trashed = _trashed_live_candidate(photo, config)
+        if live_trashed:
+            original_parent = Path(original).parent
+            live_original = str(original_parent / Path(live_trashed).name)
+            try:
+                if os.path.exists(live_original):
+                    live_original = _uniquify(live_original)
+                shutil.move(live_trashed, live_original)
+            except OSError:
+                logger.warning(
+                    "could not restore the live photo's movie %s",
+                    live_trashed,
+                    exc_info=True,
                 )
 
     shutil.move(trash_path, original)
@@ -385,6 +419,59 @@ def _trashed_raw_candidate(photo: dict[str, Any]) -> str | None:
     return None
 
 
+def _live_sibling(photo: dict[str, Any], config: Config) -> str | None:
+    """The movie that belongs to a Live Photo, when it is an original file.
+
+    A still and its movie are one memory: an iPhone writes ``IMG_1234.HEIC``
+    next to ``IMG_1234.MOV`` and the pair is shown as a single card. Moving only
+    the still to the trash would leave the movie behind, where the next scan
+    would find it alone and list it as a brand-new video card.
+
+    Returns ``None`` for a motion photo whose video is inside the image (there is
+    nothing separate to move) and for a ``live_path`` inside the app's own cache,
+    which is derived data rather than something the user owns.
+    """
+    live_path = photo.get("live_path")
+    if not live_path or not os.path.exists(live_path):
+        return None
+    folder = photo.get("folder") or os.path.dirname(photo.get("path") or "")
+    try:
+        cache_root = os.path.abspath(os.path.join(folder, config.cache_dir_name))
+        if os.path.abspath(live_path).startswith(cache_root + os.sep):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return live_path
+
+
+def _trashed_live_candidate(photo: dict[str, Any], config: Config) -> str | None:
+    """Find the movie that was moved to the trash together with a Live Photo.
+
+    Located by stem inside the photo's trash day folder, the same way the raw
+    sibling is found: the pair shares a file name, and different source folders
+    land in different day folders.
+    """
+    trashed_image = photo.get("path") or ""
+    if not trashed_image:
+        return None
+    day_dir = os.path.dirname(trashed_image)
+    if not day_dir or not os.path.isdir(day_dir):
+        return None
+    stem = Path(trashed_image).stem
+    image_suffix = Path(trashed_image).suffix.lower()
+    for name in sorted(os.listdir(day_dir)):
+        candidate = os.path.join(day_dir, name)
+        if not os.path.isfile(candidate):
+            continue
+        if Path(name).stem != stem:
+            continue
+        if Path(name).suffix.lower() == image_suffix:
+            continue
+        if video.looks_like_video(candidate):
+            return candidate
+    return None
+
+
 def _original_path_for_trashed(photo: dict[str, Any], trashed_raw: str) -> str:
     """Rebuild where a trashed raw file came from."""
     raw_path = photo.get("raw_path") or ""
@@ -396,15 +483,36 @@ def _original_path_for_trashed(photo: dict[str, Any], trashed_raw: str) -> str:
     return trashed_raw
 
 
-def _remove_photo_cache(photo: dict[str, Any]) -> None:
-    """Delete cached proxy/thumbnail files for a photo, if present."""
-    for key in ("thumb_path", "proxy_path"):
+def _remove_photo_cache(photo: dict[str, Any], config: Config | None = None) -> None:
+    """Delete every cached file a row produced, if present.
+
+    Covers the video derivatives as well: a preview or a transcoded copy left
+    behind for a row that no longer exists is invisible to the user and can be
+    hundreds of megabytes. Each path is checked against the album's cache
+    directory first, so a stale column can never point this at an original.
+    """
+    folder = photo.get("folder") or ""
+    for key in ("thumb_path", "proxy_path", "clip_path", "play_path", "live_path"):
         path = photo.get(key)
-        if path and os.path.exists(path):
-            try:
-                _remove_file(path)
-            except OSError:
-                logger.debug("photo cache file is already gone: %s", path)
+        if not path or not os.path.exists(path):
+            continue
+        if config is not None and folder and not _inside_cache_dir(path, folder, config):
+            logger.debug("refusing to delete %s: outside the cache directory", path)
+            continue
+        try:
+            _remove_file(path)
+        except OSError:
+            logger.debug("photo cache file is already gone: %s", path)
+
+
+def _inside_cache_dir(path: str, folder: str, config: Config) -> bool:
+    """True when ``path`` sits inside one folder's cache directory."""
+    try:
+        root = os.path.abspath(os.path.join(folder, config.cache_dir_name))
+        target = os.path.abspath(path)
+    except (TypeError, ValueError):
+        return False
+    return target == root or target.startswith(root + os.sep)
 
 
 #: How long to keep trying when Windows says a file is busy. Antivirus, the
@@ -541,7 +649,7 @@ def _empty_trash(
             card_deferred += card_result["deferred"]
         except (CardError, OSError):
             logger.warning("card purge failed for photo %s", photo["id"], exc_info=True)
-        _remove_photo_cache(photo)
+        _remove_photo_cache(photo, cfg)
         database.delete_rows([photo["id"]])
         deleted += 1
         touched_folders.add(
@@ -1233,6 +1341,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip()
         force = bool(data.get("force", False))
+        skip_videos = bool(data.get("skip_indexed_videos", False))
         if not folder:
             return jsonify({"error": "请提供文件夹路径"}), 400
         try:
@@ -1244,7 +1353,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 return jsonify(
                     {"error": "该文件夹已有任务正在运行", "job_id": existing.id}
                 ), 409
-        job = start_rebuild_index(folder, database, cfg, force=force)
+        job = start_rebuild_index(
+            folder, database, cfg, force=force, skip_indexed_videos=skip_videos
+        )
         return jsonify(
             {
                 "job_id": job.id,
@@ -1259,6 +1370,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         data = request.get_json(force=True, silent=True) or {}
         folder = data.get("folder", "").strip()
         force = bool(data.get("force", False))
+        # The answer to "ffmpeg is missing - keep the videos I already read".
+        skip_videos = bool(data.get("skip_indexed_videos", False))
         if not folder:
             return jsonify({"error": "请提供文件夹路径"}), 400
         try:
@@ -1270,7 +1383,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 return jsonify(
                     {"error": "该文件夹已有扫描任务正在运行", "job_id": existing.id}
                 ), 409
-        job = start_scan(folder, database, cfg, force=force)
+        job = start_scan(
+            folder, database, cfg, force=force, skip_indexed_videos=skip_videos
+        )
         return jsonify({"job_id": job.id, "status": job.status, "folder": folder})
 
     @app.post("/api/import/plan")
@@ -1922,11 +2037,10 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     card_totals[key] += card_result[key]
                 card_totals["errors"].extend(card_result["errors"])
                 card_totals["source"] = card_result["source"]
-        for folder in touched_folders:
-            try:
-                cleanup_folder_cache(folder, database, cfg.cache_dir_name)
-            except (OSError, sqlite3.Error):
-                logger.warning("cache cleanup failed for %s", folder, exc_info=True)
+        # No folder-wide cache sweep here: moving a photo to the trash keeps its
+        # row and every cached path it references, so a sweep would scan the
+        # whole cache directory to find nothing. It only earns its cost when a
+        # row is actually deleted, which is what "彻底移除" does.
         payload = {"moved": moved, "errors": errors}
         if any_card:
             payload["card"] = card_totals
@@ -1958,7 +2072,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 errors.append({"id": pid, "error": "照片不在回收站"})
                 continue
             try:
-                new_original, restored_raw = _restore_from_trash(photo)
+                new_original, restored_raw = _restore_from_trash(photo, config=cfg)
                 database.restore_deleted([photo["id"]], {photo["id"]: new_original})
                 if restored_raw:
                     database.update_raw_path(photo["id"], restored_raw)
@@ -1983,11 +2097,8 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 card_totals["queued"] += card_result["queued"]
                 card_totals["errors"].extend(card_result["errors"])
                 card_totals["source"] = card_result["source"]
-        for folder in touched_folders:
-            try:
-                cleanup_folder_cache(folder, database, cfg.cache_dir_name)
-            except (OSError, sqlite3.Error):
-                logger.warning("cache cleanup failed for %s", folder, exc_info=True)
+        # Same reasoning as delete: restoring reuses the cache the row still
+        # points at, so there is nothing to sweep.
         payload = {"restored": restored, "errors": errors}
         if any_card:
             payload["card"] = card_totals
@@ -2008,6 +2119,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         purged = []
         errors = []
         raw_removed = 0
+        live_removed = 0
         card_removed = 0
         card_deferred = 0
         touched_folders = set()
@@ -2051,6 +2163,16 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                         raw_removed += 1
                     except OSError:
                         logger.debug("raw sibling already gone: %s", sibling)
+            # A Live Photo's movie went to the trash with the still, so purging
+            # the photo has to take it too - otherwise "彻底移除" leaves a movie
+            # in the trash with no card pointing at it.
+            live_sibling = _trashed_live_candidate(photo, cfg)
+            if live_sibling and _trash_only(live_sibling, cfg):
+                try:
+                    _remove_file(live_sibling)
+                    live_removed += 1
+                except OSError:
+                    logger.debug("live photo movie already gone: %s", live_sibling)
             # A file that was moved into the card's trash earlier is erased now,
             # so permanently removing a photo does not leave a copy behind on the
             # card. A card that is away defers this to its next connection.
@@ -2066,7 +2188,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 photo.get("folder")
                 or os.path.dirname(photo.get("original_path") or photo["path"])
             )
-            _remove_photo_cache(photo)
+            _remove_photo_cache(photo, cfg)
             database.delete_rows([pid])
             purged.append({"id": pid, "file_removed": file_removed})
         for folder in touched_folders:
@@ -2078,6 +2200,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             {
                 "purged": purged,
                 "raw_removed": raw_removed,
+                "live_removed": live_removed,
                 "card_removed": card_removed,
                 "card_deferred": card_deferred,
                 "errors": errors,
