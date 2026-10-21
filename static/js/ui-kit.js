@@ -213,6 +213,12 @@ window.LuminaUI = (() => {
    * ``options.checkbox`` adds an opt-in row above the buttons and makes the
    * promise resolve with ``{ confirmed, checked }`` instead of a bare boolean.
    */
+  //: Set while a confirm dialog is on screen. The dialog is a single shared
+  //: element, so a second question asked before the first is answered would
+  //: otherwise rewrite its contents and leave the first promise pending for
+  //: ever. The newcomer settles the older one as "no" and takes over.
+  let activeConfirm = null;
+
   function confirmDialog(message, options = {}) {
     return new Promise((resolve) => {
       const modal = getEl("confirmModal");
@@ -220,6 +226,7 @@ window.LuminaUI = (() => {
         resolve(window.confirm(message));
         return;
       }
+      if (activeConfirm) activeConfirm();
 
       const titleEl = getEl("confirmTitle");
       const msgEl = getEl("confirmMessage");
@@ -256,22 +263,34 @@ window.LuminaUI = (() => {
       }
 
       function cleanup() {
+        activeConfirm = null;
         hideModal(modal);
         if (checkRow) checkRow.classList.add("hidden");
         if (okBtn) okBtn.removeEventListener("click", onOk);
         if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
         if (closeBtn) closeBtn.removeEventListener("click", onCancel);
         modal.removeEventListener("click", onOverlay);
+        document.removeEventListener("keydown", onKey);
       }
 
       function onOk() { const value = result(true); cleanup(); resolve(value); }
       function onCancel() { const value = result(false); cleanup(); resolve(value); }
       function onOverlay(e) { if (e.target === modal) onCancel(); }
+      function onKey(e) {
+        // Escape is the reflex for "not this" and every other dialog in the app
+        // answers it; this one used to require aiming at the × button.
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          onCancel();
+        }
+      }
 
       if (okBtn) okBtn.addEventListener("click", onOk);
       if (cancelBtn) cancelBtn.addEventListener("click", onCancel);
       if (closeBtn) closeBtn.addEventListener("click", onCancel);
       modal.addEventListener("click", onOverlay);
+      document.addEventListener("keydown", onKey);
+      activeConfirm = onCancel;
       showModal(modal);
     });
   }

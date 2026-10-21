@@ -1438,60 +1438,13 @@ function updateSelectionBar() {
    means depends on which button is pressed. The two are different enough that
    the checkbox alone cannot say it, so each run asks first - and the dialog is
    the only place that names the consequence before the model starts working.
+
+   These build on ``confirmDialog`` from js/ui-kit.js rather than a dialog of
+   their own: that one already owns ``#confirmModal`` and is what every other
+   confirmation in the app uses. A second implementation meant two pieces of
+   code writing into one element, and whichever ran second won - which is how
+   the empty-trash prompt ended up showing the text of the scan prompt.
    ========================================================================== */
-
-/**
- * Ask one question with a confirm dialog.
- *
- * ``fields`` renders extra controls above the buttons; the answer comes back as
- * ``{confirmed, values}``. Resolves rather than throwing, so a caller can await
- * it in a straight line.
- */
-function askConfirm(options) {
-  return new Promise((resolve) => {
-    const modal = $("confirmModal");
-    if (!modal) {
-      // No dialog in the page means no way to ask; take the safe answer.
-      resolve({ confirmed: false, values: {} });
-      return;
-    }
-    $("confirmTitle").textContent = options.title || "确认";
-    $("confirmBody").innerHTML = options.body || "";
-    const fields = $("confirmFields");
-    fields.innerHTML = options.fieldsHtml || "";
-    fields.classList.toggle("hidden", !options.fieldsHtml);
-    const okBtn = $("confirmOkBtn");
-    okBtn.textContent = options.okText || "继续";
-    okBtn.classList.toggle("danger", !!options.danger);
-    okBtn.classList.toggle("primary", !options.danger);
-
-    const finish = (confirmed) => {
-      okBtn.removeEventListener("click", onOk);
-      $("confirmCancelBtn").removeEventListener("click", onCancel);
-      modal.removeEventListener("click", onBackdrop);
-      document.removeEventListener("keydown", onKey);
-      const values = {};
-      fields.querySelectorAll("input[type=checkbox]").forEach((el) => {
-        values[el.id] = el.checked;
-      });
-      closeModal("confirmModal");
-      resolve({ confirmed, values });
-    };
-    const onOk = () => finish(true);
-    const onCancel = () => finish(false);
-    const onBackdrop = (e) => {
-      if (e.target === modal) finish(false);
-    };
-    const onKey = (e) => {
-      if (e.key === "Escape") finish(false);
-    };
-    okBtn.addEventListener("click", onOk);
-    $("confirmCancelBtn").addEventListener("click", onCancel);
-    modal.addEventListener("click", onBackdrop);
-    document.addEventListener("keydown", onKey);
-    showModal(modal);
-  });
-}
 
 /**
  * The "ffmpeg is not installed" question.
@@ -1502,41 +1455,35 @@ function askConfirm(options) {
  * already in the library with blanks.
  */
 async function askMissingFfmpeg() {
-  const answer = await askConfirm({
-    title: "没有检测到 ffmpeg",
-    body:
-      "<p>本次整理会重新读取整个文件夹，但本机没有 ffmpeg，视频的时长、分辨率与编码读不出来。</p>" +
-      "<p>如果不跳过已索引的视频，它们已有的这些信息会被清空（评分与标签不受影响）。</p>",
-    okText: "继续整理",
-    fieldsHtml: `
-      <label class="checkbox-row">
-        <input id="confirmSkipVideos" type="checkbox" checked />
-        <span>跳过已索引的视频</span>
-      </label>
-    `,
-  });
+  const answer = await confirmDialog(
+    "本次整理会重新读取整个文件夹，但本机没有 ffmpeg，视频的时长、分辨率与编码读不出来。\n" +
+      "如果不跳过已索引的视频，它们已有的这些信息会被清空（评分与标签不受影响）。",
+    {
+      title: "没有检测到 ffmpeg",
+      confirmText: "继续整理",
+      checkbox: { label: "跳过已索引的视频", checked: true },
+    }
+  );
   return {
-    confirmed: answer.confirmed,
-    skipVideos: answer.values.confirmSkipVideos !== false,
+    confirmed: typeof answer === "object" ? answer.confirmed : answer,
+    skipVideos: typeof answer === "object" ? answer.checked : true,
   };
 }
 
 /** The consequence of "重新整理全部", stated per button. */
 async function askForceScan(mode) {
   const isScan = mode === "scan";
-  const body = isScan
-    ? "<p>将先重新读取整个文件夹的文件信息，然后把<strong>每一张照片、每一段视频</strong>重新送交大模型解读。</p>" +
-      "<p>评分、标签、标题与简评会被新结果覆盖，手动编辑过的内容同样会被覆盖（珍藏状态保留）。</p>" +
-      "<p>这会按张数消耗模型调用，耗时可能很长。</p>"
-    : "<p>将重新读取整个文件夹的文件信息：文件大小、EXIF、拍摄地点，以及视频的时长、分辨率与编码。</p>" +
-      "<p>不调用大模型，评分、标签与简评保持不变。</p>";
-  const answer = await askConfirm({
+  const message = isScan
+    ? "将先重新读取整个文件夹的文件信息，然后把每一张照片、每一段视频重新送交大模型解读。\n" +
+      "评分、标签、标题与简评会被新结果覆盖，手动编辑过的内容同样会被覆盖（珍藏状态保留）。\n" +
+      "这会按张数消耗模型调用，耗时可能很长。"
+    : "将重新读取整个文件夹的文件信息：文件大小、EXIF、拍摄地点，以及视频的时长、分辨率与编码。\n" +
+      "不调用大模型，评分、标签与简评保持不变。";
+  return confirmDialog(message, {
     title: isScan ? "重新整理全部并重新解读？" : "重新整理全部？",
-    body,
-    okText: isScan ? "重新整理并解读" : "重新整理",
+    confirmText: isScan ? "重新整理并解读" : "重新整理",
     danger: isScan,
   });
-  return answer.confirmed;
 }
 
 async function startScan() {
@@ -4588,6 +4535,10 @@ function init() {
     });
   });
   document.querySelectorAll(".modal").forEach((modal) => {
+    // The confirm dialog handles its own backdrop: it is a promise, and hiding
+    // it without resolving would leave the caller waiting for ever. Binding the
+    // generic handler here as well meant one click ran both paths.
+    if (modal.id === "confirmModal") return;
     modal.addEventListener("click", (e) => {
       if (e.target !== modal) return;
       if (state.importPickPending && modal.id === "dirModal") {

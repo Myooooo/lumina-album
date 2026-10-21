@@ -546,20 +546,6 @@
     </div>
   </div>
 
-  <!-- Confirmation dialog. One dialog serves every "are you sure" question the
-       toolbar needs, so the wording and the button order stay consistent. -->
-  <div id="confirmModal" class="modal hidden">
-    <div class="modal-content confirm-content">
-      <h2 id="confirmTitle">确认</h2>
-      <div id="confirmBody" class="confirm-body"></div>
-      <div id="confirmFields" class="confirm-fields hidden"></div>
-      <div class="modal-actions">
-        <button id="confirmCancelBtn" class="btn"><span class="btn-icon" data-icon="close"></span>取消</button>
-        <button id="confirmOkBtn" class="btn primary">继续</button>
-      </div>
-    </div>
-  </div>
-
   <!-- SD card sync modal -->
   <div id="cardSyncModal" class="modal hidden">
     <div class="modal-content">
@@ -588,7 +574,7 @@
   <!-- Custom confirm dialog -->
   <div id="confirmModal" class="modal hidden">
     <div class="modal-content confirm-content">
-      <button class="modal-close" data-close="confirmModal"><span class="btn-icon" data-icon="close"></span></button>
+      <button class="modal-close" title="取消"><span class="btn-icon" data-icon="close"></span></button>
       <h2 id="confirmTitle"><span class="modal-title-icon" data-icon="sparkles"></span>确认操作</h2>
       <p id="confirmMessage"></p>
       <label id="confirmCheckRow" class="confirm-check hidden">

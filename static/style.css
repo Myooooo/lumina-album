@@ -3111,40 +3111,6 @@ select {
   color: var(--primary-dark);
 }
 
-/* ---------- Confirmation dialog ----------
-   Narrower than a form dialog: it asks one question and has to read at a
-   glance. The body carries its own rhythm so paragraphs about consequences stay
-   legible at this width. */
-.confirm-content {
-  max-width: 480px;
-}
-
-.confirm-body p {
-  margin: 0 0 10px;
-  font-size: 13.5px;
-  line-height: var(--leading-body);
-  color: var(--text-secondary);
-}
-
-.confirm-body p:last-child {
-  margin-bottom: 0;
-}
-
-.confirm-body strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.confirm-fields {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px dashed rgba(160, 130, 90, 0.25);
-}
-
-.confirm-fields.hidden {
-  display: none;
-}
-
 /* The confirming button in a dialog is the one the eye must land on, so a
    destructive confirm is filled rather than outlined: an outline reads as
    "secondary" next to the pale cancel button beside it. */
