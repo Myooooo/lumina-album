@@ -293,7 +293,7 @@
         </button>
         <button class="settings-tab" role="tab" data-tab="image" id="tabBtnImage"
                 aria-selected="false" aria-controls="tabImage" tabindex="-1">
-          <span class="btn-icon" data-icon="imageSize"></span><span class="tab-label">图片处理</span>
+          <span class="btn-icon" data-icon="imageSize"></span><span class="tab-label">照片处理</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="video" id="tabBtnVideo"
                 aria-selected="false" aria-controls="tabVideo" tabindex="-1">
@@ -368,15 +368,15 @@
 
           <h3 class="settings-subtitle">实况照片</h3>
           <div class="form-grid">
+            <label class="checkbox-row full-row">
+              <input id="setMergeLivePhotos" type="checkbox" />
+              <span>合并显示实况照片（重新整理后生效）</span>
+            </label>
             <div class="volume-editor full-row" data-volume-key="live">
               <span class="volume-editor-label">实况音量</span>
               <input id="setLiveVolume" class="volume-range" type="range" min="0" max="100" step="1" value="0" />
               <input id="setLiveVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
             </div>
-            <label class="checkbox-row full-row">
-              <input id="setMergeLivePhotos" type="checkbox" />
-              <span>合并显示实况照片（重新整理后生效）</span>
-            </label>
           </div>
         </section>
 
@@ -386,11 +386,10 @@
           <div class="form-grid">
             <label class="full-row">视频处理方式
               <select id="setVideoProcessing">
-                <option value="ffmpeg">用 ffmpeg 处理（读取时长与编码、生成封面与预览）</option>
-                <option value="none">不处理（之后的同步跳过视频文件）</option>
+                <option value="ffmpeg">用 ffmpeg 处理（读取参数、生成封面与预览）</option>
+                <option value="none">不处理（之后的同步跳过视频文件，现有视频不受影响）</option>
               </select>
             </label>
-            <p class="full-row settings-hint compact">选择「不处理」后，之后的相册同步会忽略所有视频文件；已建立的索引不受影响。</p>
             <label>预览时长（秒）
               <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
             </label>

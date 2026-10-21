@@ -1743,9 +1743,11 @@ select {
   z-index: 4;
 }
 
+/* Sound on the left, play/pause on the right: the transport control belongs at
+   the corner the eye reads last, and the speaker is the secondary one. */
 .preview-sound-btn {
   bottom: 12px;
-  right: 12px;
+  left: 12px;
   width: 38px;
   height: 38px;
   justify-content: center;
@@ -1754,7 +1756,7 @@ select {
 
 .preview-video-pause {
   bottom: 12px;
-  left: 12px;
+  right: 12px;
   width: 38px;
   height: 38px;
   justify-content: center;
@@ -1820,7 +1822,6 @@ select {
 .preview-live-btn svg {
   width: 17px;
   height: 17px;
-  margin-left: 2px;
 }
 
 /* ---------- Volume editor ----------
@@ -1838,14 +1839,14 @@ select {
 }
 
 .form-grid .volume-editor[data-volume-key="live"] {
-  --volume-color: var(--dim-memory);
+  --volume-color: var(--primary);
   --volume-glow: rgba(189, 99, 113, 0.24);
 }
 
 .form-grid .volume-editor-label {
   font-size: 12.5px;
-  font-weight: 600;
-  color: var(--volume-color);
+  font-weight: 500;
+  color: var(--muted);
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
@@ -1872,7 +1873,8 @@ select {
   );
   outline: none;
   cursor: pointer;
-  transition: box-shadow .25s ease;
+  transition: box-shadow var(--dur-fast) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out);
 }
 
 .form-grid input.volume-range:focus-visible {
@@ -1889,7 +1891,8 @@ select {
   border: 3px solid var(--volume-color);
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
   cursor: grab;
-  transition: transform .2s var(--ease-out), box-shadow .2s ease;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .volume-range::-moz-range-thumb {
@@ -1900,14 +1903,50 @@ select {
   border: 3px solid var(--volume-color);
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.18);
   cursor: grab;
-  transition: transform .2s var(--ease-out), box-shadow .2s ease;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
 }
 
-.volume-range:active::-webkit-slider-thumb,
-.volume-range:active::-moz-range-thumb {
-  transform: scale(1.18);
+/* The knob answers the pointer before it is grabbed: a lift, a halo, and the
+   rail warms up a touch behind it. Movement only, so it stays composited. */
+@media (hover: hover) and (pointer: fine) {
+  .volume-range:hover::-webkit-slider-thumb {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 5px var(--volume-glow), 0 3px 8px rgba(60, 40, 20, 0.22);
+  }
+  .volume-range:hover::-moz-range-thumb {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 5px var(--volume-glow), 0 3px 8px rgba(60, 40, 20, 0.22);
+  }
+  .volume-range:hover {
+    filter: saturate(1.06);
+  }
+}
+
+/* Keyboard users get the same halo the pointer gets. */
+.volume-range:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.16);
+  box-shadow: 0 0 0 5px var(--volume-glow), 0 3px 8px rgba(60, 40, 20, 0.22);
+}
+.volume-range:focus-visible::-moz-range-thumb {
+  transform: scale(1.16);
+  box-shadow: 0 0 0 5px var(--volume-glow), 0 3px 8px rgba(60, 40, 20, 0.22);
+}
+
+/* Pressed: the knob spreads and the halo tightens, so the finger feels the
+   grab. Split into one rule per engine on purpose - a selector list that mixes
+   `::-webkit-slider-thumb` with `::-moz-range-thumb` is invalid, and the whole
+   rule is dropped by every browser. That is why this animation never played. */
+.volume-range:active::-webkit-slider-thumb {
+  transform: scale(1.24);
   cursor: grabbing;
-  box-shadow: 0 0 0 6px var(--volume-glow), 0 2px 6px rgba(60, 40, 20, 0.2);
+  box-shadow: 0 0 0 7px var(--volume-glow), 0 4px 10px rgba(60, 40, 20, 0.24);
+}
+
+.volume-range:active::-moz-range-thumb {
+  transform: scale(1.24);
+  cursor: grabbing;
+  box-shadow: 0 0 0 7px var(--volume-glow), 0 4px 10px rgba(60, 40, 20, 0.24);
 }
 
 .form-grid input.volume-number {
@@ -1917,11 +1956,21 @@ select {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--volume-color);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
 }
 
 .form-grid input.volume-number:focus {
   border-color: var(--volume-color);
   box-shadow: 0 0 0 3px var(--volume-glow);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .form-grid input.volume-number:hover {
+    border-color: var(--volume-color);
+    background: #fff;
+  }
 }
 
 /* ---------- Fullscreen video ---------- */
@@ -2035,6 +2084,7 @@ select {
 
 .checkbox-row span {
   line-height: 1.5;
+  font-size: 14px;
 }
 
 /* An unchecked switch is a "no", so its label leans muted; checked, it reads
