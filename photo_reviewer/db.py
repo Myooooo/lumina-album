@@ -84,17 +84,44 @@ def _time_sort_key(photo: dict[str, Any], descending: bool):
 
 
 def sort_photos(photos: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
-    """Sort photo dicts in place using the same sort names as the UI."""
+    """Sort photo dicts in place using the same sort names as the UI.
+
+    Score sorts break ties on capture time, matching ``list_photos``: a score
+    alone left equal-scoring photos in arbitrary order, which read as a shuffled
+    shoot.
+    """
     if sort == "score_desc":
-        photos.sort(key=lambda p: (p.get("score") is None, -(p.get("score") or 0)))
+        photos.sort(
+            key=lambda p: (
+                p.get("score") is None,
+                -(p.get("score") or 0),
+                _time_sort_key(p, descending=True),
+            )
+        )
     elif sort == "score_asc":
-        photos.sort(key=lambda p: (p.get("score") is None, p.get("score") or 0))
+        photos.sort(
+            key=lambda p: (
+                p.get("score") is None,
+                p.get("score") or 0,
+                _time_sort_key(p, descending=True),
+            )
+        )
     elif sort == "filename":
-        photos.sort(key=lambda p: str(p.get("filename") or "").lower())
+        photos.sort(
+            key=lambda p: (
+                str(p.get("filename") or "").lower(),
+                _time_sort_key(p, descending=True),
+            )
+        )
     elif sort == "recent":
         photos.sort(key=lambda p: p.get("analyzed_at") or "", reverse=True)
     elif sort == "size":
-        photos.sort(key=lambda p: p.get("size") or 0, reverse=True)
+        photos.sort(
+            key=lambda p: (
+                -(p.get("size") or 0),
+                _time_sort_key(p, descending=True),
+            )
+        )
     elif sort == "time_asc":
         photos.sort(key=lambda p: _time_sort_key(p, descending=False))
     elif sort == "time_desc":
@@ -566,12 +593,18 @@ class Database:
             sql = f"SELECT * FROM photos {where} ORDER BY {order} LIMIT ? OFFSET ?"
             return self._query_photos(sql, params + [limit, offset])
 
+        # A score on its own is not a tie-breaker. A folder where many photos
+        # scored 8.0 came back in whatever order SQLite happened to store them,
+        # which is why a shoot sometimes looked shuffled. Capture time settles
+        # the tie, so equal scores read chronologically.
+        capture_time = _capture_time_sql_expr()
+        by_time = f"({capture_time}) IS NULL ASC, {capture_time} DESC"
         sort_map = {
-            "score_asc": "(score IS NULL) ASC, score ASC",
-            "score_desc": "(score IS NULL) ASC, score DESC",
-            "filename": "filename COLLATE NOCASE ASC",
+            "score_asc": f"(score IS NULL) ASC, score ASC, {by_time}",
+            "score_desc": f"(score IS NULL) ASC, score DESC, {by_time}",
+            "filename": f"filename COLLATE NOCASE ASC, {by_time}",
             "recent": "analyzed_at DESC",
-            "size": "size DESC",
+            "size": f"size DESC, {by_time}",
         }
         order = sort_map.get(sort, sort_map["score_asc"])
         sql = f"SELECT * FROM photos {where} ORDER BY {order} LIMIT ? OFFSET ?"

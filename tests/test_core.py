@@ -4160,6 +4160,80 @@ class AnalysisStateQueryTests(unittest.TestCase):
         self.assertIn(os.path.join(self.folder, "lost.mp4"), paths)
 
 
+class SortTieBreakTests(unittest.TestCase):
+    """Equal scores are ordered by capture time, not by whatever SQLite stored.
+
+    A folder where many photos scored 8.0 came back shuffled, which is what made
+    a shoot look out of order even with "总分从高到低" selected.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "pics")
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp.name, "l.db"))
+
+    def tearDown(self) -> None:
+        self.db.close()
+        try:
+            self.tmp.cleanup()
+        except OSError:
+            pass
+
+    def _add(self, name: str, score: float, captured: str | None) -> None:
+        exif = {"datetime_original": captured} if captured else {}
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.folder, name),
+                "folder": self.folder,
+                "filename": name,
+                "status": "analyzed",
+                "score": score,
+                "exif": exif,
+            }
+        )
+
+    def _names(self, sort: str) -> list[str]:
+        return [
+            row["filename"]
+            for row in self.db.list_photos(folder=self.folder, sort=sort, limit=50)
+        ]
+
+    def test_equal_scores_are_ordered_by_capture_time(self) -> None:
+        self._add("mid.jpg", 8.0, "2024:05:02 10:00:00")
+        self._add("late.jpg", 8.0, "2024:05:03 10:00:00")
+        self._add("early.jpg", 8.0, "2024:05:01 10:00:00")
+        self.assertEqual(
+            self._names("score_desc"), ["late.jpg", "mid.jpg", "early.jpg"]
+        )
+
+    def test_score_still_outranks_time(self) -> None:
+        self._add("old_high.jpg", 9.0, "2020:01:01 10:00:00")
+        self._add("new_low.jpg", 5.0, "2025:01:01 10:00:00")
+        self.assertEqual(self._names("score_desc"), ["old_high.jpg", "new_low.jpg"])
+
+    def test_ascending_scores_also_tie_break_by_time(self) -> None:
+        self._add("a.jpg", 5.0, "2024:05:01 10:00:00")
+        self._add("b.jpg", 5.0, "2024:05:02 10:00:00")
+        self.assertEqual(self._names("score_asc"), ["b.jpg", "a.jpg"])
+
+    def test_a_photo_without_a_date_sorts_after_one_with(self) -> None:
+        self._add("dated.jpg", 8.0, "2024:05:01 10:00:00")
+        self._add("undated.jpg", 8.0, None)
+        self.assertEqual(self._names("score_desc"), ["dated.jpg", "undated.jpg"])
+
+    def test_python_sorting_matches_the_sql(self) -> None:
+        self._add("mid.jpg", 8.0, "2024:05:02 10:00:00")
+        self._add("late.jpg", 8.0, "2024:05:03 10:00:00")
+        self._add("early.jpg", 8.0, "2024:05:01 10:00:00")
+        rows = self.db.list_photos(folder=self.folder, sort="score_desc", limit=50)
+        shuffled = list(reversed(rows))
+        sort_photos(shuffled, "score_desc")
+        self.assertEqual(
+            [r["filename"] for r in shuffled], [r["filename"] for r in rows]
+        )
+
+
 class LivePhotoMergeSwitchTests(unittest.TestCase):
     """「合并显示实况照片」 decides whether a pair is one item or two.
 

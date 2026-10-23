@@ -1687,6 +1687,66 @@ select {
   animation: previewVideoIn .36s ease both;
 }
 
+/* ---------- Generating a preview ----------
+   Shown over the poster only while the first clip is encoded. It is a quiet
+   announcement, not a progress bar: the wait is a fraction of a second, and a
+   bar that fills would draw more attention than the thing it is hiding. */
+.preview-rendering {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  /* The stage is only as wide as the picture and this pill is centred inside
+     it, so without an explicit width it shrank to the remaining space and the
+     label wrapped one character per line. */
+  width: max-content;
+  max-width: calc(100% - 32px);
+  white-space: nowrap;
+  padding: 8px 15px 8px 12px;
+  border-radius: 99px;
+  border: 1px solid rgba(247, 239, 228, 0.22);
+  background: rgba(14, 12, 10, 0.55);
+  color: #f2e9dc;
+  font-size: 12.5px;
+  letter-spacing: var(--tracking-label);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--dur-ui) var(--ease-out);
+  z-index: 5;
+}
+
+.preview-rendering.visible {
+  opacity: 1;
+}
+
+/* Fading out is slower than fading in: the clip underneath is already moving,
+   and a quick disappearance reads as a glitch. */
+.preview-rendering:not(.visible) {
+  transition: opacity var(--dur-slow) var(--ease-soft);
+}
+
+/* A ring that turns without a keyframe-heavy animation: one element, one
+   rotation, composited. */
+.preview-rendering-ring {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.6px solid rgba(247, 239, 228, 0.28);
+  border-top-color: #f2e9dc;
+  animation: previewRenderingSpin 720ms linear infinite;
+}
+
+@keyframes previewRenderingSpin {
+  to { transform: rotate(360deg); }
+}
+
 /* A Live Photo's motion fades in over the still and, when it ends, fades back
    out - the way iOS turns a moment into movement and back.
 
@@ -1812,8 +1872,26 @@ select {
   cursor: pointer;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  transition: transform .26s var(--ease-out), background-color .2s ease;
+  /* Opacity is part of the transition because the button fades away while the
+     Live Photo's motion plays, then fades back in with the still. */
+  transition: transform var(--dur-ui) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              opacity var(--dur-ui) var(--ease-out),
+              visibility 0s linear 0s;
   z-index: 4;
+}
+
+/* Hidden for the duration of the motion. `visibility` flips only after the fade
+   has finished on the way out (the delay below) and immediately on the way in,
+   so the button cannot be clicked while invisible but never blinks mid-fade. */
+.preview-live-btn.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: scale(0.9);
+  transition: transform var(--dur-ui) var(--ease-out),
+              opacity var(--dur-ui) var(--ease-out),
+              visibility 0s linear var(--dur-ui);
 }
 
 .preview-live-btn:hover {

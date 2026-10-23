@@ -36,6 +36,8 @@ const state = {
   videoPreviewMode: "once",
   //: Preview volume, 0-100.
   videoPreviewVolume: 50,
+  //: Pending timer that hides the "generating a preview" cue after its fade.
+  renderingHideTimer: null,
   //: Live Photo motion volume, 0-100. Silent by default.
   liveVolume: 0,
   //: Whether the server found ffmpeg. Known from startup, so a full redo can
@@ -2171,14 +2173,23 @@ function applyPreviewAfterRemoval(nextId) {
   updatePreview({ skipImage: true });
 }
 
+/**
+ * Move the preview one card in ``delta`` direction.
+ *
+ * Deliberately not circular. Wrapping from the first photo to the last meant
+ * "上一张" on the first card jumped to somewhere in the middle of the album, and
+ * the next press navigated from there - the user lost their place with no way
+ * to tell what had happened. The ends are ends: the side arrows are hidden there
+ * and the keyboard says so.
+ */
 async function navigatePreview(delta) {
   let order = visiblePhotoOrder();
   if (!order.length) return;
   let idx = order.indexOf(state.currentPreviewId);
   if (idx < 0) return;
 
-  // At the end of the loaded pages, fetch the next page before wrapping
-  // back to the first card.
+  // At the end of the loaded pages, fetch the next page before deciding that
+  // there is genuinely no next photo.
   if (delta > 0 && idx === order.length - 1 && state.hasMore) {
     const loadedBefore = state.photos.length;
     await loadMorePhotos();
@@ -2189,7 +2200,17 @@ async function navigatePreview(delta) {
     }
   }
 
-  const nextId = order[(idx + delta + order.length) % order.length];
+  const target = idx + delta;
+  if (target < 0) {
+    showToast("已经到顶了。", "info");
+    return;
+  }
+  if (target >= order.length) {
+    showToast("已经到底了。", "info");
+    return;
+  }
+
+  const nextId = order[target];
   const token = ++state.previewNavToken;
   const url = `/api/proxy/${nextId}`;
   await preloadImage(url);
@@ -2207,6 +2228,22 @@ async function navigatePreview(delta) {
 /* ==========================================================================
    Folder history dropdown (the chevron inside the path field)
    ========================================================================== */
+
+/**
+ * Whether there is a photo before/after the one on screen.
+ *
+ * Drives the side arrows and the "at the end" toasts. A page still to load
+ * counts as a neighbour on the way forward, because pressing the arrow fetches
+ * it rather than stopping.
+ */
+function previewHasNeighbour(delta) {
+  const order = visiblePhotoOrder();
+  if (!order.length) return false;
+  const idx = order.indexOf(state.currentPreviewId);
+  if (idx < 0) return false;
+  if (delta < 0) return idx > 0;
+  return idx < order.length - 1 || !!state.hasMore;
+}
 
 function folderHistoryOpen() {
   return !$("folderHistory").classList.contains("hidden");
@@ -2662,6 +2699,7 @@ function stopPreviewVideo() {
   video.removeAttribute("src");
   video.load();
   video.classList.add("hidden");
+  showRenderingIndicator(false);
   const pause = $("previewVideoPauseBtn");
   if (pause) pause.classList.add("hidden");
 }
@@ -2691,8 +2729,9 @@ function applyPreviewMedia(photo, options = {}) {
   // the previous clip running underneath.
   stopPreviewVideo();
   if (soundBtn) soundBtn.classList.add("hidden");
-  const liveBtn = $("previewLiveBtn");
-  if (liveBtn) liveBtn.classList.add("hidden");
+  // Cleared through the same helper the playback path uses, so the button's
+  // state never depends on which code path ran last.
+  setLiveButtonVisible(false);
   $("previewImage").classList.toggle("hidden", false);
 
   if (isVideo) {
@@ -2720,12 +2759,43 @@ function applyPreviewMedia(photo, options = {}) {
   // 视频处理 tab and talks about video previews. Letting it silence Live Photos
   // meant a switch labelled "video" quietly changed how photographs behave.
   if (hasLive) {
+    // Shown first, then playLiveMotion hides it again for the duration of the
+    // motion - the still is what the button belongs to.
+    setLiveButtonVisible(true);
     playLiveMotion(photo);
   }
-  if (hasLive && liveBtn) liveBtn.classList.remove("hidden");
 }
 
 /** Load and start the preview for ``photo``, honouring the preview settings. */
+/**
+ * Show or hide the "generating a preview" indicator.
+ *
+ * It sits over the poster while the first clip is encoded. Going away is a
+ * fade, so the clip underneath appears to replace it rather than cut in.
+ */
+function showRenderingIndicator(visible) {
+  const el = $("previewRendering");
+  if (!el) return;
+  if (visible) {
+    clearTimeout(state.renderingHideTimer);
+    state.renderingHideTimer = null;
+    // Take it out of `hidden` first, then flip opacity on the next frame, or
+    // the browser coalesces both changes and the fade-in never runs.
+    el.classList.remove("hidden");
+    void el.offsetWidth;
+    el.classList.add("visible");
+    return;
+  }
+  el.classList.remove("visible");
+  // `display: none` would cut the fade short, so the element is only hidden
+  // once the transition has finished.
+  clearTimeout(state.renderingHideTimer);
+  state.renderingHideTimer = setTimeout(() => {
+    el.classList.add("hidden");
+    state.renderingHideTimer = null;
+  }, 420);
+}
+
 function playPreviewClip(photo, options = {}) {
   const video = $("previewVideo");
   if (!video) return;
@@ -2748,9 +2818,14 @@ function playPreviewClip(photo, options = {}) {
   // "loop" repeats.
   video.loop = state.videoPreviewMode === "loop";
   video.classList.add("hidden");
+  // The poster is already on screen; the indicator covers the gap while the
+  // first preview is encoded. It is shown straight away and dismissed by
+  // `onReady`, which also handles the cache-hit case (it flashes and goes).
+  showRenderingIndicator(true);
   video.src = wanted;
   const onReady = () => {
     if (video.dataset.photoId !== String(photo.id)) return;
+    showRenderingIndicator(false);
     video.classList.remove("hidden");
     if (pause) pause.classList.remove("hidden");
     const played = video.play();
@@ -2783,6 +2858,7 @@ function playPreviewClip(photo, options = {}) {
       const current = video.getAttribute("src") || "";
       if (!current || current !== wanted) return;
       // No ffmpeg, or a codec ffmpeg could not read: keep the poster.
+      showRenderingIndicator(false);
       video.classList.add("hidden");
       paintPauseButton();
     },
@@ -2888,6 +2964,10 @@ function playLiveMotion(photo, options = {}) {
   video.classList.remove("is-fading");
   video.classList.add("hidden", "is-live-motion");
   video.src = wanted;
+  // The replay button belongs to the still. While the motion is on screen it
+  // would sit on top of the footage, inviting a press that does nothing useful,
+  // so it fades out for the duration and fades back in with the picture.
+  setLiveButtonVisible(false);
 
   const fadeOut = () => {
     livePlaying = false;
@@ -2896,6 +2976,7 @@ function playLiveMotion(photo, options = {}) {
     setTimeout(() => {
       if (video.dataset.photoId !== String(photo.id)) return;
       video.classList.add("is-fading");
+      setLiveButtonVisible(true);
       // Slightly longer than the fade in style.css so the element is never
       // hidden mid-transition.
       setTimeout(() => {
@@ -2913,7 +2994,10 @@ function playLiveMotion(photo, options = {}) {
       video.classList.remove("hidden");
       const played = video.play();
       if (played && typeof played.catch === "function") {
-        played.catch(() => video.classList.add("hidden"));
+        played.catch(() => {
+          video.classList.add("hidden");
+          setLiveButtonVisible(true);
+        });
       }
     },
     { once: true }
@@ -2924,6 +3008,7 @@ function playLiveMotion(photo, options = {}) {
     () => {
       livePlaying = false;
       video.classList.add("hidden");
+      setLiveButtonVisible(true);
       // Autoplay is allowed to fail quietly (a motion that will not decode
       // should not throw an error at someone who just opened a photo), but a
       // press deserves an answer.
@@ -2931,6 +3016,19 @@ function playLiveMotion(photo, options = {}) {
     },
     { once: true }
   );
+}
+
+
+/**
+ * Show or hide the Live Photo replay button, with the fade declared in CSS.
+ *
+ * ``is-hidden`` rather than the ``hidden`` utility class: the latter removes the
+ * element from the layout on the spot, which is the opposite of a fade.
+ */
+function setLiveButtonVisible(visible) {
+  const btn = $("previewLiveBtn");
+  if (!btn) return;
+  btn.classList.toggle("is-hidden", !visible);
 }
 
 
@@ -2962,9 +3060,12 @@ function updatePreview(options = {}) {
   // Pull the EXIF / raw size for this photo if it has not arrived yet; the
   // dialog is already painted by the time the response lands.
   ensurePhotoDetail(id);
-  const hasNav = state.photos.length > 1;
-  $("previewPrevBtn").classList.toggle("hidden", !hasNav);
-  $("previewNextBtn").classList.toggle("hidden", !hasNav);
+  // Each arrow is hidden at its own end of the list: there is nothing to the
+  // left of the first photo, and nothing to the right of the last one. A single
+  // "has more than one photo" flag kept both lit at both ends, which is what
+  // made pressing 上一张 on the first card jump somewhere.
+  $("previewPrevBtn").classList.toggle("hidden", !previewHasNeighbour(-1));
+  $("previewNextBtn").classList.toggle("hidden", !previewHasNeighbour(1));
   const img = $("previewImage");
   if (!options.skipImage) {
     img.classList.remove("preview-switch-left", "preview-switch-right");

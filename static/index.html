@@ -188,6 +188,12 @@
             <!-- Video: the poster shows immediately, the loop cross-fades in.
                  The same element plays a Live Photo's motion once, then fades. -->
             <video id="previewVideo" class="preview-video hidden" muted autoplay loop playsinline preload="metadata"></video>
+            <!-- Shown only while a preview is generated for the first time,
+                 then faded out as the clip takes over. -->
+            <div id="previewRendering" class="preview-rendering hidden" role="status">
+              <span class="preview-rendering-ring" aria-hidden="true"></span>
+              <span class="preview-rendering-text">正在生成预览…</span>
+            </div>
             <button id="previewSoundBtn" class="preview-sound-btn hidden" type="button" title="打开声音">
               <span class="btn-icon" data-icon="volumeOff"></span>
             </button>
