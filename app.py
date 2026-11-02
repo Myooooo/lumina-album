@@ -23,12 +23,22 @@ import os
 import socket
 import threading
 import webbrowser
+from collections.abc import Iterator
 
 from photo_reviewer.config import CONFIG
 from photo_reviewer.server import create_app
 
-#: How many ports to try after the configured one before giving up.
+#: How many ports to try on each side of the configured one before sweeping.
 PORT_ATTEMPTS = 40
+
+#: Ports applications are conventionally allowed to use, tried only when nothing
+#: near the configured port works. Chosen to sit outside the blocks Windows
+#: reserves for itself (which on one machine covered 4416-5284 in one stretch).
+_FALLBACK_PORTS = (8080, 8090, 8888, 9000, 9090, 3000, 5173, 6060, 7070)
+
+#: The range a non-privileged process may bind.
+_PORT_MIN = 1024
+_PORT_MAX = 65535
 
 #: How long to wait before opening the browser. The server starts listening a
 #: moment after ``app.run`` is entered, and a browser that arrives before that
@@ -92,36 +102,78 @@ def _port_is_free(host: str, port: int) -> bool:
     return True
 
 
+def _candidate_ports(start: int) -> Iterator[int]:
+    """Ports to try, in the order a person would expect.
+
+    Upwards from the configured port first, then downwards, then a wide sweep of
+    the conventional application ports.
+
+    The wide sweep exists because Windows hands out *blocks* of ports to itself:
+    on the machine this was written for, 5057-5156 is reserved wholesale, so a run
+    that started at 5061 and tried 40 consecutive numbers found nothing - every
+    candidate was inside one exclusion range. Walking a fixed count in one
+    direction cannot survive that; also trying the other direction can, because a
+    reserved block has an edge.
+
+    Yields each port at most once so the bind is never attempted twice.
+    """
+    seen: set[int] = set()
+
+    def emit(value: int) -> Iterator[int]:
+        if _PORT_MIN <= value <= _PORT_MAX and value not in seen:
+            seen.add(value)
+            yield value
+
+    # Upwards, then downwards, interleaved so a reserved block reached quickly
+    # does not consume the whole budget before the edge is found.
+    for step in range(PORT_ATTEMPTS):
+        for direction in (1, -1):
+            value = start + direction * step if step else start
+            yield from emit(value)
+    for value in _FALLBACK_PORTS:
+        yield from emit(value)
+
+
 def main() -> int:
     host = CONFIG.host
-    for offset in range(PORT_ATTEMPTS):
-        port = CONFIG.port + offset
+    chosen: int | None = None
+    tried = 0
+    for port in _candidate_ports(CONFIG.port):
+        tried += 1
         if not _port_is_free(host, port):
-            if offset == 0:
-                print(f"端口 {port} 被占用或已被系统保留，正在寻找下一个可用端口…", flush=True)
+            if tried == 1:
+                print(
+                    f"端口 {CONFIG.port} 被占用或已被系统保留，正在寻找下一个可用端口…",
+                    flush=True,
+                )
             continue
-        if offset:
-            print(f"改用端口 {port}（原端口 {CONFIG.port} 不可用）。", flush=True)
-        url = f"http://{host}:{port}"
-        print(f"拾光相册已启动： {url}", flush=True)
-        open_browser_later(url)
-        # ``use_reloader`` stays off: it re-runs this module in a child process,
-        # which would probe and bind a second time - and would open a second
-        # browser tab.
-        app.run(
-            host=host,
-            port=port,
-            debug=CONFIG.debug,
-            threaded=True,
-            use_reloader=False,
+        chosen = port
+        break
+
+    if chosen is None:
+        print(
+            "找不到可用端口（附近和常用端口都试过了）。\n"
+            "可以用环境变量指定一个，例如：set PHOTO_PORT=8080",
+            flush=True,
         )
-        return 0
-    print(
-        f"在 {CONFIG.port}-{CONFIG.port + PORT_ATTEMPTS - 1} 之间找不到可用端口。\n"
-        "可以用环境变量指定一个，例如：set PHOTO_PORT=8080",
-        flush=True,
+        return 1
+
+    if chosen != CONFIG.port:
+        print(f"改用端口 {chosen}（原端口 {CONFIG.port} 不可用）。", flush=True)
+    url = f"http://{host}:{chosen}"
+    print(f"拾光相册已启动： {url}", flush=True)
+    open_browser_later(url)
+    # ``use_reloader`` stays off: it re-runs this module in a child process,
+    # which would probe and bind a second time - and would open a second
+    # browser tab.
+    app.run(
+        host=host,
+        port=chosen,
+        debug=CONFIG.debug,
+        threaded=True,
+        use_reloader=False,
     )
-    return 1
+    return 0
 
 
 if __name__ == "__main__":

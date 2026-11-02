@@ -6586,6 +6586,38 @@ class LauncherTests(unittest.TestCase):
         self.assertGreaterEqual(launcher.PORT_ATTEMPTS, 1)
         self.assertLessEqual(launcher.PORT_ATTEMPTS, 200)
 
+    def test_candidates_are_unique_and_in_range(self) -> None:
+        launcher = self._launcher()
+        sequence = list(launcher._candidate_ports(5050))
+        self.assertEqual(len(sequence), len(set(sequence)), "a port is probed twice")
+        self.assertTrue(all(1024 <= port <= 65535 for port in sequence))
+
+    def test_it_searches_both_directions(self) -> None:
+        """Windows reserves whole blocks, so upwards alone is not enough.
+
+        On the machine this was written for, 5057-5156 is reserved: starting at
+        5061 and counting up finds nothing at all. Counting down reaches 5056.
+        """
+        launcher = self._launcher()
+        sequence = list(launcher._candidate_ports(5061))
+        self.assertIn(5062, sequence, "still goes up first")
+        self.assertIn(5056, sequence, "and comes back down")
+        # The edge of the block is close by, so it must be reached early rather
+        # than after the whole upward budget is spent.
+        self.assertLess(sequence.index(5056), 20)
+
+    def test_conventional_ports_are_the_last_resort(self) -> None:
+        launcher = self._launcher()
+        sequence = list(launcher._candidate_ports(5050))
+        self.assertIn(8080, sequence)
+        # A fallback must never be tried before the neighbours.
+        self.assertGreater(sequence.index(8080), sequence.index(5051))
+
+    def test_a_free_configured_port_is_used_immediately(self) -> None:
+        launcher = self._launcher()
+        sequence = list(launcher._candidate_ports(5050))
+        self.assertEqual(sequence[0], 5050)
+
 
 if __name__ == "__main__":
     unittest.main()
