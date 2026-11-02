@@ -5641,6 +5641,214 @@ class BatchAnalysisApiTests(unittest.TestCase):
         self.assertEqual(job.processed, ANALYSIS_FAILURE_LIMIT)
 
 
+class DuplicateDetectionTests(unittest.TestCase):
+    """Grouping photos by perceptual hash.
+
+    The two rules that matter were both discovered by running the grouping over
+    the real library, so they are pinned here: the grouping must be
+    complete-linkage (single-linkage merged a 30-frame burst into one group of
+    134 unrelated photos), and two photos from different folders are never the
+    same picture.
+    """
+
+    @staticmethod
+    def _photo(pid, phash, width=1000, height=1000, size=1000, folder="A", status="analyzed"):
+        return {
+            "id": pid,
+            "phash": phash,
+            "width": width,
+            "height": height,
+            "size": size,
+            "folder": folder,
+            "filename": f"{pid}.jpg",
+            "status": status,
+        }
+
+    def test_identical_hashes_group_together(self) -> None:
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, "0f0f0f0f0f0f0f0f"),
+            self._photo(2, "0f0f0f0f0f0f0f0f"),
+        ]
+        groups = group_duplicates(photos)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual([p["id"] for p in groups[0].photos], [1, 2])
+
+    def test_distance_beyond_the_threshold_is_not_a_group(self) -> None:
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, "0000000000000000"),
+            self._photo(2, "000000000000ffff"),  # 16 bits apart
+        ]
+        self.assertEqual(group_duplicates(photos), [])
+
+    def test_the_threshold_is_honoured(self) -> None:
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, "0000000000000000"),
+            self._photo(2, "000000000000000f"),  # 4 bits apart
+        ]
+        self.assertEqual(group_duplicates(photos, threshold=3), [])
+        self.assertEqual(len(group_duplicates(photos, threshold=4)), 1)
+
+    def test_a_chain_does_not_collapse_into_one_group(self) -> None:
+        """A -> B -> C where A and C are far apart must not be one group.
+
+        This is the bug that made a real library report a group of 134 photos:
+        measuring the transitive closure of "within threshold" merges a burst.
+        """
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, "0000000000000000"),
+            self._photo(2, "000000000000000f"),  # 4 from 1
+            self._photo(3, "00000000000000ff"),  # 4 from 2, 8 from 1
+        ]
+        groups = group_duplicates(photos, threshold=6)
+        # 1 and 3 are 8 apart, so no group may contain all three.
+        for group in groups:
+            self.assertLess(group.size, 3, [p["id"] for p in group.photos])
+
+    def test_different_folders_are_never_grouped(self) -> None:
+        """Two cameras produce visually similar frames; they are not duplicates."""
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, "0f0f0f0f0f0f0f0f", folder="Canon"),
+            self._photo(2, "0f0f0f0f0f0f0f0f", folder="Sony"),
+        ]
+        self.assertEqual(group_duplicates(photos), [])
+
+    def test_a_landscape_is_not_matched_to_a_portrait(self) -> None:
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, "0f0f0f0f0f0f0f0f", width=6000, height=4000),
+            self._photo(2, "0f0f0f0f0f0f0f0f", width=4000, height=6000),
+        ]
+        self.assertEqual(group_duplicates(photos), [])
+
+    def test_rows_without_a_usable_hash_are_skipped(self) -> None:
+        from photo_reviewer.duplicates import group_duplicates
+
+        photos = [
+            self._photo(1, ""),
+            self._photo(2, "not-hex-at-all!!"),
+            self._photo(3, "abc"),  # legacy variable width
+            self._photo(4, "0f0f0f0f0f0f0f0f"),
+            self._photo(5, "0f0f0f0f0f0f0f0f"),
+        ]
+        groups = group_duplicates(photos)
+        self.assertEqual(len(groups), 1)
+        self.assertEqual([p["id"] for p in groups[0].photos], [4, 5])
+
+    def test_the_keeper_prefers_resolution_then_size(self) -> None:
+        from photo_reviewer.duplicates import DuplicateGroup
+
+        group = DuplicateGroup(
+            photos=[
+                self._photo(1, "0f0f0f0f0f0f0f0f", width=1000, height=1000, size=900),
+                self._photo(2, "0f0f0f0f0f0f0f0f", width=2000, height=2000, size=500),
+                self._photo(3, "0f0f0f0f0f0f0f0f", width=1000, height=1000, size=800),
+            ]
+        )
+        self.assertEqual(group.keep_id, 2, "the biggest picture wins")
+        self.assertEqual(group.wasted_bytes, 900 + 800)
+
+    def test_summary_counts_what_could_be_removed(self) -> None:
+        from photo_reviewer.duplicates import DuplicateGroup, summarise
+
+        groups = [
+            DuplicateGroup(
+                photos=[self._photo(i, "0f0f0f0f0f0f0f0f", size=100) for i in (1, 2, 3)]
+            ),
+            DuplicateGroup(
+                photos=[self._photo(i, "ffffffffffffffff", size=50) for i in (4, 5)]
+            ),
+        ]
+        stats = summarise(groups)
+        self.assertEqual(stats["groups"], 2)
+        self.assertEqual(stats["photos"], 5)
+        self.assertEqual(stats["removable"], 3)
+        self.assertEqual(stats["wasted_bytes"], 200 + 50)
+
+    def test_a_real_dhash_round_trips_through_the_parser(self) -> None:
+        """The stored value is hex, so a leading zero must not shorten it."""
+        from photo_reviewer.duplicates import _parse
+
+        self.assertEqual(_parse("0f0f0f0f0f0f0f0f"), 0x0F0F0F0F0F0F0F0F)
+        self.assertEqual(_parse("0000000000000001"), 1)
+        self.assertIsNone(_parse(""))
+
+
+class DuplicatesApiTests(unittest.TestCase):
+    """The /api/duplicates endpoint."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+        folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(folder, exist_ok=True)
+        for pid, phash in ((101, "0f0f0f0f0f0f0f0f"), (102, "0f0f0f0f0f0f0f0f")):
+            self.db.upsert_photo(
+                {
+                    "path": os.path.join(folder, f"{pid}.jpg"),
+                    "folder": folder,
+                    "filename": f"{pid}.jpg",
+                    "status": "analyzed",
+                    "width": 1000,
+                    "height": 1000,
+                    "size": 2048,
+                    "phash": phash,
+                }
+            )
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_it_returns_groups_with_a_keeper(self) -> None:
+        body = self.client.get("/api/duplicates").get_json()
+        self.assertEqual(body["summary"]["groups"], 1)
+        group = body["groups"][0]
+        self.assertIn(group["keep_id"], [photo["id"] for photo in group["photos"]])
+        self.assertEqual(len(group["photos"]), 2)
+
+    def test_a_photo_payload_carries_what_the_reviewer_compares(self) -> None:
+        body = self.client.get("/api/duplicates").get_json()
+        photo = body["groups"][0]["photos"][0]
+        for key in ("id", "filename", "width", "height", "size", "thumb_version"):
+            self.assertIn(key, photo)
+
+    def test_an_invalid_threshold_is_rejected(self) -> None:
+        self.assertEqual(
+            self.client.get("/api/duplicates?threshold=abc").status_code, 400
+        )
+
+    def test_an_absurd_threshold_is_clamped(self) -> None:
+        body = self.client.get("/api/duplicates?threshold=999").get_json()
+        self.assertLessEqual(body["threshold"], 24)
+
+    def test_an_empty_library_returns_no_groups(self) -> None:
+        folder = os.path.join(self.tmp.name, "album")
+        ids = [
+            self.db.get_photo_by_path(os.path.join(folder, name))["id"]
+            for name in ("101.jpg", "102.jpg")
+        ]
+        self.db.delete_rows(ids)
+        body = self.client.get("/api/duplicates").get_json()
+        self.assertEqual(body["groups"], [])
+        self.assertEqual(body["summary"]["groups"], 0)
+
+
 class BytesReaderTests(unittest.TestCase):
     """The buffer wrapper Pillow reads raw previews through.
 

@@ -5013,6 +5013,7 @@ function init() {
     if (!document.hidden) refreshCardStatus();
   });
   initBackToTop();
+  initDuplicates();
 }
 
 /* ==========================================================================
@@ -5144,6 +5145,250 @@ function initBackToTop() {
     { passive: true }
   );
   syncBackToTop();
+}
+
+/* ==========================================================================
+   Duplicate review
+
+   A sheet of groups, each showing the copies of one picture. Picking which to
+   discard is a visual judgement, so the group is the unit: every copy is on
+   screen at a reachable size, the recommended keeper is marked, and ticking a
+   card queues it for the bin. Nothing is deleted here - the selection goes
+   through the same 收起 path as the gallery, so it lands in the bin and can be
+   restored.
+   ========================================================================== */
+
+//: Which photos the reviewer has ticked for removal, by group index then id.
+const dupState = {
+  groups: [],
+  // id -> true. A Set of ids rather than per-group sets: the request only needs
+  // ids, and a photo can only be in one group anyway.
+  chosen: new Set(),
+  threshold: 6,
+  loading: false,
+};
+
+/** The slider's numbers, in the order the slider offers them. */
+const DUP_THRESHOLD_LABELS = [
+  [0, "几乎相同"],
+  [3, "很接近"],
+  [6, "宽松"],
+  [9, "很宽松"],
+  [12, "只看构图"],
+];
+
+function dupThresholdLabel(value) {
+  let label = DUP_THRESHOLD_LABELS[0][1];
+  for (const [at, text] of DUP_THRESHOLD_LABELS) {
+    if (value >= at) label = text;
+  }
+  return label;
+}
+
+/** "1.2 MB" for the space a group would free, or "" when it frees nothing. */
+function dupWastedText(bytes) {
+  return bytes > 0 ? `可省出 ${fmtSize(bytes)}` : "";
+}
+
+function dupCardHtml(photo, keepId) {
+  const isKeeper = photo.id === keepId;
+  const chosen = dupState.chosen.has(photo.id);
+  const pixels = photo.width && photo.height ? `${photo.width} × ${photo.height}` : "";
+  return `
+    <label class="dup-card${isKeeper ? " is-keeper" : ""}${chosen ? " is-chosen" : ""}"
+           data-id="${photo.id}">
+      <input type="checkbox" class="dup-check" ${chosen ? "checked" : ""}
+             ${isKeeper ? "disabled" : ""} />
+      <span class="dup-shot">
+        <img class="dup-img" src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}"
+             loading="lazy" decoding="async" />
+        ${isKeeper ? '<span class="dup-keep-badge">建议保留</span>' : ""}
+      </span>
+      <span class="dup-meta">
+        <span class="dup-name" title="${escapeHtml(photo.filename)}">${escapeHtml(photo.filename)}</span>
+        <span class="dup-spec">${pixels ? `${pixels} · ` : ""}${fmtSize(photo.size)}</span>
+      </span>
+    </label>`;
+}
+
+function dupGroupHtml(group, index) {
+  const wasted = dupWastedText(group.wasted_bytes);
+  return `
+    <section class="dup-group" data-group="${index}" style="animation-delay:${Math.min(index, 12) * 0.03}s">
+      <header class="dup-group-head">
+        <span class="dup-group-title">${group.photos.length} 张相似</span>
+        ${wasted ? `<span class="dup-group-wasted">${wasted}</span>` : ""}
+      </header>
+      <div class="dup-grid">
+        ${group.photos.map((p) => dupCardHtml(p, group.keep_id)).join("")}
+      </div>
+    </section>`;
+}
+
+function renderDuplicates() {
+  const body = $("duplicatesBody");
+  if (!body) return;
+  if (!dupState.groups.length) {
+    body.innerHTML = `
+      <div class="duplicates-empty">
+        <span class="duplicates-empty-icon" data-icon="sparkles"></span>
+        <p>没有找到看起来重复的照片。</p>
+        <p class="duplicates-empty-hint">把「相似程度」调低一点也许多少能找出几张。</p>
+      </div>`;
+    renderAllIcons(body);
+    updateDupSelection();
+    return;
+  }
+  body.innerHTML = dupState.groups.map(dupGroupHtml).join("");
+  updateDupSelection();
+}
+
+function updateDupSelection() {
+  const count = dupState.chosen.size;
+  const button = $("dupTrashBtn");
+  const summary = $("dupSelectionSummary");
+  if (button) button.disabled = count === 0;
+  if (summary) {
+    summary.textContent = count ? `已选中 ${count} 张` : "";
+  }
+}
+
+function dupGroupCount() {
+  return dupState.groups.length;
+}
+
+/** Load (or reload) the groups for the current threshold. */
+async function loadDuplicates(threshold) {
+  if (dupState.loading) return;
+  dupState.loading = true;
+  const body = $("duplicatesBody");
+  if (body) {
+    body.innerHTML = '<div class="duplicates-empty">正在比对照片…</div>';
+  }
+  try {
+    const params = new URLSearchParams();
+    if (state.folder) params.set("folder", state.folder);
+    if (threshold !== undefined) params.set("threshold", String(threshold));
+    const data = await api(`/api/duplicates?${params.toString()}`);
+    dupState.groups = data.groups || [];
+    dupState.threshold = data.threshold;
+    // Start from "keep one per group": that is what almost everyone wants, and
+    // ticking the rest by hand in a list of 200 groups is not a review.
+    applyKeepOneRule();
+    const summary = data.summary || {};
+    const lede = $("duplicatesLede");
+    if (lede) {
+      lede.textContent = summary.groups
+        ? `找到 ${summary.groups} 组相似的回忆，共 ${summary.photos} 张。收起多余的就够了，原图会先进回收站。`
+        : "没有找到看起来重复的照片。";
+    }
+    renderDuplicates();
+  } catch (e) {
+    if (body) {
+      body.innerHTML = `<div class="duplicates-empty">比对失败：${escapeHtml(e.message)}</div>`;
+    }
+  } finally {
+    dupState.loading = false;
+  }
+}
+
+/** Tick every copy except the recommended keeper. */
+function applyKeepOneRule() {
+  dupState.chosen.clear();
+  for (const group of dupState.groups) {
+    for (const photo of group.photos) {
+      if (photo.id !== group.keep_id) dupState.chosen.add(photo.id);
+    }
+  }
+}
+
+function openDuplicates() {
+  showModal($("duplicatesModal"));
+  const slider = $("dupThreshold");
+  if (slider) {
+    slider.value = String(dupState.threshold);
+    $("dupThresholdLabel").textContent = dupThresholdLabel(dupState.threshold);
+  }
+  loadDuplicates(dupState.threshold);
+}
+
+async function trashChosenDuplicates() {
+  const ids = [...dupState.chosen];
+  if (!ids.length) return;
+  const confirmed = await confirmDialog(
+    `确定把选中的 ${ids.length} 张相似照片收起吗？\n它们会先进回收站，随时可以恢复。`,
+    { title: "收起重复的回忆", confirmText: "收起", danger: true }
+  );
+  if (!confirmed) return;
+  try {
+    const data = await api("/api/delete", {
+      method: "POST",
+      body: JSON.stringify({ ids, sync_card: false }),
+    });
+    if (data.errors && data.errors.length) {
+      showToast("部分照片收起失败：" + data.errors.map((e) => e.error).join("; "), "error");
+    }
+    showToast(`已收起 ${ids.length} 张重复的回忆`, "success");
+    removePhotoRows(ids);
+    loadStats();
+    // Reload rather than patch the groups: a photo that was trashed leaves its
+    // group, and the counts in the header have to follow.
+    await loadDuplicates(dupState.threshold);
+  } catch (e) {
+    showToast("收起失败：" + e.message, "error");
+  }
+}
+
+function initDuplicates() {
+  const btn = $("duplicatesBtn");
+  if (btn) btn.addEventListener("click", openDuplicates);
+
+  const body = $("duplicatesBody");
+  if (body) {
+    body.addEventListener("change", (e) => {
+      const check = e.target.closest(".dup-check");
+      if (!check) return;
+      const card = check.closest(".dup-card");
+      if (!card) return;
+      const id = Number(card.dataset.id);
+      if (check.checked) dupState.chosen.add(id);
+      else dupState.chosen.delete(id);
+      card.classList.toggle("is-chosen", check.checked);
+      updateDupSelection();
+    });
+  }
+
+  const slider = $("dupThreshold");
+  if (slider) {
+    // Re-query on release rather than on every pixel: each step re-runs the
+    // grouping over the whole library, which is a second of work.
+    let pending = null;
+    slider.addEventListener("input", () => {
+      $("dupThresholdLabel").textContent = dupThresholdLabel(Number(slider.value));
+    });
+    slider.addEventListener("change", () => {
+      const value = Number(slider.value);
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => loadDuplicates(value), 60);
+    });
+  }
+
+  const selectAll = $("dupSelectAllBtn");
+  if (selectAll) {
+    selectAll.addEventListener("click", () => {
+      applyKeepOneRule();
+      renderDuplicates();
+    });
+  }
+  const clear = $("dupClearBtn");
+  if (clear) {
+    clear.addEventListener("click", () => {
+      dupState.chosen.clear();
+      renderDuplicates();
+    });
+  }
+  const trash = $("dupTrashBtn");
+  if (trash) trash.addEventListener("click", trashChosenDuplicates);
 }
 
 document.addEventListener("DOMContentLoaded", init);

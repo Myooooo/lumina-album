@@ -55,6 +55,7 @@ from .config import (
     Config,
 )
 from .db import Database, sort_photos
+from .duplicates import DEFAULT_THRESHOLD, group_duplicates, summarise
 from .exif import extract_exif
 from .geocode import PROVIDERS as GEOCODING_PROVIDERS
 from .geocode import geocoding_enabled, reverse_geocode
@@ -89,6 +90,30 @@ _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 #: One year, in seconds: how long a content-addressed thumbnail is cacheable.
 _IMMUTABLE_IMAGE_MAX_AGE = 31536000
+
+
+def _duplicate_payload(photo: dict[str, Any]) -> dict[str, Any]:
+    """A review row: enough to recognise the photo and compare the copies.
+
+    No EXIF or tags - the decision here is made by looking, and the only numbers
+    that matter are the ones that tell you which copy to keep (resolution and file
+    size), plus the thumbnail version so the browser can cache it.
+    """
+    return {
+        "id": photo["id"],
+        "filename": photo.get("filename") or "",
+        "folder": photo.get("folder") or "",
+        "width": int(photo.get("width") or 0),
+        "height": int(photo.get("height") or 0),
+        "size": int(photo.get("size") or 0),
+        "media_kind": photo.get("media_kind") or "photo",
+        "status": photo.get("status") or "",
+        "score": photo.get("score"),
+        "favorite": bool(photo.get("favorite")),
+        # The same cache-busting token the gallery uses: the dHash changes when
+        # the thumbnail is re-rendered, so the browser can keep this one forever.
+        "thumb_version": photo.get("phash") or "",
+    }
 
 
 def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any]:
@@ -1548,6 +1573,45 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/folders")
     def api_folders():
         return jsonify({"folders": database.all_folders()})
+
+    @app.get("/api/duplicates")
+    def api_duplicates():
+        """Groups of photos that look like the same picture.
+
+        Exposed as its own page rather than as a badge on the gallery: deciding
+        what to throw away needs the group in front of you, at a size where the
+        difference is visible. Everything is computed from the stored dHash, so
+        the request costs a second on an eleven-thousand-photo library and
+        touches no files.
+
+        ``threshold`` is the Hamming distance. The default (6) is conservative on
+        purpose and the UI offers it as a slider, because "how alike is alike"
+        is a judgement call the reviewer should make, not one to bury.
+        """
+        folder = request.args.get("folder", "").strip() or None
+        raw_threshold = request.args.get("threshold", "").strip()
+        try:
+            threshold = int(raw_threshold) if raw_threshold else DEFAULT_THRESHOLD
+        except (TypeError, ValueError):
+            return jsonify({"error": "threshold 参数不合法"}), 400
+        threshold = max(0, min(threshold, 24))
+
+        candidates = database.duplicate_candidates(folder)
+        groups = group_duplicates(candidates, threshold=threshold)
+        return jsonify(
+            {
+                "threshold": threshold,
+                "summary": summarise(groups),
+                "groups": [
+                    {
+                        "keep_id": group.keep_id,
+                        "wasted_bytes": group.wasted_bytes,
+                        "photos": [_duplicate_payload(p) for p in group.photos],
+                    }
+                    for group in groups
+                ],
+            }
+        )
 
     @app.get("/api/photos")
     def api_photos():

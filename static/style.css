@@ -331,7 +331,12 @@ svg {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 8px 15px;
+  /* A fixed height rather than padding-derived. The text buttons and the
+     icon-only ones sit in the same toolbar row, and 8px of padding over a 13.5px
+     line landed on 37px while `.icon-only` declared 38px - a 1px step between
+     neighbours that is invisible on its own and obvious once they are lined up. */
+  height: 38px;
+  padding: 0 15px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.85);
   border-radius: var(--radius-md);
@@ -392,7 +397,10 @@ svg {
 }
 
 .btn.small {
-  padding: 5px 10px;
+  /* Overrides the 38px base: a small button in a dense row (the card banner,
+     the progress strip) has to stay visually secondary. */
+  height: 30px;
+  padding: 0 10px;
   font-size: 12px;
   border-radius: var(--radius-sm);
   gap: 5px;
@@ -3775,3 +3783,331 @@ select {
   color: var(--danger);
 }
 
+/* ---------- Duplicate review sheet ----------
+   A taller, wider dialog than the rest: the decision is made by comparing
+   pictures, so the cards have to be big enough to actually compare. It borrows
+   the same panel gradient, the same radius and the same entrance as every other
+   modal, and the groups stagger in the way the gallery's cards do. */
+
+.duplicates-content {
+  max-width: 1120px;
+  width: calc(100vw - 64px);
+  max-height: min(88vh, 940px);
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 18px;
+}
+
+.duplicates-lede {
+  margin: -6px 0 16px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* ---------- Toolbar: similarity slider + bulk actions ---------- */
+
+.duplicates-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 253, 249, 0.7);
+}
+
+.duplicates-similarity {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.duplicates-similarity input[type="range"] {
+  width: 150px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.duplicates-similarity output {
+  min-width: 4.5em;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.duplicates-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- Scrolling body ---------- */
+
+.duplicates-body {
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 4px 8px;
+  margin: 0 -4px;
+  /* A soft edge instead of a hard cut: the sheet should look like it continues
+     under the toolbar rather than stopping at a line. */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+}
+
+.duplicates-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 240px;
+  padding: 30px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  animation: dupEmptyIn var(--dur-panel) var(--ease-out) both;
+}
+
+.duplicates-empty p {
+  margin: 0;
+}
+
+.duplicates-empty-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(179, 125, 86, 0.1);
+  color: var(--primary);
+}
+
+.duplicates-empty-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.duplicates-empty-hint {
+  font-size: 12.5px;
+  color: rgba(142, 128, 114, 0.85);
+}
+
+@keyframes dupEmptyIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- One group ---------- */
+
+.dup-group {
+  padding: 14px 16px 16px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.55);
+  animation: dupGroupIn var(--dur-panel) var(--ease-out) backwards;
+}
+
+@keyframes dupGroupIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.995); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.dup-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dup-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.dup-group-wasted {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+/* ---------- One photo ---------- */
+
+.dup-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 7px 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-solid);
+  cursor: pointer;
+  transition: transform var(--dur-ui) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+
+.dup-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+}
+
+/* Ticked for removal: dimmed and tinted, so the intended outcome is visible at a
+   glance without hiding the picture - you are still checking it. */
+.dup-card.is-chosen {
+  border-color: rgba(194, 89, 83, 0.45);
+  background: rgba(194, 89, 83, 0.045);
+}
+
+.dup-card.is-chosen .dup-shot {
+  opacity: 0.55;
+}
+
+/* The copy the app suggests keeping. It cannot be ticked: every group has to
+   leave at least one behind, and the recommendation is the safest default. */
+.dup-card.is-keeper {
+  border-color: rgba(179, 125, 86, 0.55);
+  box-shadow: 0 0 0 3px rgba(179, 125, 86, 0.1);
+}
+
+.dup-card.is-keeper .dup-check {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.dup-check {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--danger);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 4px;
+}
+
+.dup-shot {
+  position: relative;
+  display: block;
+  /* Not a fixed aspect ratio: the whole judgement is "is this the same
+     picture?", and a 4:3 box crops a portrait into a strip that hides exactly
+     the framing being compared. A bounded height keeps every card the same size
+     while `object-fit: contain` shows the photo whole. */
+  height: 150px;
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, rgba(60, 40, 20, 0.05), rgba(60, 40, 20, 0.02));
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+.dup-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.dup-keep-badge {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: rgba(179, 125, 86, 0.9);
+  color: #fff8ef;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.dup-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 2px;
+  min-width: 0;
+}
+
+.dup-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dup-spec {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Footer ---------- */
+
+.duplicates-actions {
+  align-items: center;
+  padding-top: 14px;
+}
+
+.duplicates-summary {
+  margin-right: auto;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reduced motion: the sheet may still fade, but nothing slides or scales. */
+@media (prefers-reduced-motion: reduce) {
+  .dup-group,
+  .duplicates-empty {
+    animation: none !important;
+  }
+  .dup-card {
+    transition: border-color var(--dur-fast) var(--ease-out),
+                background-color var(--dur-fast) var(--ease-out);
+  }
+  .dup-card:hover {
+    transform: none;
+  }
+}
+
+/* The sheet is already tight on a narrow window; give the grid fewer columns so
+   a card still reads as a photo rather than a swatch. */
+@media (max-width: 720px) {
+  .duplicates-content {
+    width: calc(100vw - 24px);
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .dup-grid {
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: 9px;
+  }
+  .duplicates-similarity input[type="range"] {
+    width: 110px;
+  }
+}

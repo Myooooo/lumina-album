@@ -31,6 +31,7 @@
         <span id="cardStatusText">SD 卡已连接</span>
         <span id="cardPendingDot" class="card-pending-dot hidden">0</span>
       </button>
+      <button id="duplicatesBtn" class="btn" title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复照片</button>
       <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
     <div id="cardBanner" class="card-banner hidden">
@@ -232,6 +233,42 @@
       <ul id="dirList" class="dir-list"></ul>
       <div class="dir-actions">
         <button id="dirChooseBtn" class="btn primary" disabled><span class="btn-icon" data-icon="check"></span>选择此文件夹</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Duplicate review: a full-height sheet rather than a small dialog, because
+       the whole point is seeing several versions of one picture side by side. -->
+  <div id="duplicatesModal" class="modal hidden">
+    <div class="modal-content duplicates-content">
+      <button class="modal-close" data-close="duplicatesModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="rawLayers"></span>重复的回忆</h2>
+      <p class="duplicates-lede" id="duplicatesLede">正在比对…</p>
+
+      <div class="duplicates-toolbar">
+        <label class="duplicates-similarity">
+          <span>相似程度</span>
+          <input id="dupThreshold" type="range" min="0" max="12" step="1" value="6" />
+          <output id="dupThresholdLabel">宽松</output>
+        </label>
+        <div class="duplicates-toolbar-actions">
+          <button id="dupSelectAllBtn" class="btn small" type="button">
+            <span class="btn-icon" data-icon="check"></span>每组只留一张
+          </button>
+          <button id="dupClearBtn" class="btn small" type="button">全部不选</button>
+        </div>
+      </div>
+
+      <div id="duplicatesBody" class="duplicates-body">
+        <div class="duplicates-empty">正在比对照片…</div>
+      </div>
+
+      <div class="modal-actions duplicates-actions">
+        <span id="dupSelectionSummary" class="duplicates-summary"></span>
+        <button class="btn" data-close="duplicatesModal">先不处理</button>
+        <button id="dupTrashBtn" class="btn danger" disabled>
+          <span class="btn-icon" data-icon="archive"></span>收起所选
+        </button>
       </div>
     </div>
   </div>

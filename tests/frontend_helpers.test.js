@@ -818,6 +818,64 @@ check(
   check("half way down is not the bottom", probe(600, 2000, 800), false);
 }
 
+/* ---------------------------------------------------------- duplicate review
+   The review sheet starts from "keep one per group" because that is what almost
+   everyone wants; ticking the surplus by hand across hundreds of groups is not a
+   review. The keeper itself must never be selectable, or a group could be emptied
+   and the "keep" promise would be a lie. */
+section("duplicate review");
+
+const DUP_LABEL = extract("dupThresholdLabel");
+const DUP_KEEP_ONE = extract("applyKeepOneRule");
+const dupLabel = new Function(
+  `${extractConst("DUP_THRESHOLD_LABELS")} ${DUP_LABEL} return dupThresholdLabel;`
+)();
+
+check("an exact match reads as such", dupLabel(0), "几乎相同");
+check("a tight threshold reads as close", dupLabel(3), "很接近");
+check("the default reads as loose", dupLabel(6), "宽松");
+check("a very loose threshold says so", dupLabel(9), "很宽松");
+check("the widest threshold describes composition", dupLabel(12), "只看构图");
+
+check(
+  "the sheet defaults to keeping one per group",
+  /function applyKeepOneRule/.test(src) && /photo\.id !== group\.keep_id/.test(src),
+  true
+);
+check(
+  "the keeper's checkbox is disabled",
+  /isKeeper \? "disabled" : ""/.test(src),
+  true
+);
+check(
+  "nothing is deleted directly - it goes through the bin",
+  /api\("\/api\/delete"/.test(src) && /sync_card: false/.test(src),
+  true
+);
+check(
+  "groups animate in, staggered like the gallery cards",
+  /animation-delay:\$\{Math\.min\(index, 12\) \* 0\.03\}s/.test(src),
+  true
+);
+
+{
+  // Run the keep-one rule over two stub groups and inspect the resulting set.
+  const groups = [
+    { keep_id: 2, photos: [{ id: 1 }, { id: 2 }, { id: 3 }] },
+    { keep_id: 5, photos: [{ id: 4 }, { id: 5 }] },
+  ];
+  const chosen = new Set([99]); // a stale tick that must be cleared
+  const run = new Function(
+    "dupState",
+    `${DUP_KEEP_ONE}; return applyKeepOneRule;`
+  )({ groups, chosen });
+  run();
+  check("stale ticks are dropped", chosen.has(99), false);
+  check("every duplicate is ticked", [1, 3, 4].every((id) => chosen.has(id)), true);
+  check("the keepers are not ticked", chosen.has(2) || chosen.has(5), false);
+  check("the count matches what would be removed", chosen.size, 3);
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`
