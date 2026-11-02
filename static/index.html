@@ -31,6 +31,7 @@
         <span id="cardStatusText">SD 卡已连接</span>
         <span id="cardPendingDot" class="card-pending-dot hidden">0</span>
       </button>
+      <button id="memoriesBtn" class="btn" title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
       <button id="duplicatesBtn" class="btn" title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复照片</button>
       <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
@@ -237,6 +238,18 @@
     </div>
   </div>
 
+  <!-- 那年今日：photos taken on this day in earlier years, grouped by year. -->
+  <div id="memoriesModal" class="modal hidden">
+    <div class="modal-content memories-content">
+      <button class="modal-close" data-close="memoriesModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="sun"></span>那年今日</h2>
+      <p class="memories-lede" id="memoriesLede">正在翻找旧时光…</p>
+      <div id="memoriesBody" class="memories-body">
+        <div class="memories-empty">正在翻找旧时光…</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Duplicate review: a full-height sheet rather than a small dialog, because
        the whole point is seeing several versions of one picture side by side. -->
   <div id="duplicatesModal" class="modal hidden">
@@ -407,6 +420,20 @@
             <label>索引线程数
               <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
             </label>
+          </div>
+
+          <h3 class="settings-subtitle">那年今日</h3>
+          <div class="form-grid">
+            <label class="full-row">回忆的时间范围
+              <select id="setMemoryWindow">
+                <option value="0">只看同一天</option>
+                <option value="1">前后 1 天</option>
+                <option value="2">前后 2 天</option>
+                <option value="3">前后 3 天</option>
+                <option value="7">前后 7 天</option>
+              </select>
+            </label>
+            <p class="settings-hint full-row">范围越宽，越容易找出一段旅程；同时也会带进一些相近的日子。</p>
           </div>
 
           <h3 class="settings-subtitle">实况照片</h3>

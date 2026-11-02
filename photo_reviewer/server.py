@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +54,7 @@ from .config import (
     VIDEO_PROCESSING,
     Config,
 )
-from .db import Database, sort_photos
+from .db import Database, photo_capture_year, sort_photos
 from .duplicates import DEFAULT_THRESHOLD, group_duplicates, summarise
 from .exif import extract_exif
 from .geocode import PROVIDERS as GEOCODING_PROVIDERS
@@ -1573,6 +1573,66 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/folders")
     def api_folders():
         return jsonify({"folders": database.all_folders()})
+
+    @app.get("/api/memories")
+    def api_memories():
+        """Photos taken on this day in earlier years.
+
+        Grouped by year so the page can present them as "一年前的今天" and so on -
+        a flat list of forty photos from four years loses the thing that makes a
+        memory a memory. The window comes from the settings (0 = the exact day),
+        and ``day``/``month`` can be overridden so the page works for a date the
+        user picked as well as for today.
+        """
+        folder = request.args.get("folder", "").strip() or None
+        today = datetime.now().astimezone()
+        try:
+            month = int(request.args.get("month", today.month))
+            day = int(request.args.get("day", today.day))
+        except (TypeError, ValueError):
+            return jsonify({"error": "month/day 参数不合法"}), 400
+        try:
+            date(2000, month, day)
+        except ValueError:
+            return jsonify({"error": "这个日期不存在"}), 400
+
+        window = cfg.memory_window_days
+        if "window" in request.args:
+            try:
+                window = int(request.args.get("window"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "window 参数不合法"}), 400
+        window = max(0, min(window, 30))
+
+        rows = database.memories_on(month, day, window=window, folder=folder)
+        buckets: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            year = photo_capture_year(row)
+            if not year:
+                continue
+            buckets.setdefault(year, []).append(row)
+
+        years = []
+        for year in sorted(buckets, reverse=True):
+            photos = buckets[year]
+            years.append(
+                {
+                    "year": year,
+                    "years_ago": today.year - year,
+                    "count": len(photos),
+                    "photos": [_photo_payload(p) for p in photos],
+                }
+            )
+        return jsonify(
+            {
+                "month": month,
+                "day": day,
+                "window": window,
+                "total": sum(item["count"] for item in years),
+                "years": years,
+            }
+        )
+
 
     @app.get("/api/duplicates")
     def api_duplicates():

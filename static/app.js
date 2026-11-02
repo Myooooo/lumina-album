@@ -3733,6 +3733,7 @@ async function openSettings() {
     $("setVideoClipAudio").checked = cfg.video_clip_audio !== false;
     $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
     $("setMergeLivePhotos").checked = cfg.merge_live_photos !== false;
+    setSelectValue($("setMemoryWindow"), String(cfg.memory_window_days ?? 0));
     setSelectValue($("setVideoPreviewMode"), cfg.video_preview_mode || "once");
     setSelectValue($("setVideoProcessing"), cfg.video_processing || "ffmpeg");
     setVolume("video", cfg.video_preview_volume ?? 50);
@@ -3777,6 +3778,7 @@ async function saveSettings() {
     video_clip_audio: $("setVideoClipAudio").checked,
     video_pregenerate: $("setVideoPregenerate").checked,
     merge_live_photos: $("setMergeLivePhotos").checked,
+    memory_window_days: parseInt($("setMemoryWindow").value, 10) || 0,
     video_preview_mode: $("setVideoPreviewMode").value,
     video_processing: $("setVideoProcessing").value,
     video_preview_volume: clampVolume($("setVideoPreviewVolume").value),
@@ -5013,6 +5015,7 @@ function init() {
     if (!document.hidden) refreshCardStatus();
   });
   initBackToTop();
+  initMemories();
   initDuplicates();
 }
 
@@ -5145,6 +5148,102 @@ function initBackToTop() {
     { passive: true }
   );
   syncBackToTop();
+}
+
+/* ==========================================================================
+   那年今日
+
+   Photos taken on this calendar day in earlier years, grouped by year so the
+   page can say "一年前的今天" instead of presenting forty photos as one pile.
+   The window is a setting (0 = the exact day) because a trip rarely lands on the
+   same date every year.
+   ========================================================================== */
+
+/** "去年" / "两年前" / "五年前的今天" - a year count reads as a date, not a number. */
+function yearsAgoText(years) {
+  if (years <= 0) return "今年的今天";
+  if (years === 1) return "一年前的今天";
+  if (years === 2) return "两年前的今天";
+  return `${years} 年前的今天`;
+}
+
+function memoryCardHtml(photo) {
+  return `
+    <button class="memory-card" type="button" data-id="${photo.id}"
+            title="${escapeHtml(photo.filename)}">
+      <img class="memory-img" src="${thumbnailUrl(photo)}"
+           alt="${escapeHtml(photo.filename)}" loading="lazy" decoding="async" />
+    </button>`;
+}
+
+function memoryYearHtml(bucket, index) {
+  return `
+    <section class="memory-year" style="animation-delay:${Math.min(index, 10) * 0.05}s">
+      <header class="memory-year-head">
+        <span class="memory-year-title">${yearsAgoText(bucket.years_ago)}</span>
+        <span class="memory-year-meta">${bucket.year} · ${bucket.count} 张</span>
+      </header>
+      <div class="memory-strip">
+        ${bucket.photos.map(memoryCardHtml).join("")}
+      </div>
+    </section>`;
+}
+
+function renderMemories(data) {
+  const body = $("memoriesBody");
+  if (!body) return;
+  if (!data.years.length) {
+    body.innerHTML = `
+      <div class="memories-empty">
+        <span class="memories-empty-icon" data-icon="sun"></span>
+        <p>往年的这一天，还没有留下什么。</p>
+        <p class="memories-empty-hint">在设置里把「回忆的时间范围」放宽一些，也许能找到邻近日子的照片。</p>
+      </div>`;
+    renderAllIcons(body);
+    return;
+  }
+  body.innerHTML = data.years.map(memoryYearHtml).join("");
+}
+
+async function openMemories() {
+  showModal($("memoriesModal"));
+  const body = $("memoriesBody");
+  const lede = $("memoriesLede");
+  if (body) body.innerHTML = '<div class="memories-empty">正在翻找旧时光…</div>';
+  try {
+    const params = new URLSearchParams();
+    if (state.folder) params.set("folder", state.folder);
+    const data = await api(`/api/memories?${params.toString()}`);
+    if (lede) {
+      lede.textContent = data.total
+        ? `今天这个日子，你在过去留下了 ${data.total} 张回忆。`
+        : "今天这个日子，过去还没有留下回忆。";
+    }
+    renderMemories(data);
+  } catch (e) {
+    if (body) {
+      body.innerHTML = `<div class="memories-empty">翻找失败：${escapeHtml(e.message)}</div>`;
+    }
+    if (lede) lede.textContent = "";
+  }
+}
+
+function initMemories() {
+  const btn = $("memoriesBtn");
+  if (btn) btn.addEventListener("click", openMemories);
+
+  const body = $("memoriesBody");
+  if (body) {
+    // A thumbnail opens that photo in the detail dialog, on top of this sheet -
+    // which is what the reader wants: look, then come back to the year strip.
+    body.addEventListener("click", (e) => {
+      const card = e.target.closest(".memory-card");
+      if (!card) return;
+      const id = Number(card.dataset.id);
+      if (!Number.isFinite(id)) return;
+      openPreview(id);
+    });
+  }
 }
 
 /* ==========================================================================

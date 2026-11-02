@@ -4111,3 +4111,210 @@ select {
     width: 110px;
   }
 }
+
+/* ---------- 那年今日 ----------
+   A year strip per group: the date is the anchor, so each year gets its own
+   heading and the photos run sideways underneath it. Same panel, same radius and
+   same staggered entrance as the rest of the app; the strips slide in from below
+   in year order, which reads as turning back through time. */
+
+.memories-content {
+  max-width: 1040px;
+  width: calc(100vw - 64px);
+  max-height: min(86vh, 900px);
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 22px;
+}
+
+.memories-lede {
+  margin: -6px 0 16px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.memories-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 2px 4px 4px;
+  margin: 0 -4px;
+}
+
+.memories-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 220px;
+  padding: 28px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+  animation: memoryFadeIn var(--dur-panel) var(--ease-out) both;
+}
+
+.memories-empty p {
+  margin: 0;
+}
+
+.memories-empty-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(179, 125, 86, 0.1);
+  color: var(--primary);
+}
+
+.memories-empty-icon svg {
+  width: 23px;
+  height: 23px;
+}
+
+.memories-empty-hint {
+  font-size: 12.5px;
+  color: rgba(142, 128, 114, 0.85);
+}
+
+@keyframes memoryFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.memory-year {
+  margin-bottom: 22px;
+  animation: memoryYearIn var(--dur-slow) var(--ease-out) backwards;
+  /* A soft edge instead of a hard cut, so a long day reads as continuing past
+     the panel rather than being clipped by it. Masked rather than covered with a
+     gradient, which would have to match the panel's own background. */
+  -webkit-mask-image: linear-gradient(
+    to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  mask-image: linear-gradient(
+    to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+}
+
+@keyframes memoryYearIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.memory-year-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* The phrase ("一年前的今天") is the headline; the year and count are the
+   small print that answers "which year exactly". */
+.memory-year-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.memory-year-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A horizontal strip rather than a grid: a day is a sequence, and running them
+   sideways keeps the years from competing for the same column. The scrollbar is
+   hidden on purpose - a permanent track under every year reads as a broken
+   control, and the images cut off at the right edge already say "there is more".
+   Still scrollable, so a trackpad, a shift-wheel and the keyboard all work. */
+.memory-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 4px 2px 8px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.memory-strip::-webkit-scrollbar {
+  height: 0;
+  display: none;
+}
+
+.memory-card {
+  flex: 0 0 auto;
+  width: 150px;
+  height: 150px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(60, 40, 20, 0.04);
+  overflow: hidden;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: transform var(--dur-ui) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+
+.memory-card:hover {
+  transform: translateY(-3px) scale(1.015);
+  box-shadow: var(--shadow-card);
+  border-color: rgba(179, 125, 86, 0.4);
+}
+
+.memory-card:active {
+  transform: translateY(-1px) scale(0.995);
+  transition-duration: var(--dur-press);
+}
+
+.memory-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.memory-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+.memory-card:hover .memory-img {
+  transform: scale(1.04);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .memory-year,
+  .memories-empty {
+    animation: none !important;
+  }
+  .memory-card,
+  .memory-img {
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .memory-card:hover,
+  .memory-card:hover .memory-img {
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .memories-content {
+    width: calc(100vw - 24px);
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .memory-card {
+    width: 118px;
+    height: 118px;
+  }
+}

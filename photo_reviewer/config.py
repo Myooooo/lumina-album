@@ -63,6 +63,7 @@ PERSISTED_FIELDS = (
     "video_preview_mode",
     "live_volume",
     "merge_live_photos",
+    "memory_window_days",
 )
 
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
@@ -274,6 +275,12 @@ class Config:
     #: takes effect on the next "重新整理".
     merge_live_photos: bool = field(
         default_factory=lambda: _env_bool("PHOTO_MERGE_LIVE_PHOTOS", True)
+    )
+    #: How many days either side of today "那年今日" looks. 0 is the exact
+    #: calendar day. A trip rarely lands on the same date every year, so a wider
+    #: window finds more memories - at the cost of some that are a day or two off.
+    memory_window_days: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_MEMORY_WINDOW_DAYS", "0"))
     )
     #: Where the poster frame is taken from, as a fraction of the duration.
     video_poster_ratio: float = field(

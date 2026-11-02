@@ -6,6 +6,7 @@ and model calls are replaced with deterministic fakes.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import shutil
@@ -5847,6 +5848,99 @@ class DuplicatesApiTests(unittest.TestCase):
         body = self.client.get("/api/duplicates").get_json()
         self.assertEqual(body["groups"], [])
         self.assertEqual(body["summary"]["groups"], 0)
+
+
+class MemoriesTests(unittest.TestCase):
+    """那年今日: photos from this calendar day in earlier years.
+
+    The date handling is the part worth pinning: EXIF stores ``2023:10:02``, the
+    query compares normalised ``MM-DD`` text, and "earlier years" has to exclude
+    the current one or the feature reports this morning as a memory.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(self.folder, exist_ok=True)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _add(self, name: str, captured: str) -> int:
+        path = os.path.join(self.folder, name)
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": name,
+                "status": "analyzed",
+                "exif": {"datetime_original": captured},
+            }
+        )
+        return self.db.get_photo_by_path(path)["id"]
+
+    def test_only_earlier_years_are_returned(self) -> None:
+        current_year = datetime.datetime.now().astimezone().year
+        self._add("old.jpg", f"{current_year - 2}:10:02 08:00:00")
+        self._add("thisyear.jpg", f"{current_year}:10:02 08:00:00")
+        body = self.client.get("/api/memories?month=10&day=2").get_json()
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["years"][0]["year"], current_year - 2)
+
+    def test_years_are_grouped_and_counted(self) -> None:
+        self._add("a.jpg", "2022:10:02 08:00:00")
+        self._add("b.jpg", "2022:10:02 09:00:00")
+        self._add("c.jpg", "2019:10:02 10:00:00")
+        body = self.client.get("/api/memories?month=10&day=2").get_json()
+        self.assertEqual(body["total"], 3)
+        self.assertEqual([item["year"] for item in body["years"]], [2022, 2019])
+        self.assertEqual(body["years"][0]["count"], 2)
+        # Newest year first, so "last year" is the first thing read.
+        self.assertGreater(body["years"][0]["years_ago"], 0)
+
+    def test_a_window_widens_to_neighbouring_days(self) -> None:
+        self._add("near.jpg", "2023:10:04 08:00:00")
+        exact = self.client.get("/api/memories?month=10&day=2&window=0").get_json()
+        widened = self.client.get("/api/memories?month=10&day=2&window=3").get_json()
+        self.assertEqual(exact["total"], 0)
+        self.assertEqual(widened["total"], 1)
+
+    def test_the_window_wraps_across_a_month_boundary(self) -> None:
+        """The 1st seen with a window of 1 must reach the last day of the month
+        before, which is what `date + timedelta` gives and a naive ±1 would not."""
+        self._add("nye.jpg", "2023:09:30 23:00:00")
+        body = self.client.get("/api/memories?month=10&day=1&window=1").get_json()
+        self.assertEqual(body["total"], 1)
+
+    def test_deleted_photos_are_left_out(self) -> None:
+        pid = self._add("gone.jpg", "2022:10:02 08:00:00")
+        self.db.mark_deleted([pid], {})
+        body = self.client.get("/api/memories?month=10&day=2").get_json()
+        self.assertEqual(body["total"], 0)
+
+    def test_an_impossible_date_is_rejected(self) -> None:
+        self.assertEqual(
+            self.client.get("/api/memories?month=13&day=2").status_code, 400
+        )
+        self.assertEqual(
+            self.client.get("/api/memories?month=2&day=31").status_code, 400
+        )
+
+    def test_an_invalid_window_is_rejected(self) -> None:
+        self.assertEqual(
+            self.client.get("/api/memories?month=10&day=2&window=abc").status_code, 400
+        )
+
+    def test_a_wild_window_is_clamped(self) -> None:
+        body = self.client.get("/api/memories?month=10&day=2&window=999").get_json()
+        self.assertLessEqual(body["window"], 30)
 
 
 class BytesReaderTests(unittest.TestCase):

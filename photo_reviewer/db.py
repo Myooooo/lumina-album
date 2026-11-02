@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import threading
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -1394,6 +1394,54 @@ class Database:
                     (1 if favorite else 0, photo_id),
                 )
                 conn.commit()
+            finally:
+                conn.close()
+
+    def memories_on(
+        self, month: int, day: int, window: int = 0, folder: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Photos taken on this calendar day in earlier years.
+
+        ``window`` widens the net symmetrically - 0 is the exact day, 1 adds the
+        day before and after - because a trip rarely falls on one date across
+        years, and a memory that comes back empty is worse than one that is a day
+        off. Days are compared as text: the capture time is already normalised to
+        ``YYYY-MM-DD`` by ``_capture_time_sql_expr``, so slicing the month and day
+        out of it is exact and needs no date parsing in Python.
+
+        The current year is excluded: "a year ago today" should be a memory, not
+        this morning.
+        """
+        window = max(0, min(int(window), 30))
+        days = set()
+        for offset in range(-window, window + 1):
+            shifted = date(2000, month, day) + timedelta(days=offset)
+            days.add(shifted.strftime("%m-%d"))
+
+        capture = _capture_time_sql_expr()
+        clauses = [
+            f"{capture} IS NOT NULL",
+            "status != 'deleted'",
+            f"substr({capture}, 6, 5) IN ({','.join('?' for _ in days)})",
+            f"CAST(substr({capture}, 1, 4) AS INTEGER) < ?",
+        ]
+        params: list[Any] = sorted(days)
+        # "Earlier years" is measured on the local calendar: the user's today,
+        # not UTC's, which can be a different date for most of the world.
+        params.append(datetime.now().astimezone().year)
+        if folder:
+            clauses.append("folder = ?")
+            params.append(folder)
+        sql = (
+            "SELECT * FROM photos WHERE "
+            + " AND ".join(clauses)
+            + f" ORDER BY {capture} ASC, id ASC"
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                return [self._row_to_dict(row) for row in rows]
             finally:
                 conn.close()
 

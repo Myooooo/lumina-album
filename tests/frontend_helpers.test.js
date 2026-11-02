@@ -818,7 +818,44 @@ check(
   check("half way down is not the bottom", probe(600, 2000, 800), false);
 }
 
-/* ---------------------------------------------------------- duplicate review
+/* ------------------------------------------------------------- 那年今日
+   A year count has to read as a date, not as a number: "两年前的今天", never
+   "2 年前的今天". The phrasing is the whole feature - it is what makes the sheet
+   feel like a memory rather than a filtered list. */
+section("那年今日");
+
+const YEARS_AGO = new Function(`${extract("yearsAgoText")} return yearsAgoText;`)();
+
+check("the current year is not a memory", YEARS_AGO(0), "今年的今天");
+check("one year back reads naturally", YEARS_AGO(1), "一年前的今天");
+check("two years back reads naturally", YEARS_AGO(2), "两年前的今天");
+check("three years back switches to digits", YEARS_AGO(3), "3 年前的今天");
+check("a distant year still reads", YEARS_AGO(12), "12 年前的今天");
+
+check(
+  "years are grouped, newest first, from the API",
+  /data\.years\.map\(memoryYearHtml\)/.test(src),
+  true
+);
+check(
+  "an empty day says so in the page's own voice",
+  /往年的这一天，还没有留下什么/.test(src),
+  true
+);
+check(
+  "the window is a setting, not a hard-coded guess",
+  /memory_window_days:\s*parseInt\(\$\("setMemoryWindow"\)/.test(src),
+  true
+);
+check(
+  "the settings sheet offers the window",
+  /id="setMemoryWindow"/.test(
+    fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8")
+  ),
+  true
+);
+
+/* ------------------------------------------------------------- duplicate review
    The review sheet starts from "keep one per group" because that is what almost
    everyone wants; ticking the surplus by hand across hundreds of groups is not a
    review. The keeper itself must never be selectable, or a group could be emptied
