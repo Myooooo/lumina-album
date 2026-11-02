@@ -366,6 +366,48 @@ svg {
   box-shadow: 0 4px 14px rgba(60, 40, 20, 0.08);
 }
 
+/* A disabled button has to look unavailable, not just refuse to respond.
+   There was no rule for this at all, so "收起所选" sat there in full danger red
+   with nothing selected - the one control that deletes photos reading as the most
+   inviting thing in the dialog. */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.42;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.btn:disabled:hover,
+.btn[disabled]:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+/* The same treatment for the filled variants, which would otherwise keep their
+   solid red/brown background and read as enabled. */
+.btn.danger:disabled,
+.btn.danger[disabled],
+.btn.primary:disabled,
+.btn.primary[disabled] {
+  opacity: 0.38;
+  box-shadow: none;
+}
+
+.btn.danger:disabled:hover,
+.btn.danger[disabled]:hover {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.btn.primary:disabled:hover,
+.btn.primary[disabled]:hover {
+  background: var(--primary);
+  color: #ffffff;
+}
+
 .btn:active {
   transform: scale(0.97);
 }
@@ -3940,6 +3982,41 @@ select {
 .dup-group-wasted {
   font-size: 12px;
   color: var(--muted);
+}
+
+/* The per-group shortcut. A quiet text button rather than another chip: it shares
+   the row with the group's own heading and must not compete with it. */
+.dup-group-keep {
+  margin-left: auto;
+  align-self: center;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+
+.dup-group-keep:hover {
+  color: var(--primary);
+  border-color: rgba(179, 125, 86, 0.32);
+  background: rgba(255, 253, 249, 0.9);
+}
+
+.dup-group-keep:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-press);
+}
+
+.dup-group-keep:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
 .dup-grid {

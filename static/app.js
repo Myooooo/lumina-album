@@ -5540,11 +5540,14 @@ function dupCardHtml(photo, keepId) {
 
 function dupGroupHtml(group, index) {
   const wasted = dupWastedText(group.wasted_bytes);
+  // A per-group shortcut, because "keep the best one here" is the common answer
+  // for one group even though it must never be the default for all of them.
   return `
     <section class="dup-group" data-group="${index}" style="animation-delay:${Math.min(index, 12) * 0.03}s">
       <header class="dup-group-head">
         <span class="dup-group-title">${group.photos.length} 张相似</span>
         ${wasted ? `<span class="dup-group-wasted">${wasted}</span>` : ""}
+        <button class="dup-group-keep" type="button" data-keep="${index}">只留建议的那张</button>
       </header>
       <div class="dup-grid">
         ${group.photos.map((p) => dupCardHtml(p, group.keep_id)).join("")}
@@ -5599,9 +5602,8 @@ async function loadDuplicates(threshold) {
     const data = await api(`/api/duplicates?${params.toString()}`);
     dupState.groups = data.groups || [];
     dupState.threshold = data.threshold;
-    // Start from "keep one per group": that is what almost everyone wants, and
-    // ticking the rest by hand in a list of 200 groups is not a review.
-    applyKeepOneRule();
+    // Nothing is pre-ticked: the keeper is a suggestion and the reader decides.
+    dupState.chosen.clear();
     const summary = data.summary || {};
     const lede = $("duplicatesLede");
     if (lede) {
@@ -5619,14 +5621,34 @@ async function loadDuplicates(threshold) {
   }
 }
 
-/** Tick every copy except the recommended keeper. */
-function applyKeepOneRule() {
-  dupState.chosen.clear();
-  for (const group of dupState.groups) {
+/**
+ * Tick every copy except the recommended keeper, for one group or for all.
+ *
+ * Deliberately *not* applied when the sheet opens. Keeping the best copy is a
+ * suggestion, not a decision, and pre-ticking dozens of files in a destructive
+ * dialog means one stray click discards a whole afternoon's shoot. The reader
+ * chooses; the keeper is only marked as the one worth keeping.
+ */
+function applyKeepOneRule(groupIndex) {
+  const targets =
+    groupIndex === undefined ? dupState.groups : [dupState.groups[groupIndex]];
+  for (const group of targets) {
+    if (!group) continue;
     for (const photo of group.photos) {
       if (photo.id !== group.keep_id) dupState.chosen.add(photo.id);
     }
   }
+}
+
+/** Clear every tick, by group or everywhere. */
+function clearChosen(groupIndex) {
+  if (groupIndex === undefined) {
+    dupState.chosen.clear();
+    return;
+  }
+  const group = dupState.groups[groupIndex];
+  if (!group) return;
+  for (const photo of group.photos) dupState.chosen.delete(photo.id);
 }
 
 function openDuplicates() {
@@ -5716,6 +5738,19 @@ function initDuplicates() {
   }
   const trash = $("dupTrashBtn");
   if (trash) trash.addEventListener("click", trashChosenDuplicates);
+
+  // The per-group shortcut lives in the header of each group, so it is delegated
+  // from the list rather than bound to every group on every render.
+  if (body) {
+    body.addEventListener("click", (e) => {
+      const button = e.target.closest(".dup-group-keep");
+      if (!button) return;
+      const index = Number(button.dataset.keep);
+      if (!Number.isFinite(index)) return;
+      applyKeepOneRule(index);
+      renderDuplicates();
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);

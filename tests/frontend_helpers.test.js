@@ -959,6 +959,7 @@ section("duplicate review");
 
 const DUP_LABEL = extract("dupThresholdLabel");
 const DUP_KEEP_ONE = extract("applyKeepOneRule");
+const DUP_CLEAR = extract("clearChosen");
 const dupLabel = new Function(
   `${extractConst("DUP_THRESHOLD_LABELS")} ${DUP_LABEL} return dupThresholdLabel;`
 )();
@@ -970,8 +971,17 @@ check("a very loose threshold says so", dupLabel(9), "很宽松");
 check("the widest threshold describes composition", dupLabel(12), "只看构图");
 
 check(
-  "the sheet defaults to keeping one per group",
-  /function applyKeepOneRule/.test(src) && /photo\.id !== group\.keep_id/.test(src),
+  "the sheet does NOT pre-tick anything - the reader decides",
+  // Opening the sheet used to tick every copy but the suggested keeper, which
+  // meant one stray click on a destructive button discarded a whole shoot. The
+  // keeper is a suggestion now, applied only when asked for.
+  /dupState\.chosen\.clear\(\);/.test(src) &&
+    !/applyKeepOneRule\(\);\s*\n\s*const summary/.test(src),
+  true
+);
+check(
+  "the per-group shortcut exists",
+  /dup-group-keep/.test(src) && /applyKeepOneRule\(index\)/.test(src),
   true
 );
 check(
@@ -991,21 +1001,56 @@ check(
 );
 
 {
-  // Run the keep-one rule over two stub groups and inspect the resulting set.
+  // One group: the shortcut ticks its duplicates and leaves the keeper alone.
   const groups = [
     { keep_id: 2, photos: [{ id: 1 }, { id: 2 }, { id: 3 }] },
     { keep_id: 5, photos: [{ id: 4 }, { id: 5 }] },
   ];
-  const chosen = new Set([99]); // a stale tick that must be cleared
+  const chosen = new Set();
+  const run = new Function(
+    "dupState",
+    `${DUP_KEEP_ONE}; return applyKeepOneRule;`
+  )({ groups, chosen });
+  run(0);
+  check("the group's duplicates are ticked", [1, 3].every((id) => chosen.has(id)), true);
+  check("the keeper is not ticked", chosen.has(2), false);
+  check("the other group is untouched", chosen.has(4) || chosen.has(5), false);
+  check("only this group was ticked", chosen.size, 2);
+}
+
+{
+  // All groups: still never the default, but available on request.
+  const groups = [
+    { keep_id: 2, photos: [{ id: 1 }, { id: 2 }, { id: 3 }] },
+    { keep_id: 5, photos: [{ id: 4 }, { id: 5 }] },
+  ];
+  const chosen = new Set([99]); // a tick the reader made by hand
   const run = new Function(
     "dupState",
     `${DUP_KEEP_ONE}; return applyKeepOneRule;`
   )({ groups, chosen });
   run();
-  check("stale ticks are dropped", chosen.has(99), false);
   check("every duplicate is ticked", [1, 3, 4].every((id) => chosen.has(id)), true);
   check("the keepers are not ticked", chosen.has(2) || chosen.has(5), false);
-  check("the count matches what would be removed", chosen.size, 3);
+  check("a hand-made tick survives", chosen.has(99), true);
+}
+
+{
+  // Clearing one group leaves the others alone.
+  const groups = [
+    { keep_id: 2, photos: [{ id: 1 }, { id: 2 }] },
+    { keep_id: 5, photos: [{ id: 4 }, { id: 5 }] },
+  ];
+  const chosen = new Set([1, 4]);
+  const run = new Function(
+    "dupState",
+    `${DUP_CLEAR}; return clearChosen;`
+  )({ groups, chosen });
+  run(0);
+  check("clearing a group drops its ticks", chosen.has(1), false);
+  check("clearing a group leaves others alone", chosen.has(4), true);
+  run();
+  check("clearing everything empties the set", chosen.size, 0);
 }
 
 console.log(
