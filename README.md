@@ -53,7 +53,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-浏览器打开 <http://127.0.0.1:5000>。
+浏览器打开 <http://127.0.0.1:5050>。（端口被占用时启动器会自动往后找一个可用端口，并打印实际地址。）
 
 | 包 | 用途 |
 | --- | --- |
@@ -122,7 +122,7 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_LIVE_VOLUME` | `0` | 实况短片音量（0-100），默认静音 |
 | `PHOTO_MERGE_LIVE_PHOTOS` | `true` | 合并显示实况照片；关闭后重新整理生效 |
 | `PHOTO_HOST` | `127.0.0.1` | 监听地址 |
-| `PHOTO_PORT` | `5000` | 监听端口 |
+| `PHOTO_PORT` | `5050` | 监听端口 |
 | `PHOTO_DEBUG` | `false` | Flask 调试模式 |
 | `PHOTO_ALLOWED_ORIGINS` | 空 | 额外允许的写接口来源，逗号分隔 |
 

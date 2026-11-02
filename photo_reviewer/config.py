@@ -152,7 +152,12 @@ class Config:
         default_factory=lambda: int(os.getenv("PHOTO_GEOCODING_RETRIES", "3"))
     )
     host: str = field(default_factory=lambda: os.getenv("PHOTO_HOST", "127.0.0.1"))
-    port: int = field(default_factory=lambda: int(os.getenv("PHOTO_PORT", "5000")))
+    # 5050 rather than the more obvious 5000: Windows hands out blocks of
+    # ephemeral ports, and 5000 sits inside one of them on many machines, so
+    # binding it fails with WinError 10013 and a message about permissions that
+    # says nothing about the cause. ``app.py`` still falls back to the next free
+    # port if even this one is taken.
+    port: int = field(default_factory=lambda: int(os.getenv("PHOTO_PORT", "5050")))
     debug: bool = field(default_factory=lambda: _env_bool("PHOTO_DEBUG", False))
 
     # Extra origins allowed to call mutating endpoints, for reverse proxies or
