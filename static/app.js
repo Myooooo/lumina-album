@@ -4844,7 +4844,7 @@ function init() {
       if (!ids.length) return;
       openExportDialog({
         ids,
-        subtitle: `${ids.length} 张`,
+        subject: `选中的 ${ids.length} 张照片`,
       });
     });
   }
@@ -5394,9 +5394,16 @@ function openExportDialog(options) {
   state.exportRequest = options;
   const lede = $("exportLede");
   if (lede) {
-    lede.textContent = options.subtitle
-      ? `把这次的 ${options.subtitle}收进一份可以带走的回忆里。`
-      : "把这次选中的照片收进一份可以带走的回忆里。";
+    // ``subject`` is a whole clause written by the caller ("选中的 3 张照片",
+    // "10 月 2 日的回忆") rather than a fragment spliced into a template - the
+    // template read as "把这次的 3 张收进…" for one entry and repeated 的 for the
+    // other, because no single sentence frame fits both.
+    //
+    // A subject starting with a digit picks up a thin space after 把, which is
+    // where Chinese typography wants one; one starting with a character does not.
+    const subject = options.subject || "这次选中的回忆";
+    const joiner = /^[0-9]/.test(subject) ? " " : "";
+    lede.textContent = `把${joiner}${subject}收进一份可以带走的回忆里。`;
   }
   showSheet($("exportModal"));
 }
@@ -5538,7 +5545,7 @@ function initMemories() {
       openExportDialog({
         ...state.memoriesQuery,
         title: "那年今日",
-        subtitle: `${state.memoriesQuery.month} 月 ${state.memoriesQuery.day} 日的回忆`,
+        subject: `${state.memoriesQuery.month} 月 ${state.memoriesQuery.day} 日的回忆`,
       });
     });
   }

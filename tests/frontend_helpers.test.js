@@ -1232,6 +1232,46 @@ section("toolbar layout");
   );
 }
 
+/* ------------------------------------------------------------------- copy
+   The sentences are the feature in a page like this, so the ones that are
+   assembled rather than written out get a test. The export lede used to splice a
+   fragment into a fixed frame, which read as "把这次的 3 张收进…" for a selection
+   (no measure word) and repeated 的 for a date. */
+section("generated copy");
+
+{
+  const ledeFor = new Function(
+    `${extract("openExportDialog")};`
+  );
+  check("the export lede can be built", typeof ledeFor === "function", true);
+}
+
+check(
+  "the export lede takes a whole clause, not a fragment",
+  /options\.subject \|\|/.test(src),
+  true
+);
+check(
+  "a digit-led subject gets the space 把 needs",
+  /\/\^\[0-9\]\/\.test\(subject\) \? " " : ""/.test(src),
+  true
+);
+check(
+  "both export entries pass a full clause",
+  /subject: `选中的 \$\{ids\.length\} 张照片`/.test(src) &&
+    /subject: `\$\{state\.memoriesQuery\.month\} 月/.test(src),
+  true
+);
+
+/* Every generated sentence the reader can see, checked for the mistakes this
+   section is about: a doubled 的, a missing space before a number, a sentence
+   that ends without punctuation. */
+check(
+  "no template doubles 的的",
+  !/的的/.test(src),
+  true
+);
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`
