@@ -32,7 +32,7 @@ from .importer import (
     plan_import,
     run_import,
 )
-from .scanner import JOBS, ScanJob, start_scoped_scan
+from .scanner import JOBS, JobConflict, ScanJob, start_scoped_scan
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +89,12 @@ def start_import(data: dict, db: Database, config: Config, plan=None) -> ScanJob
         plan = build_plan(data, config)
     options = getattr(plan, "options", None) or normalize_options(data)
 
-    for existing in JOBS.list():
-        if existing.folder == plan.target and existing.status == "running":
-            raise ImportError_("该文件夹已有任务正在运行，请等它完成后再导入")
-
-    job = JOBS.create(plan.target, False)
+    # JobManager enforces "one job per folder"; the only thing left to do here
+    # is give the import's own wording for the refusal.
+    try:
+        job = JOBS.create(plan.target, False)
+    except JobConflict as exc:
+        raise ImportError_("该文件夹已有任务正在运行，请等它完成后再导入") from exc
     job.phase = "copy"
     job.total = len(plan.copies)
     thread = threading.Thread(
@@ -197,7 +198,12 @@ def _import_worker(job_id: str, plan, options: dict, db: Database, config: Confi
             return
 
         child = start_scoped_scan(
-            plan.target, db, config, copied, analyze=(after == AFTER_ORGANIZE)
+            plan.target,
+            db,
+            config,
+            copied,
+            analyze=(after == AFTER_ORGANIZE),
+            parent_id=job_id,
         )
         _follow_child(job_id, child.id)
     except Exception as exc:

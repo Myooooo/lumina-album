@@ -1084,7 +1084,11 @@ class ServerApiTests(unittest.TestCase):
         trash_path = trash_dir / "a.jpg"
         trash_path.write_bytes(b"trash-file")
         photo_id = self.db.get_photo_by_path(photo_path)["id"]
-        os.remove(photo_path)  # mimic _move_to_trash: original path is now empty
+        # Mimic _move_to_trash: the original path is now empty. Through the
+        # production helper rather than os.remove, because on Windows a file
+        # written moments ago can still be held briefly by the indexer - the
+        # same reason `_remove_file` retries.
+        _remove_file(photo_path)
         self.db.mark_deleted([photo_id], {photo_id: str(trash_path)})
         resp = self.client.post("/api/trash/empty", json={"folder": self.folder})
         self.assertEqual(resp.status_code, 200)
@@ -4149,10 +4153,67 @@ class JobPruningTests(unittest.TestCase):
         self.manager.KEEP_FINISHED = 3
 
     def _finish(self, offset: float = 0.0) -> str:
-        job = self.manager.create("folder")
+        # A distinct folder per job: these tests are about pruning, and a job for
+        # a folder that already has one running is now refused on purpose.
+        job = self.manager.create(f"folder-{offset}")
         job.status = "completed"
         job.started_at = time.time() + offset
         return job.id
+
+    def test_a_folder_with_a_running_job_is_refused(self) -> None:
+        """Two workers on one folder would write the same rows at once."""
+        from photo_reviewer.scanner import JobConflict
+
+        running = self.manager.create("C:/photos")
+        running.status = "running"
+        with self.assertRaises(JobConflict) as caught:
+            self.manager.create("C:/photos")
+        self.assertEqual(caught.exception.job.id, running.id)
+
+    def test_the_guard_is_case_insensitive(self) -> None:
+        """Windows paths differ in case; the same folder must still collide."""
+        from photo_reviewer.scanner import JobConflict
+
+        running = self.manager.create("C:/Photos")
+        running.status = "running"
+        with self.assertRaises(JobConflict):
+            self.manager.create("c:/photos")
+
+    def test_a_finished_job_does_not_block_a_new_one(self) -> None:
+        from photo_reviewer.scanner import JobConflict
+
+        done = self.manager.create("C:/photos")
+        done.status = "completed"
+        # No JobConflict raised: a finished run is not a running one.
+        try:
+            self.manager.create("C:/photos")
+        except JobConflict:  # pragma: no cover - the assert below reports it
+            self.fail("a completed job must not block a new one")
+
+    def test_a_child_job_may_share_its_parents_folder(self) -> None:
+        """An import's index pass is the same folder as the import itself.
+
+        The parent is blocked waiting for the child, so refusing the child would
+        make an import unable to index its own copies.
+        """
+        from photo_reviewer.scanner import JobConflict
+
+        parent = self.manager.create("C:/photos")
+        parent.status = "running"
+        child = self.manager.create("C:/photos", parent_id=parent.id)
+        self.assertEqual(child.parent_id, parent.id)
+        # A second unrelated job on the same folder is still refused.
+        other = self.manager.create("C:/photos2")
+        other.status = "running"
+        with self.assertRaises(JobConflict):
+            self.manager.create("C:/photos2")
+
+    def test_independent_work_opts_out_of_the_rule(self) -> None:
+        """The bin sweep and video transcodes touch files, not the index."""
+        running = self.manager.create("C:/photos")
+        running.status = "running"
+        # No exception: exclusive=False is the explicit opt-out.
+        self.manager.create("C:/photos", exclusive=False)
 
     def test_finished_jobs_are_capped(self) -> None:
         ids = [self._finish(offset=i) for i in range(10)]
@@ -5403,6 +5464,210 @@ class VolumeIdentityTests(unittest.TestCase):
             if os.name == "nt":
                 # On Windows that boundary is the drive itself.
                 self.assertEqual(root, os.path.splitdrive(nested)[0] + os.sep)
+
+
+class DatabaseBackupTests(unittest.TestCase):
+    """The index holds work that cannot be rebuilt cheaply.
+
+    Scores, tags, comments, hand-written memory edits and card pairings are all
+    lost if the file goes, so a snapshot is taken on startup.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmp.name, "library.db")
+        self.db = Database(self.db_path)
+        # Enough rows that the file clears the "nothing worth keeping" floor.
+        with self.db as handle:
+            handle.upsert_photo(
+                {
+                    "path": os.path.join(self.tmp.name, "a.jpg"),
+                    "folder": self.tmp.name,
+                    "filename": "a.jpg",
+                    "status": "analyzed",
+                    "score": 8.0,
+                }
+            )
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_a_backup_is_a_usable_copy(self) -> None:
+        from photo_reviewer.backup import backup_database
+
+        target = backup_database(self.db_path)
+        self.assertIsNotNone(target)
+        self.assertTrue(os.path.exists(target))
+        copy = Database(str(target))
+        try:
+            self.assertEqual(copy.stats()["total"], 1)
+        finally:
+            copy.close()
+
+    def test_old_backups_are_pruned(self) -> None:
+        from photo_reviewer.backup import backup_database
+
+        for _ in range(7):
+            backup_database(self.db_path)
+        backups = [
+            name
+            for name in os.listdir(os.path.join(self.tmp.name, "backups"))
+            if name.startswith("library-")
+        ]
+        self.assertLessEqual(len(backups), 5)
+
+    def test_a_tiny_database_is_not_worth_backing_up(self) -> None:
+        from photo_reviewer.backup import backup_database
+
+        small = os.path.join(self.tmp.name, "small.db")
+        with open(small, "wb") as handle:
+            handle.write(b"x" * 100)
+        self.assertIsNone(backup_database(small))
+
+    def test_automatic_backups_are_rate_limited(self) -> None:
+        from photo_reviewer.backup import BACKUP_STAMP_KEY, maybe_auto_backup
+
+        first = maybe_auto_backup(self.db, self.db_path)
+        self.assertIsNotNone(first)
+        # A second call inside the interval must do nothing.
+        self.assertIsNone(maybe_auto_backup(self.db, self.db_path))
+        self.assertTrue(self.db.get_meta(BACKUP_STAMP_KEY))
+
+
+class BatchAnalysisApiTests(unittest.TestCase):
+    """The multi-photo "重新解读" action runs as a job, not a browser loop."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        # JOBS is process-wide; a job from a previous test must not be mistaken
+        # for one of ours in tearDown.
+        for job in JOBS.list():
+            job.status = "completed"
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+        self.ids = []
+        for index in range(3):
+            path = os.path.join(self.folder, f"p{index}.jpg")
+            Image.new("RGB", (32, 24), (120, 90, 60)).save(path, "JPEG")
+            self.db.upsert_photo(
+                {
+                    "path": path,
+                    "folder": self.folder,
+                    "filename": f"p{index}.jpg",
+                    "status": "pending",
+                }
+            )
+            self.ids.append(self.db.get_photo_by_path(path)["id"])
+
+    def tearDown(self) -> None:
+        # A batch job runs on a daemon thread and touches the database; let it
+        # finish before the temp directory goes away.
+        for job in JOBS.list():
+            if job.status in ("pending", "running"):
+                wait_for_job(job.id)
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_a_dead_endpoint_is_refused_before_any_work(self) -> None:
+        """The probe turns a 15-second-per-photo stall into one clear error."""
+        with patch(
+            "photo_reviewer.server.probe_endpoint",
+            return_value=(False, "无法连接模型服务"),
+        ):
+            resp = self.client.post("/api/analyze/batch", json={"ids": self.ids})
+        self.assertEqual(resp.status_code, 503)
+        self.assertIn("无法连接模型服务", resp.get_json()["error"])
+
+    def test_a_reachable_endpoint_starts_a_job(self) -> None:
+        with patch(
+            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+        ), patch("photo_reviewer.scanner.reanalyze_photo", return_value={}):
+            resp = self.client.post("/api/analyze/batch", json={"ids": self.ids})
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertEqual(body["total"], 3)
+            self.assertTrue(body["job_id"])
+            # The worker runs on its own thread, so it has to finish while the
+            # patch is still in place - otherwise it calls the real function and
+            # waits on a model that is not there.
+            job = wait_for_job(body["job_id"])
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(job.report["analysed"], 3)
+
+    def test_an_empty_selection_is_rejected(self) -> None:
+        resp = self.client.post("/api/analyze/batch", json={"ids": []})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_deleted_photos_are_not_queued(self) -> None:
+        self.db.mark_deleted([self.ids[0]], {})
+        with patch(
+            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+        ), patch("photo_reviewer.scanner.reanalyze_photo", return_value={}):
+            resp = self.client.post("/api/analyze/batch", json={"ids": self.ids})
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertEqual(body["total"], 2)
+            wait_for_job(body["job_id"])
+
+    def test_consecutive_failures_pause_the_run(self) -> None:
+        """A dead endpoint must stop the queue, not fail every photo in turn.
+
+        Each failed attempt costs the full retry budget, so running the whole
+        selection would write a failure row for every photo and take hours.
+        """
+        from photo_reviewer.scanner import ANALYSIS_FAILURE_LIMIT
+
+        ids = self.ids * 10  # more than the failure limit
+        # The worker logs a warning per failure on purpose; that is the signal
+        # this test is about, so keep it out of the suite's output.
+        with patch(
+            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+        ), patch(
+            "photo_reviewer.scanner.reanalyze_photo",
+            side_effect=RuntimeError("endpoint down"),
+        ), self.assertLogs("photo_reviewer.scanner", level="WARNING"):
+            resp = self.client.post("/api/analyze/batch", json={"ids": ids})
+            self.assertEqual(resp.status_code, 200)
+            job = wait_for_job(resp.get_json()["job_id"])
+        self.assertTrue(job.stalled)
+        self.assertTrue(job.report["paused"])
+        self.assertEqual(job.processed, ANALYSIS_FAILURE_LIMIT)
+
+
+class BytesReaderTests(unittest.TestCase):
+    """The buffer wrapper Pillow reads raw previews through.
+
+    ``readline`` is not decorative: the TIFF plugin calls it while walking the
+    IFD chain. Without it, one RAW container in a real library failed to index
+    with "'_BytesReader' object has no attribute 'readline'".
+    """
+
+    def test_it_implements_the_protocol_pillow_uses(self) -> None:
+        from photo_reviewer.thumbnailer import _BytesReader
+
+        reader = _BytesReader(b"abc\ndef\nghi")
+        self.assertEqual(reader.readline(), b"abc\n")
+        self.assertEqual(reader.readline(), b"def\n")
+        self.assertEqual(reader.tell(), 8)
+        self.assertEqual(reader.read(), b"ghi")
+        self.assertEqual(reader.readline(), b"")
+        reader.seek(0)
+        self.assertEqual(reader.readline(2), b"ab")
+        self.assertTrue(reader.seekable())
+        self.assertTrue(reader.readable())
+
+    def test_it_can_be_used_as_a_context_manager(self) -> None:
+        from photo_reviewer.thumbnailer import _BytesReader
+
+        with _BytesReader(b"x") as reader:
+            self.assertEqual(reader.read(), b"x")
 
 
 if __name__ == "__main__":

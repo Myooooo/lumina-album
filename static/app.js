@@ -1915,8 +1915,28 @@ function jobSummaryText(job) {
       : "回收站已经是空的";
   }
 
+  // A batch re-analysis reports how many it actually got through.
+  if (report && typeof report === "object" && "analysed" in report) {
+    if (job.status === "cancelled") {
+      return `重新解读已取消：已完成 ${report.analysed} 张`;
+    }
+    const parts = [`重新解读完成：${report.analysed} 张`];
+    if (Number(report.failed) > 0) parts.push(`${report.failed} 张失败`);
+    if (report.paused) {
+      parts.push("模型服务连续失败，已提前暂停");
+    }
+    return parts.join("，");
+  }
+
   if (job.status === "cancelled") return `${phaseLabel(job.phase)}已取消`;
+  if (job.stalled) {
+    return `模型服务连续失败，${phaseLabel(job.phase)}已暂停（${job.processed}/${job.total}）`;
+  }
   if (!job.total) return "整理完成：没有需要处理的照片";
+  if (job.processed < job.total && job.phase === "analyze") {
+    // Stopped short: say so rather than implying the whole album was read.
+    return `解读已暂停：共处理 ${job.processed}/${job.total}`;
+  }
   return `整理完成：共处理 ${job.processed}/${job.total}`;
 }
 
@@ -2377,41 +2397,43 @@ async function openFolder() {
   }
 }
 
+/**
+ * Re-analyse several photos at once.
+ *
+ * This used to be a `for` loop in the page: one `/api/reanalyze` per photo,
+ * behind a blocking overlay. Selecting a few hundred photos meant a spinner for
+ * hours with no way to stop it, and a refresh threw the whole run away.
+ *
+ * It is now a background job on the server, so the toolbar shows the same
+ * progress bar, remaining-time estimate and cancel button as a scan, and a
+ * reloaded page picks the run back up (see resumeScanJob). The endpoint probes
+ * the model first, so a stopped server fails immediately instead of writing a
+ * failure row for every photo.
+ */
 async function reanalyzeSelected(ids) {
   ids = ids.filter((id) => {
     const p = photoById(id);
     return p && p.status !== "deleted";
   });
   if (!ids.length) return;
-  if (!await confirmDialog(`确定重新解读选中的 ${ids.length} 张照片吗？`, { title: "重新解读", confirmText: "重新解读" })) return;
-  showLoading(`正在重新解读选中的 ${ids.length} 张照片…`);
-  let ok = 0;
-  let fail = 0;
+  const confirmed = await confirmDialog(
+    `确定重新解读选中的 ${ids.length} 张照片吗？\n任务会在后台进行，可以随时取消。`,
+    { title: "重新解读", confirmText: "开始解读" }
+  );
+  if (!confirmed) return;
   try {
-    for (let i = 0; i < ids.length; i++) {
-      $("loadingText").textContent = `正在重新解读照片 ${i + 1}/${ids.length}…`;
-      try {
-        const updated = await api("/api/reanalyze", { method: "POST", body: JSON.stringify({ id: ids[i] }) });
-        const idx = photoIndexById(ids[i]);
-        if (idx >= 0 && updated) {
-          if ($("statusFilter").value === "pending") {
-            removePhotoRows([ids[i]]);
-          } else {
-            Object.assign(state.photos[idx], updated);
-            invalidatePhotoDetail(ids[i]);
-            refreshCard(ids[i]);
-          }
-        }
-        ok++;
-      } catch (e) {
-        fail++;
-      }
-    }
+    const data = await api("/api/analyze/batch", {
+      method: "POST",
+      body: JSON.stringify({ ids, folder: state.folder || "" }),
+    });
     state.selected.clear();
     updateSelectionBar();
-    showToast(`重新解读完成：成功 ${ok} 张，失败 ${fail} 张`, fail ? "error" : "success");
-  } finally {
-    hideLoading();
+    renderGallery({ animate: false });
+    state.currentJobId = data.job_id;
+    showProgress(`正在重新解读 ${data.total} 张照片…`);
+    pollScan();
+  } catch (e) {
+    showToast("重新解读失败：" + e.message, "error");
   }
 }
 

@@ -23,7 +23,9 @@ from .api_client import (
     DIMENSION_KEYS,
     LEGACY_DIMENSION_KEYS,
     PROMPT_PRESETS,
+    SEMANTIC_CANDIDATE_LIMIT,
     SemanticSearchError,
+    probe_endpoint,
     semantic_search,
     strip_json_format,
 )
@@ -66,7 +68,9 @@ from .repair import (
 from .scanner import (
     JOBS,
     RAW_EXTENSIONS,
+    JobConflict,
     reanalyze_photo,
+    start_analysis_batch,
     start_rebuild_index,
     start_scan,
     start_video_job,
@@ -273,6 +277,33 @@ def _image_cache_timeout() -> int | None:
     keeps Flask's default of ``no-cache`` and revalidates with its ETag.
     """
     return _IMMUTABLE_IMAGE_MAX_AGE if request.args.get("v") else None
+
+
+#: ``/api/years`` parses the EXIF JSON of every row in the folder, which is why
+#: it cost ~22 ms on an 11k-photo library while the rest of the panel answered in
+#: single digits. The answer only changes when a scan does, so it is memoised for
+#: a short while; the key includes the folder so switching albums is unaffected.
+YEARS_CACHE_SECONDS = 60.0
+_years_cache: dict[str, tuple[float, list[int]]] = {}
+
+
+def _cached_years(database: Database, folder: str | None) -> list[int]:
+    """Distinct capture years, memoised for ``YEARS_CACHE_SECONDS``."""
+    key = folder or ""
+    now = time.monotonic()
+    hit = _years_cache.get(key)
+    if hit and now - hit[0] < YEARS_CACHE_SECONDS:
+        return hit[1]
+    years = database.capture_years(folder)
+    if len(_years_cache) > 32:
+        _years_cache.clear()
+    _years_cache[key] = (now, years)
+    return years
+
+
+def invalidate_years_cache() -> None:
+    """Drop the memoised years, e.g. after a scan indexed new photos."""
+    _years_cache.clear()
 
 
 def _trash_destination(day_dir: Path, source: str) -> Path:
@@ -1367,14 +1398,14 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             folder = _normalize_folder(folder)
         except NotADirectoryError as exc:
             return jsonify({"error": str(exc)}), 400
-        for existing in JOBS.list():
-            if existing.folder == folder and existing.status == "running":
-                return jsonify(
-                    {"error": "该文件夹已有任务正在运行", "job_id": existing.id}
-                ), 409
-        job = start_rebuild_index(
-            folder, database, cfg, force=force, skip_indexed_videos=skip_videos
-        )
+        try:
+            job = start_rebuild_index(
+                folder, database, cfg, force=force, skip_indexed_videos=skip_videos
+            )
+        except JobConflict as exc:
+            return jsonify(
+                {"error": "该文件夹已有任务正在运行", "job_id": exc.job.id}
+            ), 409
         return jsonify(
             {
                 "job_id": job.id,
@@ -1397,14 +1428,16 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             folder = _normalize_folder(folder)
         except NotADirectoryError as exc:
             return jsonify({"error": str(exc)}), 400
-        for existing in JOBS.list():
-            if existing.folder == folder and existing.status == "running":
-                return jsonify(
-                    {"error": "该文件夹已有扫描任务正在运行", "job_id": existing.id}
-                ), 409
-        job = start_scan(
-            folder, database, cfg, force=force, skip_indexed_videos=skip_videos
-        )
+        # The "one job per folder" rule lives in JobManager.create, so it cannot
+        # be forgotten by a caller; this just turns the refusal into a 409.
+        try:
+            job = start_scan(
+                folder, database, cfg, force=force, skip_indexed_videos=skip_videos
+            )
+        except JobConflict as exc:
+            return jsonify(
+                {"error": "该文件夹已有扫描任务正在运行", "job_id": exc.job.id}
+            ), 409
         return jsonify({"job_id": job.id, "status": job.status, "folder": folder})
 
     @app.post("/api/import/plan")
@@ -1510,7 +1543,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/years")
     def api_years():
         folder = request.args.get("folder", "").strip() or None
-        return jsonify({"years": database.capture_years(folder)})
+        return jsonify({"years": _cached_years(database, folder)})
 
     @app.get("/api/folders")
     def api_folders():
@@ -1642,6 +1675,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             )
         except (TypeError, ValueError):
             return jsonify({"error": "score 参数不合法"}), 400
+        # ``semantic_search`` only ever sends the first 500 candidates to the
+        # model, so fetching 2000 meant decoding four times as many rows - tags,
+        # EXIF, dimensions, video_info - as the prompt could use.
         all_candidates = database.list_photos(
             folder=folder,
             status=status,
@@ -1652,7 +1688,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             year=year,
             exclude_deleted=exclude_deleted,
             sort=sort,
-            limit=2000,
+            limit=SEMANTIC_CANDIDATE_LIMIT,
         )
         result_map = {}
 
@@ -2327,7 +2363,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 exclude_deleted=False,
                 limit=100000,
             )
-            job = JOBS.create(folder or "", False)
+            # Emptying the bin writes files, not index rows, so it can run
+            # alongside a scan of the same folder.
+            job = JOBS.create(folder or "", False, exclusive=False)
             job.phase = "trash"
             job.total = len(pending)
             thread = threading.Thread(
@@ -2391,5 +2429,69 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:  # noqa: BLE001
             return jsonify({"error": str(exc)}), 500
+
+    @app.post("/api/analyze/batch")
+    def api_analyze_batch():
+        """Analyse a set of photos as one background job.
+
+        This is what the "重新解读" action on a multi-photo selection calls. It
+        used to be a browser-side loop issuing one request per photo behind a
+        blocking overlay, which meant no cancelling, no progress beyond a
+        counter, and starting over after a refresh. Running it as a job gives
+        the toolbar bar, the remaining-time estimate, cancel, and resumption
+        after a page reload - all of which already existed for scans.
+
+        ``ids`` may be omitted in favour of ``folder`` + ``status="pending"``,
+        which queues everything in an album that has no analysis yet.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        ids = data.get("ids")
+        folder = data.get("folder", "").strip()
+        status = data.get("status", "").strip() or None
+
+        if ids is None:
+            if not folder:
+                return jsonify({"error": "请提供照片 id 或文件夹"}), 400
+            try:
+                folder = _normalize_folder(folder)
+            except NotADirectoryError as exc:
+                return jsonify({"error": str(exc)}), 400
+            rows = database.list_photos(
+                folder=folder,
+                status=status,
+                limit=100000,
+            )
+            photo_ids = [row["id"] for row in rows]
+        else:
+            if not isinstance(ids, list) or not ids:
+                return jsonify({"error": "请至少选择一张照片"}), 400
+            try:
+                photo_ids = [int(value) for value in ids]
+            except (TypeError, ValueError):
+                return jsonify({"error": "照片 id 不合法"}), 400
+
+        usable = []
+        for pid in photo_ids:
+            row = database.get_photo(pid)
+            if row and row.get("status") != "deleted":
+                usable.append(pid)
+        if not usable:
+            return jsonify({"error": "没有可以重新解读的照片"}), 400
+
+        # One cheap request now beats failing every photo in turn: with the
+        # endpoint down each attempt burns its full retry budget (~15 s).
+        reachable, why = probe_endpoint(cfg)
+        if not reachable:
+            return jsonify({"error": why}), 503
+
+        job = start_analysis_batch(folder, usable, database, cfg)
+        return jsonify(
+            {
+                "job_id": job.id,
+                "status": job.status,
+                "phase": job.phase,
+                "total": job.total,
+            }
+        )
 
     return app

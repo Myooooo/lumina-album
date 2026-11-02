@@ -102,10 +102,27 @@ class ScanJob:
     #: Photo id a single-item job is working on (currently only the video
     #: transcode), so a second request can find the job already running.
     subject_id: int | None = None
+    #: Set when the job stopped early because the model endpoint kept failing.
+    #: ``processed`` then stays short of ``total``, and the UI can say why
+    #: instead of showing a bar that quietly froze.
+    stalled: bool = False
+    #: The job that spawned this one. An import copies files and then hands the
+    #: same folder to a scoped scan to index them; that child is not a second
+    #: competing scan, it *is* the import's second half, so the one-job-per-folder
+    #: rule lets it through.
+    parent_id: str | None = None
 
     @property
     def elapsed(self) -> float:
         return max(0.0, time.time() - self.started_at)
+
+
+class JobConflict(RuntimeError):
+    """Raised when a folder already has a job running."""
+
+    def __init__(self, existing: ScanJob) -> None:
+        super().__init__(f"该文件夹已有任务正在运行：{existing.id}")
+        self.job = existing
 
 
 class JobManager:
@@ -128,9 +145,57 @@ class JobManager:
         self._jobs: dict[str, ScanJob] = {}
         self._lock = threading.Lock()
 
-    def create(self, folder: str, force: bool = False) -> ScanJob:
-        job = ScanJob(id=uuid.uuid4().hex[:12], folder=folder, force=force)
+    def running_for(self, folder: str) -> ScanJob | None:
+        """The job currently working on ``folder``, if there is one.
+
+        Two jobs on one folder would mean two workers writing the same rows
+        through one SQLite file, and two progress bars fighting over the same
+        toolbar. The rule belongs here rather than in each route: the route that
+        forgets it is the bug, and one of them had.
+        """
+        if not folder:
+            return None
+        want = folder.lower()
         with self._lock:
+            for job in self._jobs.values():
+                if job.status == "running" and job.folder.lower() == want:
+                    return job
+        return None
+
+    def create(
+        self,
+        folder: str,
+        force: bool = False,
+        exclusive: bool = True,
+        parent_id: str | None = None,
+    ) -> ScanJob:
+        """Register a new job.
+
+        ``exclusive`` (the default) refuses to create a second job for a folder
+        that already has one running. Pass ``False`` for work that is genuinely
+        independent of the folder - a video transcode, or the bin sweep - which
+        keeps its own ``subject_id``/``phase`` and does not touch the index.
+
+        ``parent_id`` marks a job as the follow-up half of another one (an
+        import's index pass). It is allowed to share the folder with its parent,
+        because that is not two scans racing: the parent is blocked waiting for
+        it. Without this, the import would refuse to index its own copies.
+        """
+        job = ScanJob(
+            id=uuid.uuid4().hex[:12], folder=folder, force=force, parent_id=parent_id
+        )
+        with self._lock:
+            if exclusive and folder:
+                want = folder.lower()
+                for existing in self._jobs.values():
+                    if existing.status != "running":
+                        continue
+                    if existing.folder.lower() != want:
+                        continue
+                    # A child belongs to the job it came from.
+                    if parent_id and existing.id == parent_id:
+                        continue
+                    raise JobConflict(existing)
             self._prune_locked()
             self._jobs[job.id] = job
         return job
@@ -346,14 +411,19 @@ def start_scoped_scan(
     config: Config,
     only_paths: list[str],
     analyze: bool = True,
+    parent_id: str | None = None,
 ) -> ScanJob:
     """Index (and optionally analyse) an explicit list of files.
 
     Used by the SD-card import so that bringing in a card never re-queues the
     thousands of photos that are already sitting in the library, and so the
     default can be "index only, no model calls".
+
+    ``parent_id`` is the import job this scan is the second half of. It only
+    affects the one-job-per-folder rule: a child is allowed to share its
+    parent's folder, because the parent is waiting on it.
     """
-    job = JOBS.create(folder, False)
+    job = JOBS.create(folder, False, parent_id=parent_id)
     job.phase = "index"
     thread = threading.Thread(
         target=_scan_worker,
@@ -993,27 +1063,10 @@ def _scan_worker(
         JOBS.update(
             job_id, phase="analyze", total=len(to_analyze), processed=0, current=""
         )
-        workers = max(1, int(config.scan_concurrency or 1))
-        with ThreadPoolExecutor(
-            max_workers=workers, thread_name_prefix="lumina-analyze"
-        ) as executor:
-            futures = {
-                executor.submit(
-                    _analyze_one, image_path, folder, db, config
-                ): image_path
-                for image_path in to_analyze
-            }
-            for processed, future in enumerate(as_completed(futures), start=1):
-                image_path = futures[future]
-                JOBS.update(job_id, processed=processed, current=image_path)
-                job = JOBS.get(job_id)
-                if not job or job.cancelled:
-                    JOBS.update(job_id, status="cancelled")
-                    for pending in futures:
-                        pending.cancel()
-                    return
+        _run_analysis_phase(job_id, to_analyze, folder, db, config)
 
-        if not JOBS.get(job_id).cancelled:
+        job = JOBS.get(job_id)
+        if job and not job.cancelled and not job.stalled:
             try:
                 cleanup_folder_cache(folder, db, config.cache_dir_name)
             except (OSError, sqlite3.Error):
@@ -1021,6 +1074,89 @@ def _scan_worker(
             JOBS.update(job_id, status="completed")
     except Exception as exc:  # noqa: BLE001
         JOBS.update(job_id, status="error", error=str(exc))
+
+
+#: How many photos one analysis batch may hold. Small enough that cancelling
+#: takes effect promptly and the progress bar moves smoothly; large enough that
+#: the per-batch bookkeeping is negligible next to a model call.
+ANALYSIS_BATCH = 24
+
+#: How many consecutive failures mean the endpoint is down rather than one file
+#: being broken. Reaching it pauses the queue instead of burning through the
+#: whole list - with a dead endpoint each photo costs the full retry budget
+#: (~15 s), so an unattended 9,000-photo run would spend a day and write a
+#: failure row for every one of them.
+ANALYSIS_FAILURE_LIMIT = 5
+
+
+def _run_analysis_phase(
+    job_id: str,
+    to_analyze: list[str],
+    folder: str,
+    db: Database,
+    config: Config,
+) -> None:
+    """Analyse each path, reporting progress into ``job_id``.
+
+    Shared by the full scan, the import's optional analysis, and the batch
+    "re-analyse the selection" job, so all three behave identically: same
+    batching, same cancellation, same behaviour when the endpoint is down.
+
+    Work is submitted one batch at a time rather than as thousands of futures
+    up front. Two reasons: cancelling only has to stop the batch in flight
+    instead of racing a queue that has already been handed to the pool, and the
+    failure streak below can stop the run after five photos instead of after
+    all of them.
+    """
+    if not to_analyze:
+        return
+    workers = max(1, int(config.scan_concurrency or 1))
+    done = 0
+    streak = 0
+    total = len(to_analyze)
+
+    with ThreadPoolExecutor(
+        max_workers=workers, thread_name_prefix="lumina-analyze"
+    ) as executor:
+        for start in range(0, total, ANALYSIS_BATCH):
+            job = JOBS.get(job_id)
+            if not job or job.cancelled:
+                JOBS.update(job_id, status="cancelled")
+                return
+            batch = to_analyze[start : start + ANALYSIS_BATCH]
+            futures = {
+                executor.submit(_analyze_one, path, folder, db, config): path
+                for path in batch
+            }
+            for future in as_completed(futures):
+                path = futures[future]
+                job = JOBS.get(job_id)
+                if not job or job.cancelled:
+                    JOBS.update(job_id, status="cancelled")
+                    for pending in futures:
+                        pending.cancel()
+                    return
+                done += 1
+                JOBS.update(job_id, processed=done, current=path)
+                try:
+                    ok = future.result()
+                except Exception:  # noqa: BLE001 - a single bad photo is not fatal
+                    ok = False
+                streak = 0 if ok else streak + 1
+                if streak >= ANALYSIS_FAILURE_LIMIT:
+                    for pending in futures:
+                        pending.cancel()
+                    JOBS.update(
+                        job_id,
+                        stalled=True,
+                        current="模型服务连续失败，已暂停",
+                    )
+                    logger.warning(
+                        "analysis paused after %d consecutive failures (%s)",
+                        streak,
+                        job_id,
+                    )
+                    return
 
 
 def start_rebuild_index(
@@ -1213,6 +1349,94 @@ def reanalyze_photo(photo_id: int, db: Database, config: Config) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Batch analysis job
+# ---------------------------------------------------------------------------
+
+
+def start_analysis_batch(
+    folder: str,
+    photo_ids: list[int],
+    db: Database,
+    config: Config,
+) -> ScanJob:
+    """Analyse an explicit set of photos as a tracked background job.
+
+    The UI used to do this in the browser: a `for` loop issuing one
+    ``/api/reanalyze`` per photo, behind a modal that blocked the page. Selecting
+    a few hundred photos meant staring at a spinner for hours, with no way to
+    cancel, and a refresh lost the whole run. The job machinery already solves
+    all of that - progress, remaining-time estimate, cancelling, and picking the
+    job back up after a reload - so the work belongs here.
+
+    ``folder`` may be empty (a selection spanning albums); it is only used for
+    the one-job-per-folder rule and for reporting.
+    """
+    job = JOBS.create(folder, exclusive=False)
+    job.phase = "analyze"
+    job.total = len(photo_ids)
+    thread = threading.Thread(
+        target=_analysis_worker,
+        args=(job.id, folder, photo_ids, db, config),
+        daemon=True,
+    )
+    thread.start()
+    return job
+
+
+def _analysis_worker(
+    job_id: str,
+    folder: str,
+    photo_ids: list[int],
+    db: Database,
+    config: Config,
+) -> None:
+    job = JOBS.get(job_id)
+    if not job:
+        return
+    try:
+        JOBS.update(job_id, status="running", phase="analyze", processed=0)
+        analysed = 0
+        failed = 0
+        streak = 0
+        for index, photo_id in enumerate(photo_ids, start=1):
+            current = JOBS.get(job_id)
+            if not current or current.cancelled:
+                JOBS.update(job_id, status="cancelled")
+                return
+            row = db.get_photo(photo_id)
+            label = (row or {}).get("filename") or str(photo_id)
+            JOBS.update(job_id, processed=index - 1, current=label)
+            try:
+                reanalyze_photo(photo_id, db, config)
+                analysed += 1
+                streak = 0
+            except Exception:  # one photo failing is not fatal
+                failed += 1
+                streak += 1
+                logger.warning("batch analysis failed for %s", photo_id, exc_info=True)
+                if streak >= ANALYSIS_FAILURE_LIMIT:
+                    JOBS.update(
+                        job_id,
+                        stalled=True,
+                        processed=index,
+                        status="completed",
+                        current="模型服务连续失败，已暂停",
+                        report={"analysed": analysed, "failed": failed, "paused": True},
+                    )
+                    return
+            JOBS.update(job_id, processed=index)
+        JOBS.update(
+            job_id,
+            status="completed",
+            processed=len(photo_ids),
+            current="",
+            report={"analysed": analysed, "failed": failed, "paused": False},
+        )
+    except Exception as exc:  # noqa: BLE001
+        JOBS.update(job_id, status="error", error=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Video transcoding job
 # ---------------------------------------------------------------------------
 
@@ -1232,7 +1456,7 @@ def start_video_job(photo_id: int, db: Database, config: Config) -> ScanJob:
     (and the remaining-time estimate) with no extra UI. A stream copy finishes
     before the first poll; a real transcode is the case this exists for.
     """
-    job = JOBS.create(folder="", force=True)
+    job = JOBS.create(folder="", force=True, exclusive=False)
     JOBS.update(job.id, status="running", phase="video", subject_id=photo_id, total=1)
 
     def worker() -> None:

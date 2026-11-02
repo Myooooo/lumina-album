@@ -139,6 +139,36 @@ def _normalize_base_url(url: str) -> str:
     return url
 
 
+def probe_endpoint(config: Config, timeout: float = 3.0) -> tuple[bool, str]:
+    """Check that the model endpoint answers before starting a long run.
+
+    Without this, a run queued against a stopped server spends the full retry
+    budget on every photo - measured at ~15 s each - and writes a failure row for
+    all of them. One cheap request up front turns that into an immediate, clear
+    refusal.
+
+    The probe asks for ``GET <base>/models``, which every OpenAI-compatible
+    server (LM Studio, Ollama, llama.cpp, vLLM) implements and which costs no
+    tokens. A server that does not expose it is not treated as broken: any HTTP
+    answer at all proves something is listening, so only a transport failure
+    counts as "down".
+
+    Returns ``(reachable, message)``.
+    """
+    url = urljoin(_normalize_base_url(config.api_base_url) + "/", "models")
+    headers = {}
+    api_key = getattr(config, "api_key", "")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout)
+    except (requests.exceptions.RequestException, OSError) as exc:
+        return False, f"无法连接模型服务 {config.api_base_url}：{exc}"
+    if resp.status_code >= 500:
+        return False, f"模型服务暂时不可用（HTTP {resp.status_code}）"
+    return True, ""
+
+
 def _post_chat_completion(
     payload: dict[str, Any],
     config: Config,
@@ -373,6 +403,12 @@ def _validate_result(result: dict[str, Any]) -> None:
     result["dimensions"] = _normalize_dimensions(result.get("dimensions"))
 
 
+#: How many candidate rows ``semantic_search`` puts in front of the model.
+#: Longer prompts do not help - the model cannot scan thousands of lines - so a
+#: caller should not read more rows from the database than this.
+SEMANTIC_CANDIDATE_LIMIT = 500
+
+
 def semantic_search(query: str, candidates: list, config: Config) -> list:
     """Use the local LLM to find photo ids matching a natural-language query.
 
@@ -382,7 +418,7 @@ def semantic_search(query: str, candidates: list, config: Config) -> list:
     if not query or not candidates:
         return []
     lines = []
-    for p in candidates[:500]:
+    for p in candidates[:SEMANTIC_CANDIDATE_LIMIT]:
         tags = ",".join(p.get("tags") or []) or "-"
         reason = (p.get("reason") or "")[:120]
         location = p.get("location") or ""

@@ -92,7 +92,15 @@ def _exif_orientation(img: Image.Image) -> int:
 
 
 class _BytesReader:
-    """Minimal seekable file-like wrapper around an in-memory buffer."""
+    """Minimal seekable file-like wrapper around an in-memory buffer.
+
+    Presents enough of the file protocol for Pillow's decoders. ``readline`` is
+    not optional: the TIFF plugin uses it while walking the IFD chain, and
+    without it a camera raw whose embedded preview is a TIFF-stream JPEG fails
+    with ``'_BytesReader' object has no attribute 'readline'``. That is exactly
+    what happened to one file in a 4,000-photo album - the bug only shows up for
+    the particular container layout that RAW used.
+    """
 
     __slots__ = ("_data", "_pos")
 
@@ -109,6 +117,18 @@ class _BytesReader:
         self._pos += len(chunk)
         return chunk
 
+    def readline(self, size: int = -1) -> bytes:
+        """Return the next line, newline included, or the rest of the buffer."""
+        if self._pos >= len(self._data):
+            return b""
+        end = self._data.find(b"\n", self._pos)
+        end = len(self._data) if end < 0 else end + 1
+        if size is not None and size >= 0:
+            end = min(end, self._pos + size)
+        chunk = self._data[self._pos : end]
+        self._pos = end
+        return chunk
+
     def seek(self, offset: int, whence: int = 0) -> int:
         if whence == 0:
             self._pos = offset
@@ -121,6 +141,18 @@ class _BytesReader:
 
     def tell(self) -> int:
         return self._pos
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def __enter__(self) -> _BytesReader:  # noqa: PYI034 - Self needs typing_extensions
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
 
 
 def _embedded_jpeg_streams(path: str, max_scan: int = 96 * 1024 * 1024) -> list:

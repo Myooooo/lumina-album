@@ -204,4 +204,15 @@ def run_startup_repairs(db: Database, config: Config) -> dict[str, object]:
         db.set_meta(PAIRING_REPAIR_KEY, PAIRING_REPAIR_VERSION)
         result["card_pairings"] = report
         logger.info("card pairing repair: %s", report)
+
+    # Take a snapshot before anything else can go wrong with this database in
+    # this session. Rate-limited inside, so a restart loop does not churn.
+    from .backup import maybe_auto_backup
+
+    try:
+        target = maybe_auto_backup(db, db.path)
+        if target is not None:
+            result["backup"] = str(target)
+    except Exception:  # a backup must never block startup
+        logger.warning("automatic backup failed", exc_info=True)
     return result
