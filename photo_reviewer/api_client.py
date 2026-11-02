@@ -311,6 +311,108 @@ def analyze_image(
     ) from last_parse_error
 
 
+def visual_search(
+    query: str,
+    candidates: list[dict[str, Any]],
+    config: Config,
+    batch_size: int = 4,
+    max_candidates: int = 24,
+) -> tuple[list[int], int]:
+    """Show the pictures to the model and ask which ones match ``query``.
+
+    The text-only search can only reason about captions and tags, so "找到那张
+    海边逆光的照片" matches nothing unless a caption happened to use those words. A
+    vision model can look.
+
+    The cost is the reason for every limit here: each image is a real request, so
+    the candidates are capped, sent a few at a time, and the caller is expected to
+    have narrowed the list first (by tag, year, place). Returns ``(ids, checked)``
+    so the UI can say how much was actually looked at rather than implying the
+    whole library was scanned.
+    """
+    selected = [p for p in candidates if p.get("thumb_path") or p.get("proxy_path")]
+    selected = selected[: max(1, max_candidates)]
+    if not query.strip() or not selected:
+        return [], 0
+
+    matches: list[int] = []
+    checked = 0
+    step = max(1, min(batch_size, 8))
+
+    for start in range(0, len(selected), step):
+        batch = selected[start : start + step]
+        content: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"搜索条件：{query.strip()}\n\n"
+                    "下面是几张照片，按顺序编号。请只根据画面本身判断哪些照片"
+                    "真正符合这个条件，宁少勿多。"
+                ),
+            }
+        ]
+        # Only the photos that could be read go into the batch, and the position
+        # maps to *that* list. Keeping unreadable ones in the numbering would let
+        # the model's "第 2 张" point at a photo it never saw.
+        shown: list[dict[str, Any]] = []
+        for photo in batch:
+            path = photo.get("thumb_path") or photo.get("proxy_path")
+            try:
+                with open(path, "rb") as handle:
+                    encoded = base64.b64encode(handle.read()).decode("ascii")
+            except OSError:
+                continue
+            shown.append(photo)
+            content.append({"type": "text", "text": f"第 {len(shown)} 张："})
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
+                }
+            )
+        checked += len(batch)
+        if not shown:
+            continue
+        # Answer in *positions*, not database ids. The model never sees an id, and
+        # asking it to echo one it cannot read produced matches that included
+        # every photo in the batch; a position is something it can actually count.
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    '只返回 JSON：{"match": [符合的序号, ...]}。'
+                    "序号从 1 开始。没有符合的就返回 {\"match\": []}。不要解释。"
+                ),
+            }
+        )
+        payload = {
+            "model": config.model,
+            "messages": [{"role": "user", "content": content}],
+            "temperature": 0.0,
+            "max_tokens": 300,
+        }
+        try:
+            resp = _post_chat_completion(payload, config)
+            text = resp.json()["choices"][0]["message"]["content"]
+            parsed = _parse_model_json(text)
+        except (RuntimeError, KeyError, IndexError, TypeError, ValueError) as exc:
+            raise SemanticSearchError(f"视觉搜索暂时不可用：{exc}") from exc
+        found = parsed.get("match", []) if isinstance(parsed, dict) else []
+        for value in found:
+            try:
+                position = int(value)
+            except (TypeError, ValueError):
+                continue
+            # Only a position that was actually shown may match: the numbering the
+            # model answered against is `shown`, not the raw batch.
+            if 1 <= position <= len(shown):
+                pid = shown[position - 1]["id"]
+                if pid not in matches:
+                    matches.append(pid)
+
+    return matches, checked
+
+
 def _parse_model_json(content: Any) -> dict[str, Any]:
     if isinstance(content, list):
         parts = []

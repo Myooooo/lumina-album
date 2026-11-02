@@ -770,7 +770,7 @@ async function loadPhotos(options = {}) {
   let data;
   let hasMore = false;
   try {
-    if ((mode === "semantic" || mode === "smart") && query) {
+    if ((mode === "semantic" || mode === "smart" || mode === "visual") && query) {
       const statusVal = $("statusFilter").value;
       const body = {
         folder: state.folder || undefined,
@@ -798,6 +798,15 @@ async function loadPhotos(options = {}) {
     }
 
     if (data.warning && !quiet) showToast(data.warning, "warning");
+    // A visual search only looks at a bounded number of photos; saying so keeps
+    // "no results" from reading as "not in your library".
+    if (data.checked && !quiet) {
+      const total = (data.photos || []).length;
+      showToast(
+        `看图搜索只查看了最前面的 ${data.checked} 张${total ? "，其余可以用筛选缩小范围后再搜" : "，没有找到符合的画面"}`,
+        "info"
+      );
+    }
     const nextPhotos = data.photos || [];
     if (quiet) {
       applyQuietRefresh(nextPhotos);

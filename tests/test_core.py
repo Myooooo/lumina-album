@@ -6305,6 +6305,156 @@ class FootprintsApiTests(unittest.TestCase):
         self.assertEqual(body["total"], 0)
 
 
+class VisualSearchTests(unittest.TestCase):
+    """Asking the vision model which pictures match.
+
+    The text search can only reason about captions, so it cannot answer "那张逆光的
+    照片". The model can look - but each image is a real request, so the limits and
+    the answer format both matter as much as the accuracy. The first version asked
+    it to echo database ids, which it cannot read, and it matched every photo in the
+    batch; asking for positions fixed that.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "l.db"))
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _photo(self, pid: int) -> dict:
+        path = os.path.join(self.tmp.name, f"p{pid}.jpg")
+        if not os.path.exists(path):
+            Image.new("RGB", (40, 30), (120, 90, 60)).save(path, "JPEG")
+        return {"id": pid, "thumb_path": path, "filename": f"p{pid}.jpg"}
+
+    def _fake_response(self, text: str):
+        class Resp:
+            def json(self):
+                return {"choices": [{"message": {"content": text}}]}
+
+        return Resp()
+
+    def test_positions_are_mapped_back_to_ids(self) -> None:
+        from photo_reviewer.api_client import visual_search
+
+        photos = [self._photo(11), self._photo(22), self._photo(33)]
+        with patch(
+            "photo_reviewer.api_client._post_chat_completion",
+            return_value=self._fake_response('{"match": [1, 3]}'),
+        ):
+            ids, checked = visual_search("有海的照片", photos, self.cfg, batch_size=3)
+        self.assertEqual(ids, [11, 33])
+        self.assertEqual(checked, 3)
+
+    def test_a_hallucinated_position_is_ignored(self) -> None:
+        """A number outside the batch must not pull in an unrelated photo."""
+        from photo_reviewer.api_client import visual_search
+
+        photos = [self._photo(11), self._photo(22)]
+        with patch(
+            "photo_reviewer.api_client._post_chat_completion",
+            return_value=self._fake_response('{"match": [9, -1, 2]}'),
+        ):
+            ids, _checked = visual_search("x", photos, self.cfg, batch_size=2)
+        self.assertEqual(ids, [22])
+
+    def test_no_match_returns_empty(self) -> None:
+        from photo_reviewer.api_client import visual_search
+
+        photos = [self._photo(11)]
+        with patch(
+            "photo_reviewer.api_client._post_chat_completion",
+            return_value=self._fake_response('{"match": []}'),
+        ):
+            ids, checked = visual_search("x", photos, self.cfg)
+        self.assertEqual(ids, [])
+        self.assertEqual(checked, 1)
+
+    def test_the_candidate_list_is_capped(self) -> None:
+        """Cost is per image, so the cap is part of the contract."""
+        from photo_reviewer.api_client import visual_search
+
+        photos = [self._photo(pid) for pid in range(1, 31)]
+        calls = {"n": 0}
+
+        def fake(*_args, **_kwargs):
+            calls["n"] += 1
+            return self._fake_response('{"match": []}')
+
+        with patch("photo_reviewer.api_client._post_chat_completion", side_effect=fake):
+            _ids, checked = visual_search(
+                "x", photos, self.cfg, batch_size=4, max_candidates=8
+            )
+        self.assertEqual(checked, 8)
+        self.assertEqual(calls["n"], 2, "eight photos at four per request")
+
+    def test_an_empty_query_or_list_does_nothing(self) -> None:
+        from photo_reviewer.api_client import visual_search
+
+        self.assertEqual(visual_search("", [self._photo(1)], self.cfg), ([], 0))
+        self.assertEqual(visual_search("x", [], self.cfg), ([], 0))
+
+    def test_a_photo_without_a_preview_is_skipped(self) -> None:
+        from photo_reviewer.api_client import visual_search
+
+        photos = [{"id": 5, "filename": "nope.jpg"}]
+        self.assertEqual(visual_search("x", photos, self.cfg), ([], 0))
+
+    def test_a_missing_preview_is_skipped_not_fatal(self) -> None:
+        """One unreadable thumbnail must not fail the whole search.
+
+        A photo whose proxy was pruned since indexing is a normal state - the
+        library keeps the row and can re-render on demand. The batch simply carries
+        the photos it could read.
+        """
+        from photo_reviewer.api_client import visual_search
+
+        photos = [{"id": 7, "thumb_path": os.path.join(self.tmp.name, "gone.jpg")}]
+        with patch(
+            "photo_reviewer.api_client._post_chat_completion",
+            return_value=self._fake_response('{"match": [1]}'),
+        ):
+            ids, checked = visual_search("x", photos, self.cfg)
+        self.assertEqual(ids, [])
+        self.assertEqual(checked, 1)
+
+
+class SearchModeApiTests(unittest.TestCase):
+    """The search endpoint's mode handling."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_an_unknown_mode_is_rejected(self) -> None:
+        """It used to fall through every branch and return an empty list, which
+        reads as "nothing matches" rather than "that is not a mode"."""
+        resp = self.client.post("/api/search", json={"query": "x", "mode": "nonsense"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_every_known_mode_is_accepted(self) -> None:
+        for mode in ("keyword", "smart"):
+            resp = self.client.post("/api/search", json={"query": "海", "mode": mode})
+            self.assertEqual(resp.status_code, 200, mode)
+
+    def test_visual_mode_reports_how_many_were_checked(self) -> None:
+        resp = self.client.post(
+            "/api/search", json={"query": "海", "mode": "visual"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("checked", resp.get_json())
+
+
 class BytesReaderTests(unittest.TestCase):
     """The buffer wrapper Pillow reads raw previews through.
 

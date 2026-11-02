@@ -818,6 +818,37 @@ check(
   check("half way down is not the bottom", probe(600, 2000, 800), false);
 }
 
+/* ------------------------------------------------------------ visual search
+   The visual mode looks at the pictures instead of the captions, which is the
+   only way to find "那张逆光的照片". It costs a request per few photos, so the UI
+   has to be honest about how much was actually looked at. */
+section("看图搜索");
+
+check(
+  "the mode is offered in the picker",
+  /value="visual"/.test(
+    fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8")
+  ),
+  true
+);
+check(
+  "visual goes through the search endpoint, not the list endpoint",
+  /mode === "semantic" \|\| mode === "smart" \|\| mode === "visual"/.test(src),
+  true
+);
+check(
+  "the UI says how many photos were looked at",
+  /看图搜索只查看了最前面的/.test(src),
+  true
+);
+check(
+  "an unknown mode is a clear error, not a silent empty result",
+  /不支持的搜索方式/.test(
+    fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "server.py"), "utf8")
+  ),
+  true
+);
+
 /* --------------------------------------------------------------- 足迹
    One card per place, with the years it was visited. No map: a real one needs a
    tile server and a connection, and this app is local on purpose - the place list

@@ -28,6 +28,7 @@ from .api_client import (
     probe_endpoint,
     semantic_search,
     strip_json_format,
+    visual_search,
 )
 from .cache import (
     DERIVED_PATH_FIELDS,
@@ -97,6 +98,16 @@ _IMMUTABLE_IMAGE_MAX_AGE = 31536000
 #: canvas, so the file grows with the selection and a thousand photos would build a
 #: document nobody can open. A keepsake is a day or a small album, not the library.
 MAX_EXPORT_PHOTOS = 300
+
+#: How many photos one visual search may show the model, and how many per request.
+#: Each image is a real request, so this is a cost ceiling as much as a quality
+#: one - the caller is expected to have narrowed the list with the filters first.
+VISUAL_SEARCH_MAX = 24
+VISUAL_SEARCH_BATCH = 4
+
+#: The search modes ``/api/search`` understands. ``visible`` looks at the pixels,
+#: the other three read the index.
+SEARCH_MODES = ("keyword", "semantic", "smart", "visual")
 
 
 def _duplicate_payload(photo: dict[str, Any]) -> dict[str, Any]:
@@ -1902,6 +1913,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         folder = data.get("folder", "").strip() or None
         query = data.get("query", "").strip()
         mode = data.get("mode", "smart") or "smart"
+        if mode not in SEARCH_MODES:
+            # An unknown mode used to fall through every branch and return an
+            # empty result set, which reads as "nothing matches" rather than
+            # "that is not a search mode".
+            return jsonify({"error": "不支持的搜索方式"}), 400
         status_raw = data.get("status", "").strip()
         recommendation = data.get("recommendation", "").strip() or None
         tag = data.get("tag", "").strip() or None
@@ -1955,6 +1971,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             limit=SEMANTIC_CANDIDATE_LIMIT,
         )
         result_map = {}
+        visual_checked = 0
 
         if mode in ("keyword", "smart"):
             keyword_photos = database.list_photos(
@@ -1986,11 +2003,38 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 if mode == "semantic" and not result_map:
                     return jsonify({"error": semantic_warning}), 502
 
+        # Visual search looks at the pictures instead of the captions, so it can
+        # find things no caption happens to describe. It costs a real request per
+        # few photos, which is why it is its own mode and why the candidate list is
+        # narrowed first by whatever filters the caller already set.
+        if mode == "visual" and query:
+            try:
+                ids, checked = visual_search(
+                    query,
+                    all_candidates,
+                    cfg,
+                    batch_size=VISUAL_SEARCH_BATCH,
+                    max_candidates=VISUAL_SEARCH_MAX,
+                )
+                by_id = {p["id"]: p for p in all_candidates}
+                for pid in ids:
+                    if pid in by_id:
+                        result_map[pid] = by_id[pid]
+                visual_checked = checked
+            except SemanticSearchError as exc:
+                semantic_warning = str(exc)
+                if not result_map:
+                    return jsonify({"error": semantic_warning}), 502
+
         photos = sort_photos(list(result_map.values()), sort)
         return jsonify(
             {
                 "photos": [_photo_payload(p) for p in photos],
                 "warning": semantic_warning,
+                # How many pictures the model actually looked at. Without it the
+                # visual mode looks like it scanned the library when it only
+                # examined the first few dozen.
+                "checked": visual_checked if mode == "visual" else None,
             }
         )
 
