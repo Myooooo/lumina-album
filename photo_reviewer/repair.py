@@ -190,4 +190,18 @@ def run_startup_repairs(db: Database, config: Config) -> dict[str, object]:
         db.set_meta(DIMENSIONS_REPAIR_KEY, DIMENSIONS_REPAIR_VERSION)
         result["dimensions"] = report
         logger.info("dimensions repair: %s", report)
+    # Card pairings written before volume identities existed: fill them in, and
+    # collapse the duplicates a drive-letter change used to leave behind.
+    from .pairing_repair import (
+        PAIRING_REPAIR_KEY,
+        PAIRING_REPAIR_VERSION,
+        needs_pairing_repair,
+        repair_pairing_identities,
+    )
+
+    if needs_pairing_repair(db):
+        report = repair_pairing_identities(db)
+        db.set_meta(PAIRING_REPAIR_KEY, PAIRING_REPAIR_VERSION)
+        result["card_pairings"] = report
+        logger.info("card pairing repair: %s", report)
     return result

@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -35,6 +36,12 @@ from typing import Any
 from .db import Database
 from .importer import MAX_REPORTED_ITEMS
 from .paths import canonical_path, is_within
+from .volume import (
+    TRUST_ORDER,
+    VolumeIdentity,
+    identities_compatible,
+    volume_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +78,19 @@ class CardTarget:
     writable: bool = False
     same_volume: bool = True
     volume_unknown: bool = False
+    #: The volume identity as read just now (``key`` and how it was obtained).
+    volume_key: str | None = None
+    volume_source: str | None = None
     warnings: list[str] = field(default_factory=list)
 
     @property
     def usable(self) -> bool:
-        """True when the card is connected, writable and the right disk."""
+        """True when the card is connected, writable and not a different disk.
+
+        ``volume_unknown`` is deliberately *not* disqualifying: it only means the
+        check could not be performed on this platform, and the recorded pairing
+        was not contradicted.
+        """
         return self.connected and self.writable and self.same_volume
 
     @property
@@ -94,6 +109,8 @@ class CardTarget:
             "album": self.album,
             "source": self.source,
             "volume": self.volume,
+            "volume_key": self.volume_key,
+            "volume_source": self.volume_source,
             "connected": self.connected,
             "writable": self.writable,
             "same_volume": self.same_volume,
@@ -111,24 +128,43 @@ class CardTarget:
 def volume_id(path: str) -> int | None:
     """Return a fingerprint of the volume holding ``path``.
 
-    On Windows ``st_dev`` is the volume serial number the filesystem reports, so
-    two different cards that both mounted as ``E:`` get different values and a
-    recycled drive letter is detectable. POSIX reports a device number with the
-    same property. ``None`` means the platform would not tell us; callers treat
-    that as "unknown", never as a match.
+    Kept for the ``card_actions.volume`` column, whose values are plain ints from
+    databases written by earlier versions. New code should use
+    :func:`volume_identity`, which can also say *how* it knows and refuses to
+    treat "no serial number" as an identity.
+
+    On Windows ``st_dev`` is the volume serial number the filesystem reports. A
+    camera card formatted as exFAT very often reports 0 for it, and 0 is not an
+    identity - every such card would look alike - so it returns ``None`` here.
     """
     try:
         stat = os.stat(path)
     except OSError:
         return None
     device = getattr(stat, "st_dev", None)
-    return int(device) if device is not None else None
+    return int(device) if device else None
 
 
 def resolve_card(
-    album: str, source: str, recorded_volume: int | None = None
+    album: str,
+    source: str,
+    recorded_volume: int | None = None,
+    recorded_key: str | None = None,
 ) -> CardTarget:
-    """Check whether the card for ``album`` is plugged in and safe to write."""
+    """Check whether the card for ``album`` is plugged in and safe to write.
+
+    The volume is identified through :func:`photo_reviewer.volume.volume_identity`,
+    which asks the operating system for something that belongs to the *volume*
+    (a Windows volume GUID, a Linux/macOS filesystem UUID) rather than to its
+    mount point. That is what makes a replug into another drive letter, or
+    through another reader, still read as the same card.
+
+    The rule below is about *contradiction*, not about missing evidence. A
+    pairing recorded before this version existed, or a path the operating system
+    will not identify, is allowed to be written - refusing there would break the
+    ordinary case of one card on one machine. What is refused is a card that
+    positively identifies itself as a different disk than the one recorded.
+    """
     target = CardTarget(
         album=canonical_path(album),
         source=canonical_path(source),
@@ -140,19 +176,58 @@ def resolve_card(
     target.connected = True
     target.writable = os.access(target.source, os.W_OK)
 
-    current = volume_id(target.source)
-    if current is None or recorded_volume is None:
-        target.volume_unknown = True
-        target.warnings.append("无法读取磁盘指纹，本次跳过磁盘一致性校验。")
-    elif current != recorded_volume:
-        target.same_volume = False
-        target.warnings.append("该路径现在挂载的是另一块磁盘，已停用同步以免误删。")
-    else:
-        target.volume = current
+    current = volume_identity(target.source)
+    target.volume_key = current.key if current else None
+    target.volume_source = current.source if current else None
 
+    if current is None:
+        # The platform would not tell us. Nothing contradicts the recorded
+        # pairing, so reads and writes both proceed - but say so, because the
+        # check really did not happen.
+        target.volume_unknown = True
+        target.warnings.append(
+            "无法读取这张卡的卷标识，本次未校验是否为同一张卡。"
+        )
+    else:
+        mismatch = False
+        if recorded_key:
+            same, certain = identities_compatible(_parse_stored(recorded_key), current)
+            if certain and not same:
+                mismatch = True
+        elif recorded_volume:
+            # A pairing written by an older build, which stored the integer that
+            # ``volume_id`` returns. That integer is a *different* kind of
+            # identifier from what ``volume_identity`` produces (a GUID or a
+            # filesystem UUID), so it is compared against ``volume_id`` - the
+            # same basis it was recorded with - rather than against the key.
+            # Comparing across the two schemes would flag every existing pairing
+            # as "another card".
+            current_legacy = volume_id(target.source)
+            if current_legacy and current_legacy != recorded_volume:
+                mismatch = True
+        if mismatch:
+            target.same_volume = False
+            target.warnings.append(
+                "该路径现在挂载的是另一张卡，已停用写卡以免误删。"
+            )
     if not target.writable:
         target.warnings.append("卡片处于写保护状态，暂时无法同步。")
     return target
+
+
+def _parse_stored(stored: str) -> VolumeIdentity | None:
+    """Rebuild a :class:`VolumeIdentity` from the ``key:source`` form we store."""
+    if not stored or ":" not in stored:
+        return None
+    # Keys look like ``\\?\volume{...}\``, ``serial:0d864b426:exfat`` or
+    # ``uuid:1234-abcd``; the source is kept separately so the key can contain
+    # colons without ambiguity.
+    for source in TRUST_ORDER:
+        suffix = ":" + source
+        if stored.endswith(suffix):
+            return VolumeIdentity(stored[: -len(suffix)], source)
+    return None
+
 
 
 def _unusable_reason(target: CardTarget) -> str:
@@ -174,6 +249,10 @@ def record_pairing(db: Database, folder: str, source: str) -> dict[str, Any] | N
 
     Called after an import copies (or confirms) files, which is what makes a
     folder a camera album in the first place.
+
+    The card's volume identity is recorded alongside the path. It is the thing
+    that survives being replugged into another drive letter; a pairing stored
+    without one can still be read from, but never written to.
     """
     album = canonical_path(folder)
     card = canonical_path(source)
@@ -182,10 +261,25 @@ def record_pairing(db: Database, folder: str, source: str) -> dict[str, Any] | N
     if is_within(card, album) or is_within(album, card):
         # Nested paths would make "relative to the album" ambiguous.
         return None
+    identity = volume_identity(card)
     volume = volume_id(card)
-    db.upsert_card_album(album, card, volume)
-    logger.info("camera album pairing recorded: %s <- %s", album, card)
-    return {"album": album, "source": card, "volume": volume}
+    stored_key = f"{identity.key}:{identity.source}" if identity else None
+    # One album belongs to one card: recording a pairing replaces whatever this
+    # album pointed at before, so a changed letter does not accumulate rows.
+    db.upsert_card_album(album, card, volume, stored_key)
+    logger.info(
+        "camera album pairing recorded: %s <- %s (%s)",
+        album,
+        card,
+        identity.source if identity else "no volume identity",
+    )
+    return {
+        "album": album,
+        "source": card,
+        "volume": volume,
+        "volume_key": stored_key,
+        "volume_source": identity.source if identity else None,
+    }
 
 
 def pairing_for(db: Database, folder: str) -> dict[str, Any] | None:
@@ -200,7 +294,12 @@ def target_for(db: Database, folder: str) -> CardTarget | None:
     pairing = pairing_for(db, folder)
     if not pairing:
         return None
-    return resolve_card(pairing["folder"], pairing["source"], pairing.get("volume"))
+    return resolve_card(
+        pairing["folder"],
+        pairing["source"],
+        pairing.get("volume"),
+        pairing.get("volume_key"),
+    )
 
 
 def _queue_counts(db: Database, source: str) -> dict[str, int]:
@@ -219,12 +318,22 @@ def _queue_counts(db: Database, source: str) -> dict[str, int]:
 
 
 def card_status(db: Database, folder: str | None = None) -> list[dict[str, Any]]:
-    """Describe every camera album, its card and its queued work."""
+    """Describe every camera album, its card and its queued work.
+
+    The toolbar polls this every 15 seconds. Probing a card that is *not* plugged
+    in means waiting for the operating system to fail a path lookup, and on a
+    reader that keeps its slot enumerated that can take a moment - so the
+    resolution result is memoised for a couple of seconds. The queue counts are
+    not cached: they come from SQLite and change as the user works.
+    """
     pairings = db.list_card_albums(canonical_path(folder) if folder else None)
     statuses = []
     for pairing in pairings:
-        target = resolve_card(
-            pairing["folder"], pairing["source"], pairing.get("volume")
+        target = _cached_target(
+            pairing["folder"],
+            pairing["source"],
+            pairing.get("volume"),
+            pairing.get("volume_key"),
         )
         entry = target.as_dict()
         entry["id"] = pairing.get("id")
@@ -232,6 +341,34 @@ def card_status(db: Database, folder: str | None = None) -> list[dict[str, Any]]
         entry["pending"] = _queue_counts(db, pairing["source"])
         statuses.append(entry)
     return statuses
+
+
+#: How long a resolved card target may be reused, in seconds.
+CARD_STATUS_TTL = 2.0
+
+_target_cache: dict[tuple[str, str, str], tuple[float, CardTarget]] = {}
+
+
+def _cached_target(
+    album: str, source: str, volume: int | None, volume_key: str | None
+) -> CardTarget:
+    """``resolve_card`` with a short-lived cache, for the polling endpoint."""
+    key = (album, source, volume_key or "")
+    now = time.monotonic()
+    cached = _target_cache.get(key)
+    if cached and now - cached[0] < CARD_STATUS_TTL:
+        return cached[1]
+    target = resolve_card(album, source, volume, volume_key)
+    # Keep the dict from growing forever if albums come and go.
+    if len(_target_cache) > 64:
+        _target_cache.clear()
+    _target_cache[key] = (now, target)
+    return target
+
+
+def invalidate_card_cache() -> None:
+    """Forget cached resolutions, e.g. right after a sync wrote to a card."""
+    _target_cache.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -659,10 +796,16 @@ def _erase(
 # ---------------------------------------------------------------------------
 
 def _target_for_source(db: Database, source: str) -> CardTarget | None:
+    """Resolve the card for one source path, using its recorded identity."""
     pairing = next((p for p in db.list_card_albums() if p["source"] == source), None)
     if not pairing:
         return None
-    return resolve_card(pairing["folder"], source, pairing.get("volume"))
+    return resolve_card(
+        pairing["folder"],
+        source,
+        pairing.get("volume"),
+        pairing.get("volume_key"),
+    )
 
 
 def pending_preview(
@@ -789,6 +932,9 @@ def apply_pending(
         "failed": [],
         "remaining": 0,
     }
+    # The card just wrote to itself, so any memoised "is it connected" answer is
+    # now stale by definition.
+    invalidate_card_cache()
     queued = db.card_actions(source=source, state=STATE_PENDING)
     erasing = db.card_actions(source=source, state=STATE_ERASE)
     if not queued and not erasing:

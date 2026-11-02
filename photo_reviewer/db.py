@@ -305,6 +305,7 @@ class Database:
                         folder TEXT NOT NULL,
                         source TEXT NOT NULL,
                         volume INTEGER,
+                        volume_key TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
                         UNIQUE(folder, source)
@@ -376,6 +377,16 @@ class Database:
                     conn.execute("ALTER TABLE photos ADD COLUMN play_state TEXT")
                 if "live_path" not in cols:
                     conn.execute("ALTER TABLE photos ADD COLUMN live_path TEXT")
+                # Card identity. ``volume_key`` is the platform-independent
+                # identifier (a Windows volume GUID or a filesystem UUID); the
+                # integer ``volume`` column is what older builds stored and is
+                # kept so an existing pairing still has something to check.
+                card_cols = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(card_albums)").fetchall()
+                }
+                if "volume_key" not in card_cols:
+                    conn.execute("ALTER TABLE card_albums ADD COLUMN volume_key TEXT")
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_photos_media_kind "
                     "ON photos(media_kind)"
@@ -1148,39 +1159,55 @@ class Database:
     # Camera-album pairings and card action queue
     # ------------------------------------------------------------------
 
-    def upsert_card_album(self, folder: str, source: str, volume: int | None) -> None:
-        """Remember that ``folder`` receives photos from the card at ``source``."""
+    def upsert_card_album(
+        self, folder: str, source: str, volume: int | None, volume_key: str | None = None
+    ) -> None:
+        """Remember that ``folder`` receives photos from the card at ``source``.
+
+        One album is fed by one card, so a pairing replaces whatever the album
+        pointed at before. Without that, every drive-letter change left the old
+        row behind: ``card_album_for`` then had to choose between several rows,
+        and the choice could land on a letter the card no longer uses.
+        """
         now = utc_now()
         with self._lock:
             conn = self._connect()
             try:
+                conn.execute("DELETE FROM card_albums WHERE folder=? AND source!=?", (folder, source))
                 conn.execute(
                     """
-                    INSERT INTO card_albums (folder, source, volume, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO card_albums
+                        (folder, source, volume, volume_key, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(folder, source) DO UPDATE SET
                         volume=excluded.volume,
+                        volume_key=COALESCE(excluded.volume_key, card_albums.volume_key),
                         updated_at=excluded.updated_at
                     """,
-                    (folder, source, volume, now, now),
+                    (folder, source, volume, volume_key, now, now),
                 )
                 conn.commit()
             finally:
                 conn.close()
 
     def list_card_albums(self, folder: str | None = None) -> list[dict[str, Any]]:
-        """Return recorded camera-album pairings, newest first."""
+        """Return recorded camera-album pairings, newest first.
+
+        ``id DESC`` breaks ties: two rows written in the same second used to sort
+        arbitrarily, which made the "which card is this?" answer unstable.
+        """
         with self._lock:
             conn = self._connect()
             try:
                 if folder:
                     rows = conn.execute(
-                        "SELECT * FROM card_albums WHERE folder=? ORDER BY updated_at DESC",
+                        "SELECT * FROM card_albums WHERE folder=? "
+                        "ORDER BY updated_at DESC, id DESC",
                         (folder,),
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        "SELECT * FROM card_albums ORDER BY updated_at DESC"
+                        "SELECT * FROM card_albums ORDER BY updated_at DESC, id DESC"
                     ).fetchall()
                 return [self._row_to_dict(r) for r in rows]
             finally:

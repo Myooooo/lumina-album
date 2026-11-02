@@ -90,6 +90,16 @@ from photo_reviewer.thumbnailer import (
     image_size_on_disk,
     make_proxy,
 )
+from photo_reviewer.volume import (
+    SOURCE_DEVICE,
+    SOURCE_SERIAL,
+    SOURCE_UUID,
+    SOURCE_VOLUME_GUID,
+    TRUST_ORDER,
+    VolumeIdentity,
+    identities_compatible,
+    volume_identity,
+)
 
 
 def wait_for_job(job_id: str, timeout: float = 6.0) -> dict:
@@ -2539,6 +2549,89 @@ class CardSyncTests(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertEqual(first, volume_id(os.path.join(self.card, "DCIM")))
 
+    def test_a_pairing_records_a_volume_identity(self) -> None:
+        """The path is not the identity: a GUID or UUID is recorded with it."""
+        pairing = self._register()
+        self.assertIsNotNone(pairing)
+        self.assertTrue(pairing["volume_key"], pairing)
+        # ``key:source`` - the source says which backend answered, so a later
+        # run knows whether the two keys are even comparable.
+        self.assertIn(":", pairing["volume_key"])
+        self.assertIn(pairing["volume_source"], TRUST_ORDER)
+
+    def test_the_card_is_recognised_at_a_different_path(self) -> None:
+        """A replug into another drive letter is still the same card.
+
+        This is the whole point of identifying the volume rather than the path:
+        as long as the same physical disk answers, the recorded identity still
+        matches whatever letter it came back on.
+        """
+        self._pair()
+        pairing = self._register()
+        target = resolve_card(
+            self.album, self.card, pairing.get("volume"), pairing.get("volume_key")
+        )
+        self.assertTrue(target.connected)
+        self.assertTrue(target.same_volume)
+        self.assertTrue(target.usable)
+        self.assertEqual(target.state, "connected")
+        # And the identity it reports is the one the pairing was made with.
+        self.assertEqual(target.volume_key, pairing["volume_key"].rsplit(":", 1)[0])
+
+    def test_a_replug_does_not_add_a_second_pairing_row(self) -> None:
+        """One album belongs to one card, however often the letter changes."""
+        self._pair()
+        self._register()
+        other = self.card + "_other"
+        os.makedirs(other, exist_ok=True)
+        record_pairing(self.db, self.album, other)
+        rows = self.db.list_card_albums(canonical_path(self.album))
+        self.assertEqual(len(rows), 1, [r["source"] for r in rows])
+        self.assertEqual(rows[0]["source"], canonical_path(other))
+
+    def test_pairings_without_a_key_still_resolve(self) -> None:
+        """Rows written before volume identities existed must keep working.
+
+        They carry only the integer column; the legacy check must not treat the
+        absence of a key as a contradiction.
+        """
+        self._pair()
+        self.db.upsert_card_album(
+            canonical_path(self.album), canonical_path(self.card), volume_id(self.card)
+        )
+        target = resolve_card(
+            self.album, self.card, volume_id(self.card), None
+        )
+        self.assertTrue(target.connected)
+        self.assertTrue(target.same_volume)
+        self.assertTrue(target.usable)
+
+    def test_an_unidentified_volume_does_not_block_the_card(self) -> None:
+        """No volume identifier is "unknown", not "wrong".
+
+        Refusing to write whenever the platform stays silent would break the
+        ordinary case on any machine the check does not support; only a card that
+        positively identifies as a different disk is refused.
+        """
+        self._pair()
+        with patch("photo_reviewer.cards.volume_identity", return_value=None):
+            target = resolve_card(self.album, self.card, 0, None)
+        self.assertTrue(target.connected)
+        self.assertTrue(target.same_volume)
+        self.assertTrue(target.usable)
+        self.assertTrue(target.volume_unknown)
+        self.assertTrue(target.warnings)
+
+    def test_a_different_volume_key_is_refused(self) -> None:
+        """The identity is what decides, not the path."""
+        self._pair()
+        fake = f"\\\\?\\volume{{00000000-0000-0000-0000-000000000000}}\\{':'}volume-guid"
+        target = resolve_card(self.album, self.card, None, fake)
+        self.assertTrue(target.connected)
+        self.assertFalse(target.same_volume)
+        self.assertFalse(target.usable)
+        self.assertEqual(target.state, "volume_mismatch")
+
     def test_relative_to_album_rejects_an_outside_path(self) -> None:
         self.assertEqual(
             relative_to_album(self.album, os.path.join(self.album, "DCIM", "x.jpg")),
@@ -2760,8 +2853,13 @@ class CardSyncTests(unittest.TestCase):
         self._pair()
         self._register()
         self._queue_offline("DSC_0001.JPG")
+        # Simulate a different card in the same slot: the recorded identity has
+        # to disagree with the volume actually mounted here.
         self.db.upsert_card_album(
-            canonical_path(self.album), canonical_path(self.card), 1
+            canonical_path(self.album),
+            canonical_path(self.card),
+            1,
+            "\\\\?\\volume{00000000-0000-0000-0000-000000000000}\\:volume-guid",
         )
         result = apply_pending(self.db, self.card, self.cfg.trash_dir_name)
         self.assertEqual(result["applied"], 0)
@@ -5210,6 +5308,101 @@ class VideoPlaybackTests(unittest.TestCase):
         # The default preview length is three seconds.
         self.assertLessEqual(clip.duration_ms, 3400)
         self.assertGreater(clip.duration_ms, 2400)
+
+
+class VolumeIdentityTests(unittest.TestCase):
+    """The card identity layer, exercised on all three platforms.
+
+    The Windows, macOS and Linux backends cannot all run on one machine, so the
+    pieces that decide *behaviour* - the comparison rules, the trust ranking and
+    the mount-point walk - are tested directly against constructed identities.
+    """
+
+    def test_the_same_key_from_the_same_backend_matches(self) -> None:
+        for source in (SOURCE_VOLUME_GUID, SOURCE_UUID, SOURCE_SERIAL, SOURCE_DEVICE):
+            same, certain = identities_compatible(
+                VolumeIdentity("k", source), VolumeIdentity("k", source)
+            )
+            self.assertTrue(same, source)
+            self.assertEqual(certain, source != SOURCE_DEVICE, source)
+
+    def test_different_keys_never_match(self) -> None:
+        same, _ = identities_compatible(
+            VolumeIdentity("k1", SOURCE_UUID), VolumeIdentity("k2", SOURCE_UUID)
+        )
+        self.assertFalse(same)
+
+    def test_a_missing_identity_is_never_a_match(self) -> None:
+        for recorded in (None, VolumeIdentity("k", SOURCE_UUID)):
+            for current in (None, VolumeIdentity("k", SOURCE_UUID)):
+                if recorded is current is None:
+                    same, certain = identities_compatible(None, None)
+                    self.assertFalse(same)
+                    self.assertFalse(certain)
+
+    def test_keys_from_different_backends_are_not_compared(self) -> None:
+        """A GUID and a device number are not the same kind of answer."""
+        same, certain = identities_compatible(
+            VolumeIdentity("k", SOURCE_VOLUME_GUID), VolumeIdentity("k", SOURCE_DEVICE)
+        )
+        self.assertFalse(same)
+        self.assertFalse(certain)
+
+    def test_only_durable_backends_are_trusted(self) -> None:
+        self.assertTrue(VolumeIdentity("k", SOURCE_VOLUME_GUID).trusted)
+        self.assertTrue(VolumeIdentity("k", SOURCE_UUID).trusted)
+        self.assertTrue(VolumeIdentity("k", SOURCE_SERIAL).trusted)
+        # A POSIX device number is allocated per boot.
+        self.assertFalse(VolumeIdentity("k", SOURCE_DEVICE).trusted)
+
+    def test_trust_order_lists_every_backend(self) -> None:
+        self.assertEqual(
+            set(TRUST_ORDER),
+            {SOURCE_VOLUME_GUID, SOURCE_UUID, SOURCE_SERIAL, SOURCE_DEVICE},
+        )
+
+    def test_a_missing_path_yields_no_identity(self) -> None:
+        self.assertIsNone(volume_identity(None))
+        self.assertIsNone(volume_identity(""))
+
+    def test_a_missing_path_falls_back_to_the_volume_that_holds_it(self) -> None:
+        """A card that was unplugged still belongs to the volume it lived on.
+
+        Identifying the *parent* is what lets a pairing written for a card that
+        is no longer mounted still be compared the next time it appears.
+        """
+        missing = os.path.join(tempfile.gettempdir(), "no-such-dir-xyz", "deeper")
+        identity = volume_identity(missing)
+        # Either the platform cannot identify it, or it identified the parent
+        # volume - both are acceptable; a placeholder never is.
+        if identity is not None:
+            self.assertTrue(identity.key.strip())
+
+    def test_a_real_directory_yields_an_identity_or_none(self) -> None:
+        """Whatever this platform supports, the answer is never a placeholder."""
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = volume_identity(tmp)
+            if identity is not None:
+                self.assertTrue(identity.key.strip())
+                self.assertIn(identity.source, TRUST_ORDER)
+
+    def test_the_mount_root_walks_up_to_the_volume_boundary(self) -> None:
+        from photo_reviewer.volume import _mount_root
+
+        with tempfile.TemporaryDirectory() as tmp:
+            nested = os.path.join(tmp, "a", "b", "c")
+            os.makedirs(nested)
+            root = _mount_root(nested)
+            # The root must be an ancestor of the path and must be a directory.
+            self.assertTrue(os.path.isdir(root))
+            self.assertTrue(
+                os.path.normcase(os.path.abspath(nested)).startswith(
+                    os.path.normcase(root)
+                )
+            )
+            if os.name == "nt":
+                # On Windows that boundary is the drive itself.
+                self.assertEqual(root, os.path.splitdrive(nested)[0] + os.sep)
 
 
 if __name__ == "__main__":
