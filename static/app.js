@@ -1488,57 +1488,56 @@ function initEndlessGallery() {
   const stateful = {
     // Accumulated downward intent since arriving at the bottom.
     pull: 0,
-    // The page height once the last fetch had fully settled. "Has the reader had
-    // a fresh arrival since this fetch?" is answered by the page being taller
-    // than this: a completed fetch grows it, and nothing else does.
+    // Which visit to the end of the page this is. Bumped every time the reader is
+    // seen somewhere other than the end; a fetch records the visit it served, so a
+    // second pull in the *same* visit is refused while the next arrival is allowed.
     //
-    // Recording it in a `finally` immediately after the await was not enough -
-    // the grid is still laying out at that point, so the height captured was an
-    // intermediate one and the next visit looked like it had already happened.
-    // A short settle delay measures the finished page instead.
-    firedAtHeight: 0,
-    // Set while a fetch is in flight so the settle timer cannot be started twice.
+    // This is deliberately not a page-height comparison. That version could not
+    // tell "still leaning on the trackpad" apart from "the page grew underneath me
+    // and I scrolled down to the new end", so the second case silently stopped
+    // working after the first fetch.
+    visit: 0,
+    // The visit a fetch has already been served for, or -1 before the first one.
+    servedVisit: -1,
+    // Set while a fetch is in flight, so one gesture cannot start two.
     settling: false,
   };
 
-  const pageHeight = () =>
-    Math.max(
-      document.body ? document.body.scrollHeight : 0,
-      document.documentElement ? document.documentElement.scrollHeight : 0
-    );
-
-  const requestMore = () => {
-    if (state.loadingMore || !state.hasMore || stateful.settling) return;
-    stateful.pull = 0;
-    stateful.settling = true;
-    const before = pageHeight();
-    Promise.resolve(loadMorePhotos()).finally(() => {
-      // Let the new cards lay out before measuring; 240 ms is enough for the
-      // browser to settle the grid and short enough that a reader still at the
-      // bottom cannot start a second pull in the meantime (the threshold gesture
-      // is longer than that).
-      setTimeout(() => {
-        const after = pageHeight();
-        // Only a fetch that actually added cards may move the baseline. A failed
-        // one leaves the page the same height, and recording that would make
-        // `pageHeight() <= firedAtHeight` true for ever - the gesture would be
-        // dead until a reload, with nothing on screen to explain why.
-        if (after > before) stateful.firedAtHeight = after;
-        stateful.settling = false;
-      }, 240);
-    });
+  // Leaving the end starts a new visit. `scroll` fires for wheel, drag, keyboard
+  // and programmatic moves alike, so this catches all of them.
+  const noteArrival = () => {
+    if (!isAtPageBottom()) {
+      stateful.visit += 1;
+    }
   };
 
   const accumulate = (delta) => {
     // Only downward motion at the bottom is a request for more.
     if (delta <= 0 || !state.hasMore || state.loadingMore) return;
+    if (state.loadingMore || stateful.settling) return;
     if (!isAtPageBottom()) return;
     stateful.pull += delta;
     if (stateful.pull < PULL_THRESHOLD) return;
-    // One fetch per arrival at the end: a page that has not grown since the last
-    // settled fetch means this is still the same visit, and the gesture is spent.
-    if (stateful.firedAtHeight && pageHeight() <= stateful.firedAtHeight) return;
+    // One fetch per visit. `servedVisit` starts at -1 so the first pull at visit 0
+    // is allowed, and a pull at the same visit after a fetch is refused.
+    if (stateful.servedVisit >= stateful.visit) return;
     requestMore();
+  };
+
+  const requestMore = () => {
+    if (state.loadingMore || !state.hasMore || stateful.settling) return;
+    stateful.pull = 0;
+    stateful.settling = true;
+    stateful.servedVisit = stateful.visit;
+    Promise.resolve(loadMorePhotos()).finally(() => {
+      // The page has just grown, so whatever the reader was at the bottom of is no
+      // longer the bottom. Re-check rather than assume: the browser may keep the
+      // scroll pinned to the end, in which case this is still the same visit.
+      setTimeout(() => {
+        noteArrival();
+        stateful.settling = false;
+      }, 240);
+    });
   };
 
   // A wheel event at the bottom has nowhere to scroll, so the browser reports the
@@ -1579,11 +1578,10 @@ function initEndlessGallery() {
     touchY = null;
   });
 
-  // No scroll listener and no armed flag: whether a pull counts is decided by
-  // comparing the page height against the height recorded when the last fetch
-  // fired. A completed fetch makes the page taller, which is exactly the "this is
-  // a fresh arrival" signal - and unlike listening for scroll events, it cannot be
-  // defeated by a jump that produces no intermediate event.
+  // Every scroll that leaves the end starts a new visit. The pull path re-checks
+  // the position as well, so a jump that emits no intermediate event is still
+  // counted correctly.
+  window.addEventListener("scroll", noteArrival, { passive: true });
 
   // The button path must not be blocked by the gesture state.
   const btn = $("loadMoreBtn");

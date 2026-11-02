@@ -774,33 +774,47 @@ check("the bottom slack is small enough to be exact", /AT_BOTTOM_SLACK = 4/.test
 check("there is a pull threshold", /PULL_THRESHOLD = 60/.test(src), true);
 check("the gesture is wired up once", (src.match(/initEndlessGallery\(\)/g) || []).length >= 2, true);
 
-/* One fetch per arrival is enforced by comparing the page height against the
-   height recorded once the last fetch had fully settled. Three earlier designs
-   were tried and all failed a real browser test:
+/* One fetch per *visit to the end*, counted as arrivals.
+
+   Four designs were tried and each failed a real browser test, which is why the
+   comment here is long:
      - an `armed` flag cleared on fetch and set by a `scroll` listener: a
-       programmatic jump to the top and back emits no intermediate event, so the
-       flag stayed disarmed for the rest of the session;
-     - re-arming on a timer since the last fetch: it let a long momentum scroll
+       programmatic jump between the top and the bottom emits no intermediate
+       event, so the flag stayed disarmed for the rest of the session;
+     - re-arming on a timer since the last fetch: a long momentum scroll could
        queue a second page;
      - recording the height in the fetch's `finally`: the grid is still laying
-       out then, so the captured height was an intermediate one. */
+       out then, so the captured height was an intermediate one;
+     - comparing the page height against that recorded baseline: it cannot tell
+       "still leaning on the trackpad" apart from "the page grew underneath me and
+       I scrolled down to the new end", so the second case stopped working.
+
+   A visit counter is the honest signal: leaving the end starts a new visit, and a
+   fetch serves exactly one visit. */
 check(
-  "a fetch records the settled page height",
-  /firedAtHeight = after/.test(src) &&
-    /setTimeout\(\(\) => \{[\s\S]{0,400}firedAtHeight/.test(src),
+  "leaving the end starts a new visit",
+  /const noteArrival = \(\) => \{\s*if \(!isAtPageBottom\(\)\) \{\s*stateful\.visit \+= 1;/.test(src),
   true
 );
 check(
-  "only a fetch that added cards moves the baseline",
-  // Recording the height after a *failed* load would set the baseline equal to
-  // the current height, and `pageHeight() <= firedAtHeight` would then be true for
-  // ever - the gesture dead until a reload, with nothing on screen explaining it.
-  /if \(after > before\) stateful\.firedAtHeight = after;/.test(src),
+  "the visit is counted on scroll, which covers every way of moving",
+  /addEventListener\("scroll", noteArrival, \{ passive: true \}\)/.test(src),
   true
 );
 check(
-  "a pull counts only when the page has grown since that fetch",
-  /pageHeight\(\) <= stateful\.firedAtHeight/.test(src),
+  "a fetch serves one visit, and only one",
+  /stateful\.servedVisit >= stateful\.visit/.test(src) &&
+    /stateful\.servedVisit = stateful\.visit;/.test(src),
+  true
+);
+check(
+  "the first pull is allowed before anything has been served",
+  /servedVisit: -1/.test(src),
+  true
+);
+check(
+  "the arrival is re-checked once the fetch has grown the page",
+  /setTimeout\(\(\) => \{\s*noteArrival\(\);/.test(src),
   true
 );
 check(
@@ -809,9 +823,8 @@ check(
   true
 );
 check(
-  "the height is read from both the body and the document element",
-  /document\.body \? document\.body\.scrollHeight/.test(src) &&
-    /document\.documentElement \? document\.documentElement\.scrollHeight/.test(src),
+  "the page-height comparison is gone, not left half-wired",
+  !/firedAtHeight/.test(src) && !/pageHeight/.test(src),
   true
 );
 check(
