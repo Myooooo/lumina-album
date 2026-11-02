@@ -6160,6 +6160,151 @@ class ExportApiTests(unittest.TestCase):
         )
 
 
+class FootprintTests(unittest.TestCase):
+    """Collapsing reverse-geocoded addresses into places.
+
+    The geocoder returns full street addresses. That is right for a caption and
+    useless for a footprint list - without collapsing, 404 distinct addresses in a
+    real library produced 404 entries instead of 22 places. The municipality and
+    country-prefix cases were both found by looking at what the real data contained.
+    """
+
+    def test_a_municipality_is_its_own_city(self) -> None:
+        from photo_reviewer.footprints import city_of
+
+        # "海淀区" is a district of the city the photo was taken in, not the place
+        # someone would say they visited.
+        self.assertEqual(city_of("北京市海淀区甘家口街道玉渊潭公园"), "北京市")
+        self.assertEqual(city_of("上海市浦东新区陆家嘴"), "上海市")
+
+    def test_a_province_is_stripped(self) -> None:
+        from photo_reviewer.footprints import city_of
+
+        self.assertEqual(city_of("河北省石家庄市裕华区槐底街道"), "石家庄市")
+        self.assertEqual(city_of("广东省深圳市南山区科技园"), "深圳市")
+        self.assertEqual(city_of("浙江省杭州市西湖区西湖"), "杭州市")
+
+    def test_an_autonomous_region_keeps_its_city(self) -> None:
+        from photo_reviewer.footprints import city_of
+
+        self.assertEqual(city_of("内蒙古自治区呼和浩特市新城区"), "呼和浩特市")
+
+    def test_a_special_administrative_region_is_the_place(self) -> None:
+        from photo_reviewer.footprints import city_of
+
+        self.assertEqual(city_of("香港特别行政区中西区中银大厦"), "香港特别行政区")
+
+    def test_a_country_prefix_does_not_become_a_place(self) -> None:
+        """A street under a bare country prefix must not read as one place."""
+        from photo_reviewer.footprints import city_of
+
+        self.assertEqual(city_of("中华人民共和国广东省深圳市南山区"), "深圳市")
+        # Nothing but the country: that is the best answer available.
+        self.assertEqual(city_of("中华人民共和国"), "中华人民共和国")
+
+    def test_a_bare_coordinate_pair_is_left_alone(self) -> None:
+        from photo_reviewer.footprints import city_of
+
+        self.assertEqual(city_of("39.9042, 116.4074"), "39.9042, 116.4074")
+
+    def test_an_empty_location_is_empty(self) -> None:
+        from photo_reviewer.footprints import city_of
+
+        self.assertEqual(city_of(""), "")
+        self.assertEqual(city_of("   "), "")
+
+    def test_photos_are_grouped_by_city(self) -> None:
+        from photo_reviewer.footprints import group_by_city
+
+        photos = [
+            {"id": 1, "location": "北京市海淀区A路", "exif": {"datetime_original": "2024:01:01"}},
+            {"id": 2, "location": "北京市朝阳区B路", "exif": {"datetime_original": "2025:01:01"}},
+            {"id": 3, "location": "河北省石家庄市C街", "exif": {"datetime_original": "2023:01:01"}},
+        ]
+        footprints = group_by_city(photos)
+        self.assertEqual(len(footprints), 2)
+        # Busiest first.
+        self.assertEqual(footprints[0].city, "北京市")
+        self.assertEqual(footprints[0].count, 2)
+        self.assertEqual(footprints[0].years, [2024, 2025])
+
+    def test_photos_without_a_location_are_skipped(self) -> None:
+        from photo_reviewer.footprints import group_by_city
+
+        photos = [
+            {"id": 1, "location": "", "exif": {}},
+            {"id": 2, "location": None, "exif": {}},
+            {"id": 3, "location": "北京市", "exif": {}},
+        ]
+        footprints = group_by_city(photos)
+        self.assertEqual(len(footprints), 1)
+        self.assertEqual(footprints[0].count, 1)
+
+    def test_a_json_exif_string_still_yields_years(self) -> None:
+        """Raw cursor rows carry exif as text; the grouping must still date them."""
+        from photo_reviewer.footprints import group_by_city
+
+        photos = [
+            {"id": 1, "location": "北京市", "exif": '{"datetime_original": "2019:05:05"}'},
+            {"id": 2, "location": "北京市", "exif": '{"datetime_original": "2021:05:05"}'},
+        ]
+        footprints = group_by_city(photos)
+        self.assertEqual(footprints[0].years, [2019, 2021])
+
+    def test_a_corrupt_exif_string_does_not_raise(self) -> None:
+        from photo_reviewer.footprints import group_by_city
+
+        footprints = group_by_city([{"id": 1, "location": "北京市", "exif": "{"}])
+        self.assertEqual(footprints[0].years, [])
+
+
+class FootprintsApiTests(unittest.TestCase):
+    """/api/footprints."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(self.folder, exist_ok=True)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _add(self, name: str, location: str, captured: str) -> None:
+        self.db.upsert_photo(
+            {
+                "path": os.path.join(self.folder, name),
+                "folder": self.folder,
+                "filename": name,
+                "status": "analyzed",
+                "location": location,
+                "exif": {"datetime_original": captured},
+            }
+        )
+
+    def test_places_are_grouped_with_a_cover(self) -> None:
+        self._add("a.jpg", "北京市海淀区A路", "2024:01:01 08:00:00")
+        self._add("b.jpg", "北京市朝阳区B路", "2025:01:01 08:00:00")
+        body = self.client.get("/api/footprints").get_json()
+        self.assertEqual(len(body["places"]), 1)
+        place = body["places"][0]
+        self.assertEqual(place["city"], "北京市")
+        self.assertEqual(place["count"], 2)
+        self.assertEqual(place["years"], [2024, 2025])
+        self.assertIn("id", place["cover"])
+
+    def test_an_empty_library_returns_no_places(self) -> None:
+        body = self.client.get("/api/footprints").get_json()
+        self.assertEqual(body["places"], [])
+        self.assertEqual(body["total"], 0)
+
+
 class BytesReaderTests(unittest.TestCase):
     """The buffer wrapper Pillow reads raw previews through.
 

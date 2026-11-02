@@ -58,6 +58,7 @@ from .db import Database, photo_capture_year, sort_photos
 from .duplicates import DEFAULT_THRESHOLD, group_duplicates, summarise
 from .exif import extract_exif
 from .exporter import build_html, build_tall_image, rows_to_export, tall_image_bytes
+from .footprints import group_by_city
 from .geocode import PROVIDERS as GEOCODING_PROVIDERS
 from .geocode import geocoding_enabled, reverse_geocode
 from .importer import ImportError_
@@ -1674,6 +1675,43 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                 "Content-Disposition": f'attachment; filename="lumina-{stamp}.png"',
                 "Content-Length": str(len(payload)),
             },
+        )
+
+    @app.get("/api/footprints")
+    def api_footprints():
+        """Where the photos were taken, grouped into places rather than addresses.
+
+        The reverse geocoder stores full street addresses, which is right for a
+        photo's caption and useless for a footprint list - every photo of one park
+        would be its own entry. ``city_of`` collapses them to the city, which took
+        404 distinct addresses down to 22 places on this library.
+
+        No map tiles: a coordinate map needs a tile server and an internet
+        connection, and this app is deliberately local. The place list plus a
+        representative photo says the same thing without either.
+        """
+        folder = request.args.get("folder", "").strip() or None
+        rows = database.located_photos(folder)
+        footprints = group_by_city(rows)
+        return jsonify(
+            {
+                "total": sum(item.count for item in footprints),
+                "places": [
+                    {
+                        "city": item.city,
+                        "count": item.count,
+                        "years": item.years,
+                        # Only what the cover thumbnail needs: a full photo payload
+                        # carries EXIF, tags and captions the place list never shows.
+                        "cover": {
+                            "id": item.photos[0]["id"],
+                            "filename": item.photos[0].get("filename") or "",
+                            "thumb_version": item.photos[0].get("phash") or "",
+                        },
+                    }
+                    for item in footprints
+                ],
+            }
         )
 
     @app.get("/api/memories")

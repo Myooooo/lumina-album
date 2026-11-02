@@ -1598,6 +1598,32 @@ class Database:
             finally:
                 conn.close()
 
+    def located_photos(self, folder: str | None = None) -> list[dict[str, Any]]:
+        """Every photo that carries a place, for the footprint view.
+
+        A narrow select for the same reason as ``duplicate_candidates``: the
+        grouping only needs the location, a thumbnail and a capture time, and
+        decoding full rows for a few thousand photos costs more than the work.
+        """
+        where = ["location IS NOT NULL", "location != ''", "status != 'deleted'"]
+        params: list[Any] = []
+        if folder:
+            where.append("folder = ?")
+            params.append(folder)
+        sql = (
+            "SELECT id, path, raw_path, location, filename, thumb_path, "
+            "proxy_path, phash, exif, status, score, media_kind, favorite, "
+            "width, height "
+            f"FROM photos WHERE {' AND '.join(where)}"
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                return [self._row_to_dict(row) for row in rows]
+            finally:
+                conn.close()
+
     def duplicate_candidates(self, folder: str | None = None) -> list[dict[str, Any]]:
         """The columns duplicate detection needs, and nothing else.
 

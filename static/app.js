@@ -5026,6 +5026,7 @@ function init() {
     if (!document.hidden) refreshCardStatus();
   });
   initBackToTop();
+  initFootprints();
   initMemories();
   initExport();
   initDuplicates();
@@ -5160,6 +5161,91 @@ function initBackToTop() {
     { passive: true }
   );
   syncBackToTop();
+}
+
+/* ==========================================================================
+   足迹
+
+   The places the photos were taken, one card per city. Deliberately not a map:
+   a real map needs a tile server and a connection, and this app is local on
+   purpose. A cover photo per place, the count and the years says what a map would
+   say without either.
+   ========================================================================== */
+
+function footprintCardHtml(place, index) {
+  const years = place.years || [];
+  let span = "";
+  if (years.length === 1) span = `${years[0]}`;
+  else if (years.length > 1) span = `${years[0]} – ${years[years.length - 1]}`;
+  const cover = place.cover || {};
+  const img = cover.id
+    ? `<img class="footprint-img" src="/api/thumbnail/${cover.id}?v=${encodeURIComponent(cover.thumb_version || "")}"
+            alt="${escapeHtml(place.city)}" loading="lazy" decoding="async" />`
+    : '<span class="footprint-noimg"></span>';
+  return `
+    <button class="footprint-card" type="button" data-city="${escapeHtml(place.city)}"
+            data-photo="${cover.id || ""}"
+            style="animation-delay:${Math.min(index, 14) * 0.04}s">
+      <span class="footprint-shot">${img}<span class="footprint-count">${place.count}</span></span>
+      <span class="footprint-body">
+        <span class="footprint-city">${escapeHtml(place.city)}</span>
+        <span class="footprint-meta">${place.count} 张${span ? ` · ${span}` : ""}</span>
+      </span>
+    </button>`;
+}
+
+function renderFootprints(data) {
+  const body = $("footprintsBody");
+  if (!body) return;
+  if (!data.places.length) {
+    body.innerHTML = `
+      <div class="footprints-empty">
+        <span class="footprints-empty-icon" data-icon="pin"></span>
+        <p>还没有记录的足迹。</p>
+        <p class="footprints-empty-hint">照片里带着 GPS 信息，或者开启了地理编码，这里就会亮起来。</p>
+      </div>`;
+    renderAllIcons(body);
+    return;
+  }
+  body.innerHTML = `<div class="footprint-grid">${data.places.map(footprintCardHtml).join("")}</div>`;
+}
+
+async function openFootprints() {
+  showModal($("footprintsModal"));
+  const body = $("footprintsBody");
+  const lede = $("footprintsLede");
+  if (body) body.innerHTML = '<div class="footprints-empty">正在整理走过的地方…</div>';
+  try {
+    const params = new URLSearchParams();
+    if (state.folder) params.set("folder", state.folder);
+    const data = await api(`/api/footprints?${params.toString()}`);
+    if (lede) {
+      lede.textContent = data.places.length
+        ? `这些回忆散落在 ${data.places.length} 个地方，共 ${data.total} 张。`
+        : "还没有记录的足迹。";
+    }
+    renderFootprints(data);
+  } catch (e) {
+    if (body) {
+      body.innerHTML = `<div class="footprints-empty">整理失败：${escapeHtml(e.message)}</div>`;
+    }
+    if (lede) lede.textContent = "";
+  }
+}
+
+function initFootprints() {
+  const btn = $("footprintsBtn");
+  if (btn) btn.addEventListener("click", openFootprints);
+
+  const body = $("footprintsBody");
+  if (body) {
+    body.addEventListener("click", (e) => {
+      const card = e.target.closest(".footprint-card");
+      if (!card) return;
+      const id = Number(card.dataset.photo);
+      if (Number.isFinite(id) && id > 0) openPreview(id);
+    });
+  }
 }
 
 /* ==========================================================================

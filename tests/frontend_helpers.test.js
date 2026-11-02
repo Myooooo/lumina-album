@@ -818,6 +818,38 @@ check(
   check("half way down is not the bottom", probe(600, 2000, 800), false);
 }
 
+/* --------------------------------------------------------------- 足迹
+   One card per place, with the years it was visited. No map: a real one needs a
+   tile server and a connection, and this app is local on purpose - the place list
+   says the same thing without either. */
+section("足迹");
+
+check(
+  "the footprint cards are grouped by city",
+  /footprint-card[\s\S]{0,200}data-city=/.test(src),
+  true
+);
+check(
+  "the cover thumbnail is content-addressed so it caches forever",
+  /api\/thumbnail\/\$\{cover\.id\}\?v=/.test(src),
+  true
+);
+check(
+  "a place with no cover still renders a card",
+  /footprint-noimg/.test(src),
+  true
+);
+check(
+  "the years are collapsed into a span",
+  /years\[years\.length - 1\]/.test(src),
+  true
+);
+check(
+  "an empty library says so in the page's own voice",
+  /还没有记录的足迹/.test(src),
+  true
+);
+
 /* ------------------------------------------------------------- export
    Two formats, two download paths. The filename comes from the server so it stays
    the one place that decides how an export is named; the client only has to read

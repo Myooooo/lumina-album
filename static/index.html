@@ -31,6 +31,7 @@
         <span id="cardStatusText">SD 卡已连接</span>
         <span id="cardPendingDot" class="card-pending-dot hidden">0</span>
       </button>
+      <button id="footprintsBtn" class="btn" title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
       <button id="memoriesBtn" class="btn" title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
       <button id="duplicatesBtn" class="btn" title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复照片</button>
       <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
@@ -235,6 +236,19 @@
       <ul id="dirList" class="dir-list"></ul>
       <div class="dir-actions">
         <button id="dirChooseBtn" class="btn primary" disabled><span class="btn-icon" data-icon="check"></span>选择此文件夹</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 足迹：the places the photos were taken, grouped by city rather than by the
+       street address the geocoder returns. -->
+  <div id="footprintsModal" class="modal hidden">
+    <div class="modal-content footprints-content">
+      <button class="modal-close" data-close="footprintsModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="pin"></span>足迹</h2>
+      <p class="footprints-lede" id="footprintsLede">正在整理走过的地方…</p>
+      <div id="footprintsBody" class="footprints-body">
+        <div class="footprints-empty">正在整理走过的地方…</div>
       </div>
     </div>
   </div>
