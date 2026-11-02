@@ -818,6 +818,38 @@ check(
   check("half way down is not the bottom", probe(600, 2000, 800), false);
 }
 
+/* ------------------------------------------------------------- export
+   Two formats, two download paths. The filename comes from the server so it stays
+   the one place that decides how an export is named; the client only has to read
+   the header and hand the blob to an anchor. */
+section("export");
+
+check("the export dialog offers both formats", /存成网页/.test(
+  fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8")
+) && /存成长图/.test(
+  fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8")
+), true);
+check(
+  "the download reads the filename from the response",
+  /Content-Disposition/.test(src) && /filename="\(\[\^"\]\+\)"/.test(src),
+  true
+);
+check(
+  "the blob url is released so it does not leak",
+  /URL\.revokeObjectURL/.test(src),
+  true
+);
+check(
+  "a failed export says so instead of failing silently",
+  /导出失败/.test(src),
+  true
+);
+check(
+  "the date export reuses the same query the sheet loaded",
+  /state\.memoriesQuery = data\.total/.test(src),
+  true
+);
+
 /* ------------------------------------------------------------- 那年今日
    A year count has to read as a date, not as a number: "两年前的今天", never
    "2 年前的今天". The phrasing is the whole feature - it is what makes the sheet

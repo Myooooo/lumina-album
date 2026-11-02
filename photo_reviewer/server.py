@@ -16,7 +16,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, request, send_file, url_for
+from flask import Flask, Response, jsonify, request, send_file, url_for
 
 from . import video
 from .api_client import (
@@ -57,6 +57,7 @@ from .config import (
 from .db import Database, photo_capture_year, sort_photos
 from .duplicates import DEFAULT_THRESHOLD, group_duplicates, summarise
 from .exif import extract_exif
+from .exporter import build_html, build_tall_image, rows_to_export, tall_image_bytes
 from .geocode import PROVIDERS as GEOCODING_PROVIDERS
 from .geocode import geocoding_enabled, reverse_geocode
 from .importer import ImportError_
@@ -90,6 +91,11 @@ _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 #: One year, in seconds: how long a content-addressed thumbnail is cacheable.
 _IMMUTABLE_IMAGE_MAX_AGE = 31536000
+
+#: Ceiling on one export. Every picture is embedded inline or stacked into one
+#: canvas, so the file grows with the selection and a thousand photos would build a
+#: document nobody can open. A keepsake is a day or a small album, not the library.
+MAX_EXPORT_PHOTOS = 300
 
 
 def _duplicate_payload(photo: dict[str, Any]) -> dict[str, Any]:
@@ -1573,6 +1579,102 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     @app.get("/api/folders")
     def api_folders():
         return jsonify({"folders": database.all_folders()})
+
+    @app.post("/api/export")
+    def api_export():
+        """Render a set of photos as a keepsake: one HTML file, or one tall image.
+
+        The download is streamed straight back rather than written to disk - a
+        keepsake is something you take away, not something the library has to
+        clean up after. ``ids`` is the selection; ``month``/``day`` asks for that
+        day's memories instead, so the 那年今日 sheet can export itself.
+
+        Both formats are self-contained: the HTML embeds every picture as a data
+        URI and the PNG is a single finished image, so either one still opens in
+        ten years with no server, no database and no folder of loose files.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        fmt = (data.get("format") or "html").strip().lower()
+        if fmt not in ("html", "png"):
+            return jsonify({"error": "不支持的导出格式"}), 400
+
+        ids = data.get("ids")
+        rows: list[dict[str, Any]] = []
+        if ids is not None:
+            if not isinstance(ids, list) or not ids:
+                return jsonify({"error": "请至少选择一张照片"}), 400
+            for raw in ids[:MAX_EXPORT_PHOTOS]:
+                try:
+                    pid = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                row = database.get_photo(pid)
+                if row and row.get("status") != "deleted":
+                    rows.append(row)
+        else:
+            folder = data.get("folder", "").strip() or None
+            today = datetime.now().astimezone()
+            try:
+                month = int(data.get("month", today.month))
+                day = int(data.get("day", today.day))
+            except (TypeError, ValueError):
+                return jsonify({"error": "month/day 参数不合法"}), 400
+            try:
+                date(2000, month, day)
+            except ValueError:
+                return jsonify({"error": "这个日期不存在"}), 400
+            window = data.get("window", cfg.memory_window_days)
+            try:
+                window = int(window)
+            except (TypeError, ValueError):
+                return jsonify({"error": "window 参数不合法"}), 400
+            rows = database.memories_on(
+                month, day, window=max(0, min(window, 30)), folder=folder
+            )
+
+        if not rows:
+            return jsonify({"error": "没有可以导出的照片"}), 400
+
+        title = (data.get("title") or "拾光回忆").strip()[:80]
+        subtitle = (data.get("subtitle") or "").strip()[:80]
+        photos = rows_to_export(rows)
+
+        stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M")
+        if fmt == "html":
+            document = build_html(
+                photos,
+                title=title,
+                subtitle=subtitle,
+                colophon="由拾光相册整理",
+            )
+            payload = document.encode("utf-8")
+            return Response(
+                payload,
+                # Not "text/html; charset=utf-8": Flask appends the charset to a
+                # text mimetype, and passing it too produced the doubled header.
+                mimetype="text/html",
+                headers={
+                    "Content-Disposition":
+                        f'attachment; filename="lumina-{stamp}.html"',
+                    "Content-Length": str(len(payload)),
+                },
+            )
+
+        image = build_tall_image(photos, title=title, subtitle=subtitle)
+        if image is None:
+            return jsonify({"error": "没有可以导出的照片"}), 400
+        try:
+            payload = tall_image_bytes(image)
+        finally:
+            image.close()
+        return Response(
+            payload,
+            mimetype="image/png",
+            headers={
+                "Content-Disposition": f'attachment; filename="lumina-{stamp}.png"',
+                "Content-Length": str(len(payload)),
+            },
+        )
 
     @app.get("/api/memories")
     def api_memories():

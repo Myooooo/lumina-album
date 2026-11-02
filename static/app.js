@@ -4788,6 +4788,17 @@ function init() {
   $("deleteSelectedBtn").addEventListener("click", () => deletePhotos([...state.selected]));
   $("restoreSelectedBtn").addEventListener("click", () => restorePhotos([...state.selected]));
   $("reanalyzeSelectedBtn").addEventListener("click", () => reanalyzeSelected([...state.selected]));
+  const exportSelectedBtn = $("exportSelectedBtn");
+  if (exportSelectedBtn) {
+    exportSelectedBtn.addEventListener("click", () => {
+      const ids = [...state.selected];
+      if (!ids.length) return;
+      openExportDialog({
+        ids,
+        subtitle: `${ids.length} 张`,
+      });
+    });
+  }
   $("permanentDeleteSelectedBtn").addEventListener("click", () => permanentDeletePhotos([...state.selected]));
   $("clearSelectionBtn").addEventListener("click", () => {
     state.selected.clear();
@@ -5016,6 +5027,7 @@ function init() {
   });
   initBackToTop();
   initMemories();
+  initExport();
   initDuplicates();
 }
 
@@ -5205,10 +5217,108 @@ function renderMemories(data) {
   body.innerHTML = data.years.map(memoryYearHtml).join("");
 }
 
+/**
+ * Ask which format to export in, then hand off to `exportKeepsake`.
+ *
+ * A dialog rather than a dropdown: there are exactly two answers, they lead to
+ * visibly different files, and each one deserves a sentence explaining when to
+ * pick it. `options` carries whatever the server needs to rebuild the same set -
+ * a list of ids, or a date and window.
+ */
+function openExportDialog(options) {
+  state.exportRequest = options;
+  const lede = $("exportLede");
+  if (lede) {
+    lede.textContent = options.subtitle
+      ? `把这次的 ${options.subtitle}收进一份可以带走的回忆里。`
+      : "把这次选中的照片收进一份可以带走的回忆里。";
+  }
+  showModal($("exportModal"));
+}
+
+function initExport() {
+  const htmlBtn = $("exportHtmlBtn");
+  const pngBtn = $("exportPngBtn");
+  const run = (format, button) => {
+    const request = state.exportRequest;
+    if (!request) return;
+    closeModal("exportModal");
+    exportKeepsake({
+      format,
+      button: null,
+      payload: {
+        ...request,
+        format,
+        title: request.title || "拾光回忆",
+      },
+    });
+  };
+  if (htmlBtn) htmlBtn.addEventListener("click", () => run("html", htmlBtn));
+  if (pngBtn) pngBtn.addEventListener("click", () => run("png", pngBtn));
+}
+
+/**
+ * Download a keepsake of the given photos.
+ *
+ * The response is a file, not JSON, so this goes through `fetch` directly rather
+ * than `api()`: it has to be read as a blob and handed to a temporary anchor. The
+ * filename comes from `Content-Disposition` so the server stays the one place that
+ * decides how an export is named.
+ */
+async function exportKeepsake(options) {
+  const button = options.button;
+  const label = options.format === "png" ? "长图" : "网页";
+  if (button) {
+    button.disabled = true;
+    button.classList.add("loading");
+  }
+  showToast(`正在整理${label}…`, "info");
+  try {
+    const resp = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options.payload),
+    });
+    if (!resp.ok) {
+      let detail = "";
+      try {
+        detail = (await resp.json()).error || "";
+      } catch (e) {
+        detail = resp.statusText;
+      }
+      throw new Error(detail || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const disposition = resp.headers.get("Content-Disposition") || "";
+    const match = /filename="([^"]+)"/.exec(disposition);
+    const filename = match ? match[1] : `lumina.${options.format === "png" ? "png" : "html"}`;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    // Revoking immediately cancels the download in some browsers; one tick is
+    // enough for the click to have been handled.
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showToast(`${label}已保存：${filename}`, "success");
+  } catch (e) {
+    showToast(`导出失败：${e.message}`, "error");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("loading");
+    }
+  }
+}
+
 async function openMemories() {
   showModal($("memoriesModal"));
   const body = $("memoriesBody");
   const lede = $("memoriesLede");
+  const actions = $("memoriesActions");
+  if (actions) actions.hidden = true;
   if (body) body.innerHTML = '<div class="memories-empty">正在翻找旧时光…</div>';
   try {
     const params = new URLSearchParams();
@@ -5220,6 +5330,17 @@ async function openMemories() {
         : "今天这个日子，过去还没有留下回忆。";
     }
     renderMemories(data);
+    if (actions) actions.hidden = !data.total;
+    // Remembered so the export buttons can reproduce exactly this view.
+    state.memoriesQuery = data.total
+      ? {
+          month: data.month,
+          day: data.day,
+          window: data.window,
+          folder: state.folder || undefined,
+          subtitle: `${data.month} 月 ${data.day} 日`,
+        }
+      : null;
   } catch (e) {
     if (body) {
       body.innerHTML = `<div class="memories-empty">翻找失败：${escapeHtml(e.message)}</div>`;
@@ -5242,6 +5363,18 @@ function initMemories() {
       const id = Number(card.dataset.id);
       if (!Number.isFinite(id)) return;
       openPreview(id);
+    });
+  }
+
+  const exportHtmlBtn = $("memoriesExportHtmlBtn");
+  if (exportHtmlBtn) {
+    exportHtmlBtn.addEventListener("click", () => {
+      if (!state.memoriesQuery) return;
+      openExportDialog({
+        ...state.memoriesQuery,
+        title: "那年今日",
+        subtitle: `${state.memoriesQuery.month} 月 ${state.memoriesQuery.day} 日的回忆`,
+      });
     });
   }
 }

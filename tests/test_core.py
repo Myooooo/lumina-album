@@ -5943,6 +5943,223 @@ class MemoriesTests(unittest.TestCase):
         self.assertLessEqual(body["window"], 30)
 
 
+class ExporterTests(unittest.TestCase):
+    """Both keepsake formats.
+
+    The point of an export is that it still opens in ten years, so the tests care
+    about self-containment (no external URLs left in the HTML), about the missing-
+    file path (a photo that moved must not leave a broken-image glyph in a
+    keepsake), and about the tall image being a real stacked picture rather than a
+    blank canvas.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = []
+        for index, colour in enumerate([(200, 120, 90), (90, 140, 200)]):
+            path = os.path.join(self.tmp.name, f"p{index}.jpg")
+            Image.new("RGB", (400, 300), colour).save(path, "JPEG")
+            self.paths.append(path)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _photos(self):
+        from photo_reviewer.exporter import ExportPhoto
+
+        return [
+            ExportPhoto(
+                filename=os.path.basename(path),
+                path=path,
+                thumbnail_path=path,
+                caption="黄昏把窗台染成了蜜色。",
+                title="窗边的黄昏",
+                tags=["黄昏", "安静"],
+                score=8.5,
+                captured="2024-10-02",
+            )
+            for path in self.paths
+        ]
+
+    def test_html_embeds_every_picture(self) -> None:
+        from photo_reviewer.exporter import build_html
+
+        document = build_html(self._photos(), title="那年今日", subtitle="10 月 2 日")
+        self.assertEqual(document.count("data:image/jpeg;base64,"), 2)
+        self.assertIn("那年今日", document)
+        self.assertIn("窗边的黄昏", document)
+        self.assertIn("黄昏把窗台染成了蜜色。", document)
+
+    def test_html_has_no_external_references(self) -> None:
+        """A keepsake must not depend on the app still running."""
+        from photo_reviewer.exporter import build_html
+
+        document = build_html(self._photos())
+        self.assertNotIn("http://", document)
+        self.assertNotIn("https://", document)
+        # Only the data URIs may carry a src.
+        for fragment in document.split('src="')[1:]:
+            self.assertTrue(fragment.startswith("data:"), fragment[:40])
+
+    def test_a_missing_file_is_reported_not_left_broken(self) -> None:
+        from photo_reviewer.exporter import ExportPhoto, build_html
+
+        photos = [
+            ExportPhoto(
+                filename="gone.jpg",
+                path=os.path.join(self.tmp.name, "does-not-exist.jpg"),
+            )
+        ]
+        document = build_html(photos)
+        self.assertNotIn("data:image", document)
+        self.assertIn("已经不在原处", document)
+
+    def test_the_tall_image_is_a_real_stack(self) -> None:
+        from photo_reviewer.exporter import build_tall_image
+
+        image = build_tall_image(self._photos(), title="那年今日")
+        self.assertIsNotNone(image)
+        try:
+            width, height = image.size
+            self.assertEqual(width, 1080)
+            # Two photos plus captions: tall, and not a single-photo canvas.
+            self.assertGreater(height, 800)
+        finally:
+            image.close()
+
+    def test_an_empty_export_is_none(self) -> None:
+        from photo_reviewer.exporter import build_tall_image
+
+        self.assertIsNone(build_tall_image([]))
+
+    def test_the_png_bytes_start_with_a_png_signature(self) -> None:
+        from photo_reviewer.exporter import build_tall_image, tall_image_bytes
+
+        image = build_tall_image(self._photos())
+        try:
+            data = tall_image_bytes(image)
+        finally:
+            image.close()
+        self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"))
+
+    def test_rows_are_flattened_from_json_columns(self) -> None:
+        """Database rows carry EXIF and tags as JSON text, not decoded objects."""
+        from photo_reviewer.exporter import rows_to_export
+
+        rows = [
+            {
+                "filename": "a.jpg",
+                "path": self.paths[0],
+                "thumb_path": self.paths[0],
+                "reason": "一句话",
+                "title": "标题",
+                "tags": '["海边", "落日"]',
+                "score": 9.1,
+                "exif": '{"datetime_original": "2023:10:02 08:00:00"}',
+            }
+        ]
+        photos = rows_to_export(rows)
+        self.assertEqual(len(photos), 1)
+        self.assertEqual(photos[0].tags, ["海边", "落日"])
+        self.assertEqual(photos[0].captured, "2023-10-02")
+        self.assertEqual(photos[0].score, 9.1)
+
+    def test_a_corrupt_json_column_does_not_raise(self) -> None:
+        from photo_reviewer.exporter import rows_to_export
+
+        photos = rows_to_export(
+            [{"filename": "a.jpg", "path": self.paths[0], "tags": "not json", "exif": "{"}]
+        )
+        self.assertEqual(photos[0].tags, [])
+        self.assertEqual(photos[0].captured, "")
+
+
+class ExportApiTests(unittest.TestCase):
+    """/api/export: the download itself."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(self.folder, exist_ok=True)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+        self.ids = []
+        for index in range(2):
+            path = os.path.join(self.folder, f"e{index}.jpg")
+            Image.new("RGB", (200, 150), (120, 90, 60)).save(path, "JPEG")
+            self.db.upsert_photo(
+                {
+                    "path": path,
+                    "folder": self.folder,
+                    "filename": f"e{index}.jpg",
+                    "status": "analyzed",
+                    "reason": "一句话的记忆。",
+                    "exif": {"datetime_original": "2022:10:02 08:00:00"},
+                }
+            )
+            self.ids.append(self.db.get_photo_by_path(path)["id"])
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_html_download(self) -> None:
+        resp = self.client.post(
+            "/api/export", json={"ids": self.ids, "format": "html", "title": "拾光回忆"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
+        body = resp.data.decode("utf-8")
+        self.assertEqual(body.count("data:image/jpeg"), 2)
+
+    def test_png_download(self) -> None:
+        resp = self.client.post(
+            "/api/export", json={"ids": self.ids, "format": "png"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.mimetype, "image/png")
+        self.assertTrue(resp.data.startswith(b"\x89PNG"))
+
+    def test_the_html_content_type_is_not_doubled(self) -> None:
+        """Flask appends the charset itself; passing it too produced
+        "text/html; charset=utf-8; charset=utf-8"."""
+        resp = self.client.post("/api/export", json={"ids": self.ids, "format": "html"})
+        self.assertEqual(resp.headers.get("Content-Type").count("charset"), 1)
+
+    def test_exporting_by_date_matches_the_memories_view(self) -> None:
+        resp = self.client.post(
+            "/api/export", json={"month": 10, "day": 2, "window": 0, "format": "html"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("data:image/jpeg", resp.data.decode("utf-8"))
+
+    def test_an_unknown_format_is_rejected(self) -> None:
+        self.assertEqual(
+            self.client.post(
+                "/api/export", json={"ids": self.ids, "format": "pdf"}
+            ).status_code,
+            400,
+        )
+
+    def test_an_empty_selection_is_rejected(self) -> None:
+        self.assertEqual(
+            self.client.post("/api/export", json={"ids": [], "format": "html"}).status_code,
+            400,
+        )
+
+    def test_an_impossible_date_is_rejected(self) -> None:
+        self.assertEqual(
+            self.client.post(
+                "/api/export", json={"month": 2, "day": 31, "format": "html"}
+            ).status_code,
+            400,
+        )
+
+
 class BytesReaderTests(unittest.TestCase):
     """The buffer wrapper Pillow reads raw previews through.
 

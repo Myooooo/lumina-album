@@ -169,6 +169,7 @@
     <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
     <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
     <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
+    <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
     <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
     <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
     <button id="clearSelectionBtn" class="btn" title="取消选择"><span class="btn-icon" data-icon="close"></span>取消</button>
@@ -238,12 +239,46 @@
     </div>
   </div>
 
+  <!-- Export: pick a format, then the file downloads. Two big choices rather than
+       a dropdown, because there are exactly two and they answer different needs. -->
+  <div id="exportModal" class="modal hidden">
+    <div class="modal-content export-content">
+      <button class="modal-close" data-close="exportModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="file"></span>导出回忆</h2>
+      <p class="export-lede" id="exportLede">把这次选中的照片收进一份可以带走的回忆里。</p>
+      <div class="export-choices">
+        <button id="exportHtmlBtn" class="export-choice" type="button">
+          <span class="export-choice-icon" data-icon="file"></span>
+          <span class="export-choice-body">
+            <span class="export-choice-title">存成网页</span>
+            <span class="export-choice-hint">单个 HTML 文件，图片全部打包在里面。适合长期保存、打印，也能直接发给朋友。</span>
+          </span>
+        </button>
+        <button id="exportPngBtn" class="export-choice" type="button">
+          <span class="export-choice-icon" data-icon="image"></span>
+          <span class="export-choice-body">
+            <span class="export-choice-title">存成长图</span>
+            <span class="export-choice-hint">一张竖版长图，适合直接发到社交平台，不用对方打开任何文件。</span>
+          </span>
+        </button>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" data-close="exportModal">先不导出</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 那年今日：photos taken on this day in earlier years, grouped by year. -->
   <div id="memoriesModal" class="modal hidden">
     <div class="modal-content memories-content">
       <button class="modal-close" data-close="memoriesModal"><span class="btn-icon" data-icon="close"></span></button>
       <h2><span class="modal-title-icon" data-icon="sun"></span>那年今日</h2>
       <p class="memories-lede" id="memoriesLede">正在翻找旧时光…</p>
+      <div class="memories-actions" id="memoriesActions" hidden>
+        <button id="memoriesExportHtmlBtn" class="btn small" type="button">
+          <span class="btn-icon" data-icon="file"></span>导出这份回忆
+        </button>
+      </div>
       <div id="memoriesBody" class="memories-body">
         <div class="memories-empty">正在翻找旧时光…</div>
       </div>
