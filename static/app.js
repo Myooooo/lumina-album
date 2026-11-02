@@ -1478,10 +1478,11 @@ function isAtPageBottom() {
  *   reader to the bottom is consumed by that scroll, so it must not immediately
  *   fetch another page (that is the difference between "I reached the end" and
  *   "I want more").
- * - One fetch per visit to the bottom. `armed` goes false the moment a pull is
- *   requested and only comes back once the page has actually left the bottom, so
- *   a momentum scroll or a thumb resting on the trackpad cannot queue several
- *   pages at once.
+ * - One fetch per visit to the bottom. The guard is the page height recorded once
+ *   the previous fetch had settled: a completed fetch makes the page taller, and a
+ *   pull only counts when the page is taller than that record. A momentum scroll or
+ *   a thumb resting on the trackpad therefore cannot queue several pages, because
+ *   the height does not change between them.
  */
 function initEndlessGallery() {
   const stateful = {
@@ -1510,13 +1511,19 @@ function initEndlessGallery() {
     if (state.loadingMore || !state.hasMore || stateful.settling) return;
     stateful.pull = 0;
     stateful.settling = true;
+    const before = pageHeight();
     Promise.resolve(loadMorePhotos()).finally(() => {
       // Let the new cards lay out before measuring; 240 ms is enough for the
       // browser to settle the grid and short enough that a reader still at the
       // bottom cannot start a second pull in the meantime (the threshold gesture
       // is longer than that).
       setTimeout(() => {
-        stateful.firedAtHeight = pageHeight();
+        const after = pageHeight();
+        // Only a fetch that actually added cards may move the baseline. A failed
+        // one leaves the page the same height, and recording that would make
+        // `pageHeight() <= firedAtHeight` true for ever - the gesture would be
+        // dead until a reload, with nothing on screen to explain why.
+        if (after > before) stateful.firedAtHeight = after;
         stateful.settling = false;
       }, 240);
     });

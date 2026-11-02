@@ -786,8 +786,16 @@ check("the gesture is wired up once", (src.match(/initEndlessGallery\(\)/g) || [
        out then, so the captured height was an intermediate one. */
 check(
   "a fetch records the settled page height",
-  /firedAtHeight = pageHeight\(\)/.test(src) &&
-    /setTimeout\(\(\) => \{[\s\S]{0,120}firedAtHeight/.test(src),
+  /firedAtHeight = after/.test(src) &&
+    /setTimeout\(\(\) => \{[\s\S]{0,400}firedAtHeight/.test(src),
+  true
+);
+check(
+  "only a fetch that added cards moves the baseline",
+  // Recording the height after a *failed* load would set the baseline equal to
+  // the current height, and `pageHeight() <= firedAtHeight` would then be true for
+  // ever - the gesture dead until a reload, with nothing on screen explaining it.
+  /if \(after > before\) stateful\.firedAtHeight = after;/.test(src),
   true
 );
 check(
