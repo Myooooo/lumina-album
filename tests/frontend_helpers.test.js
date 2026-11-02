@@ -1081,6 +1081,97 @@ check(
   check("clearing everything empties the set", chosen.size, 0);
 }
 
+/* ------------------------------------------------------------ modal behaviour
+   Two gaps surfaced once four new sheets existed, both of them older than the new
+   code:
+
+   - Escape only ever closed the fullscreen viewer and the photo preview, because
+     those were the only dialogs when that handler was written. Everything else
+     needed a click on the × button.
+   - `showModal` does not close anything, so clicking three toolbar buttons left
+     three sheets stacked on the page.
+
+   "Topmost" has to follow the order dialogs were *opened*, not document order:
+   the folder browser is opened over the import sheet while sitting before it in
+   the markup. */
+section("dialogs (Escape and stacking)");
+
+check(
+  "an open-order stack exists",
+  /modalStack: \[\]/.test(src),
+  true
+);
+check(
+  "opening a dialog records it",
+  /function pushModal\(el\)/.test(src) && /state\.modalStack\.push\(el\.id\)/.test(src),
+  true
+);
+check(
+  "closing a dialog removes it however it was dismissed",
+  /state\.modalStack\.lastIndexOf\(id\)/.test(src),
+  true
+);
+check(
+  "Escape closes the most recently opened dialog",
+  /state\.modalStack\[state\.modalStack\.length - 1\]/.test(src),
+  true
+);
+check(
+  "Escape still defers to the preview and the viewer",
+  /if \(preview && !preview\.classList\.contains\("hidden"\)\) return;/.test(src) &&
+    /if \(fullscreen && !fullscreen\.classList\.contains\("hidden"\)\) return;/.test(src),
+  true
+);
+check(
+  "Escape leaves the confirm dialog to its own promise",
+  /if \(confirm && !confirm\.classList\.contains\("hidden"\)\) return;/.test(src),
+  true
+);
+check(
+  "a top-level sheet dismisses the others",
+  /function showSheet\(el\)/.test(src) &&
+    /if \(modal\.id === "confirmModal"\) continue;/.test(src),
+  true
+);
+check(
+  "the three new sheets go through showSheet",
+  ['footprints', 'memories', 'duplicates'].every((name) =>
+    new RegExp(`showSheet\\(\\$\\("${name}Modal"\\)\\)`).test(src)
+  ),
+  true
+);
+check(
+  "the nested pair keeps using showModal directly",
+  // The folder browser opens over the import sheet and must return to it, so it
+  // must not go through the mutual-exclusion path.
+  /showModal\(\$\("dirModal"\)\);\s*\n\s*pushModal\(\$\("dirModal"\)\);/.test(src),
+  true
+);
+
+{
+  // Exercise the stack itself: push, dedupe, remove, and the topmost lookup.
+  const stack = [];
+  const push = (id) => {
+    const at = stack.lastIndexOf(id);
+    if (at !== -1) stack.splice(at, 1);
+    stack.push(id);
+  };
+  const remove = (id) => {
+    const at = stack.lastIndexOf(id);
+    if (at !== -1) stack.splice(at, 1);
+  };
+
+  push("importModal");
+  push("dirModal");
+  check("the browser is on top of the import sheet", stack[stack.length - 1], "dirModal");
+  remove("dirModal");
+  check("closing it reveals the sheet underneath", stack[stack.length - 1], "importModal");
+  push("importModal");
+  check("re-opening does not duplicate the entry", stack.length, 1);
+  remove("importModal");
+  check("an empty stack means nothing to close", stack.length, 0);
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`

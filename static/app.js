@@ -16,6 +16,11 @@ const state = {
   previewNavToken: 0,
   pollingTimer: null,
   pollTick: 0,
+  //: Ids of the dialogs currently open, oldest first. Escape closes the last one,
+  //: which is the one on top - and "on top" has to follow the order they were
+  //: opened, not document order, because the folder browser is opened over the
+  //: import sheet while sitting *before* it in the markup.
+  modalStack: [],
   //: Speed estimate for the running job (see updateEta).
   eta: null,
   //: ``id -> photo`` for the rows currently in ``state.photos``. Rebuilding this
@@ -2744,6 +2749,7 @@ function openFullscreenViewer() {
       // own controls and the two would fight over the same wheel gestures.
       if (toolbar) toolbar.classList.add("hidden");
       showModal(fsModal);
+      pushModal(fsModal);
       attachFullscreenVideoFallback(fsVideo, photo);
       return;
     }
@@ -2757,6 +2763,7 @@ function openFullscreenViewer() {
   fsImg.src = `/api/original/${photo.id}`;
   applyFsTransform();
   showModal(fsModal);
+  pushModal(fsModal);
 }
 
 /**
@@ -2869,6 +2876,7 @@ function openPreview(id) {
   state.previewNavToken += 1;
   state.currentPreviewId = id;
   showModal($("previewModal"));
+  pushModal($("previewModal"));
   updatePreview();
 }
 
@@ -3354,6 +3362,11 @@ function hideLiveButton() {
  */
 function closeModal(id, onHidden) {
   hideModal($(id), onHidden);
+  // Keep the open-order stack honest however the dialog was dismissed - the ×
+  // button, Escape, a backdrop click or a code path like "cancelling the folder
+  // browser returns to the import sheet".
+  const at = state.modalStack.lastIndexOf(id);
+  if (at !== -1) state.modalStack.splice(at, 1);
   if (id === "previewModal") {
     // A looping preview would otherwise keep decoding (and playing) behind a
     // closed dialog until something else happened to stop it.
@@ -3777,6 +3790,7 @@ async function openSettings() {
     // Always open on the model tab: that is what most visits are for.
     showSettingsTab("model");
     showModal($("settingsModal"));
+    pushModal($("settingsModal"));
     // The tab widths are only measurable once the dialog is on screen.
     requestAnimationFrame(moveSettingsTabInk);
   } catch (e) {
@@ -3967,6 +3981,7 @@ function openEditPreview() {
   $("editTags").value = (photo.tags || []).join("，");
   $("editReason").value = photo.reason || "";
   showModal($("editModal"));
+  pushModal($("editModal"));
 }
 
 async function saveEditedPhoto() {
@@ -4098,6 +4113,7 @@ function handlePromptPresetClick(name) {
 async function openDirBrowser() {
   const path = state.folder || "";
   showModal($("dirModal"));
+  pushModal($("dirModal"));
   await loadDirList(path || "");
 }
 
@@ -4307,6 +4323,7 @@ async function openImportDialog() {
   await prefillImportSource();
   setImportPreview("");
   showModal($("importModal"));
+  pushModal($("importModal"));
   // Opening the dialog is the moment the card is expected to be in the reader,
   // so any deletion queued while it was away is offered right here.
   const source = $("importSource").value.trim();
@@ -4580,6 +4597,7 @@ async function openCardSyncDialog(options = {}) {
   $("cardSyncRunBtn").disabled = !preview.ready || !preview.summary.total;
   $("cardSyncRunBtn").title = preview.ready ? "" : "SD 卡当前不可用";
   showModal($("cardSyncModal"));
+  pushModal($("cardSyncModal"));
 }
 
 async function reloadCardPreview() {
@@ -4921,6 +4939,7 @@ function init() {
       rememberImportSource(state.currentDirPath);
       closeModal("dirModal");
       showModal($("importModal"));
+      pushModal($("importModal"));
       planImport({ silent: true });
       return;
     }
@@ -4968,10 +4987,38 @@ function init() {
         state.importPickPending = false;
         closeModal("dirModal");
         showModal($("importModal"));
+        pushModal($("importModal"));
         return;
       }
       closeModal(btn.dataset.close);
     });
+  });
+
+  // Escape closes the topmost dialog, whichever it is.
+  //
+  // The keyboard handler further down only knows about the fullscreen viewer and
+  // the photo preview, because those were the only two dialogs when it was
+  // written. Every other sheet - settings, import, the folder browser and the
+  // four newer ones - could only be dismissed by aiming at the × button, and two
+  // of them could be opened at once on top of each other.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    // The preview and the viewer handle their own Escape (arrow keys and all);
+    // this must not steal the key from them.
+    const fullscreen = $("fullscreenModal");
+    if (fullscreen && !fullscreen.classList.contains("hidden")) return;
+    const preview = $("previewModal");
+    if (preview && !preview.classList.contains("hidden")) return;
+    const confirm = $("confirmModal");
+    if (confirm && !confirm.classList.contains("hidden")) return;
+
+    // Topmost means "most recently opened", not "last in the document": the
+    // folder browser is opened over the import sheet while sitting *before* it in
+    // the markup, so picking by DOM order closed the wrong one.
+    const topmost = state.modalStack[state.modalStack.length - 1];
+    if (!topmost) return;
+    e.preventDefault();
+    closeModal(topmost);
   });
   document.querySelectorAll(".modal").forEach((modal) => {
     // The confirm dialog handles its own backdrop: it is a promise, and hiding
@@ -4984,6 +5031,7 @@ function init() {
         state.importPickPending = false;
         closeModal("dirModal");
         showModal($("importModal"));
+        pushModal($("importModal"));
         return;
       }
       closeModal(modal.id);
@@ -5242,7 +5290,7 @@ function renderFootprints(data) {
 }
 
 async function openFootprints() {
-  showModal($("footprintsModal"));
+  showSheet($("footprintsModal"));
   const body = $("footprintsBody");
   const lede = $("footprintsLede");
   if (body) body.innerHTML = '<div class="footprints-empty">正在整理走过的地方…</div>';
@@ -5350,7 +5398,7 @@ function openExportDialog(options) {
       ? `把这次的 ${options.subtitle}收进一份可以带走的回忆里。`
       : "把这次选中的照片收进一份可以带走的回忆里。";
   }
-  showModal($("exportModal"));
+  showSheet($("exportModal"));
 }
 
 function initExport() {
@@ -5431,7 +5479,7 @@ async function exportKeepsake(options) {
 }
 
 async function openMemories() {
-  showModal($("memoriesModal"));
+  showSheet($("memoriesModal"));
   const body = $("memoriesBody");
   const lede = $("memoriesLede");
   const actions = $("memoriesActions");
@@ -5673,8 +5721,52 @@ function clearChosen(groupIndex) {
   for (const photo of group.photos) dupState.chosen.delete(photo.id);
 }
 
+/**
+ * Open one of the top-level sheets, dismissing any other that is already open.
+ *
+ * The toolbar buttons are mutually exclusive in the reader's mind - "重复照片"
+ * and "那年今日" are two answers to "what do I do next", not two windows to stack -
+ * and since `showModal` does not close anything, clicking three of them left three
+ * sheets on top of each other with the photo grid unreachable behind them.
+ *
+ * Deliberately not applied to the nested pairs: the folder browser opens *over*
+ * the import sheet and must return to it, so those keep using `showModal`
+ * directly.
+ */
+function showSheet(el) {
+  if (!el) return;
+  for (const modal of document.querySelectorAll(".modal")) {
+    if (modal === el) continue;
+    if (modal.classList.contains("hidden")) continue;
+    // The confirm dialog is a promise with its own cleanup; closing it from here
+    // would settle that promise in a way its caller does not expect.
+    if (modal.id === "confirmModal") continue;
+    hideModal(modal);
+    const at = state.modalStack.lastIndexOf(modal.id);
+    if (at !== -1) state.modalStack.splice(at, 1);
+  }
+  showModal(el);
+  pushModal(el);
+}
+
+/**
+ * Record a dialog as open, for the Escape handler to unwind in the right order.
+ *
+ * ``showModal`` lives in ui-kit.js and knows nothing about this stack, so the
+ * bookkeeping is done by the two helpers every caller already goes through:
+ * `showSheet` for the top-level sheets and `pushModal` for the dialogs that are
+ * opened directly (the settings sheet, the import sheet, the folder browser, the
+ * photo preview).
+ */
+function pushModal(el) {
+  if (!el || !el.id) return;
+  const at = state.modalStack.lastIndexOf(el.id);
+  if (at !== -1) state.modalStack.splice(at, 1);
+  state.modalStack.push(el.id);
+}
+
 function openDuplicates() {
-  showModal($("duplicatesModal"));
+  showSheet($("duplicatesModal"));
   const slider = $("dupThreshold");
   if (slider) {
     slider.value = String(dupState.threshold);
