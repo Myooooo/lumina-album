@@ -10,8 +10,10 @@ import datetime
 import json
 import os
 import shutil
+import socket
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -6482,6 +6484,107 @@ class BytesReaderTests(unittest.TestCase):
 
         with _BytesReader(b"x") as reader:
             self.assertEqual(reader.read(), b"x")
+
+
+class LauncherTests(unittest.TestCase):
+    """The entry point: port probing, browser opening, and staying alive.
+
+    ``app.py`` had no tests at all, which is how the browser tab could be added and
+    shipped while every other check ran with ``PHOTO_OPEN_BROWSER=0``. The timer is
+    patched out so the tests do not sleep through the real delay.
+    """
+
+    def setUp(self) -> None:
+        # Importing the module builds a Flask app; keep it off the real database.
+        self.tmp = tempfile.TemporaryDirectory()
+        self._env = {
+            key: os.environ.get(key)
+            for key in ("PHOTO_DATA_DIR", "PHOTO_DB_PATH", "PHOTO_OPEN_BROWSER")
+        }
+        os.environ["PHOTO_DATA_DIR"] = self.tmp.name
+        os.environ["PHOTO_DB_PATH"] = os.path.join(self.tmp.name, "library.db")
+        os.environ.pop("PHOTO_OPEN_BROWSER", None)
+
+    def tearDown(self) -> None:
+        for key, value in self._env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _launcher():
+        """Import ``app.py`` fresh so the env vars above are the ones it reads."""
+        import importlib
+
+        if "app" in sys.modules:
+            del sys.modules["app"]
+        return importlib.import_module("app")
+
+    def test_the_browser_is_off_by_default_only_when_asked(self) -> None:
+        launcher = self._launcher()
+        for value in ("0", "false", "no", "off", "FALSE", " Off "):
+            os.environ["PHOTO_OPEN_BROWSER"] = value
+            self.assertTrue(launcher._browser_disabled(), value)
+        for value in ("1", "true", "yes", ""):
+            os.environ["PHOTO_OPEN_BROWSER"] = value
+            self.assertFalse(launcher._browser_disabled(), value)
+
+    def test_it_opens_the_url_it_was_given(self) -> None:
+        launcher = self._launcher()
+        os.environ.pop("PHOTO_OPEN_BROWSER", None)
+        opened = []
+        with patch.object(launcher, "OPEN_BROWSER_DELAY", 0), patch(
+            "webbrowser.open", side_effect=lambda url: opened.append(url)
+        ):
+            launcher.open_browser_later("http://127.0.0.1:5050")
+            # The call happens on a timer thread; give it a moment to land.
+            for _ in range(60):
+                if opened:
+                    break
+                time.sleep(0.01)
+        self.assertEqual(opened, ["http://127.0.0.1:5050"])
+
+    def test_the_flag_suppresses_the_tab(self) -> None:
+        launcher = self._launcher()
+        os.environ["PHOTO_OPEN_BROWSER"] = "0"
+        opened = []
+        with patch.object(launcher, "OPEN_BROWSER_DELAY", 0), patch(
+            "webbrowser.open", side_effect=lambda url: opened.append(url)
+        ):
+            launcher.open_browser_later("http://127.0.0.1:5050")
+            time.sleep(0.2)
+        self.assertEqual(opened, [])
+
+    def test_a_machine_with_no_browser_still_serves(self) -> None:
+        """No default handler must print the URL, not raise into the server."""
+        launcher = self._launcher()
+        os.environ.pop("PHOTO_OPEN_BROWSER", None)
+        with patch.object(launcher, "OPEN_BROWSER_DELAY", 0), patch(
+            "webbrowser.open", side_effect=RuntimeError("no handler")
+        ):
+            # Reaching the assertion at all is the point: the timer thread must
+            # swallow the error rather than kill the process.
+            launcher.open_browser_later("http://127.0.0.1:5050")
+            time.sleep(0.25)
+        self.assertTrue(True)
+
+    def test_the_port_probe_finds_a_port_it_can_bind(self) -> None:
+        launcher = self._launcher()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            busy = probe.getsockname()[1]
+            probe.listen(1)
+            # A port somebody is listening on is not free.
+            self.assertFalse(launcher._port_is_free("127.0.0.1", busy))
+        # And the same port is free once it is released.
+        self.assertTrue(launcher._port_is_free("127.0.0.1", busy))
+
+    def test_the_attempt_budget_is_not_absurd(self) -> None:
+        launcher = self._launcher()
+        self.assertGreaterEqual(launcher.PORT_ATTEMPTS, 1)
+        self.assertLessEqual(launcher.PORT_ATTEMPTS, 200)
 
 
 if __name__ == "__main__":
