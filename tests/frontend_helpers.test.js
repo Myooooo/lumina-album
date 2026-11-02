@@ -629,6 +629,139 @@ check("is symmetric around the midpoint", (() => {
   return true;
 })(), true);
 
+/* ------------------------------------------------------------ Live Photo button
+   The replay control exists in the markup with `hidden` on it, so it never
+   flashes on a photo that turns out not to be a Live Photo. Showing it has to
+   lift that class - the original bug was a helper that only toggled the fade
+   (`is-hidden`) and left `hidden` in place forever, so the button could never
+   appear once the motion had finished. These pin the two classes apart. */
+section("Live Photo replay button");
+
+const LIVE_VIS = extract("setLiveButtonVisible");
+const LIVE_HIDE = extract("hideLiveButton");
+
+/** Run an extracted helper against a stub element that records its classes. */
+function runLiveHelper(source, fnName) {
+  const classes = new Set(["preview-live-btn", "hidden"]);
+  const btn = {
+    classList: {
+      add: (c) => classes.add(c),
+      remove: (c) => classes.delete(c),
+      contains: (c) => classes.has(c),
+      toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)),
+    },
+  };
+  const fn = new Function("$", `${source}; return ${fnName};`)(
+    (id) => (id === "previewLiveBtn" ? btn : null)
+  );
+  return { classes, call: fn };
+}
+
+{
+  const { classes, call } = runLiveHelper(LIVE_VIS, "setLiveButtonVisible");
+  call(true);
+  check("showing it lifts the hidden gate", classes.has("hidden"), false);
+  check("showing it clears the fade", classes.has("is-hidden"), false);
+}
+
+{
+  // The real sequence is "show it, then hide it for the motion": the gate has
+  // already been lifted by the show, so hiding must not put it back.
+  const { classes, call } = runLiveHelper(LIVE_VIS, "setLiveButtonVisible");
+  call(true);
+  call(false);
+  check("during playback it fades out", classes.has("is-hidden"), true);
+  check(
+    "during playback it stays laid out so it can fade back",
+    classes.has("hidden"),
+    false
+  );
+}
+
+{
+  const { classes, call } = runLiveHelper(LIVE_HIDE, "hideLiveButton");
+  call();
+  check("a still with no motion hides it outright", classes.has("hidden"), true);
+  check("and takes the fade too", classes.has("is-hidden"), true);
+}
+
+/* The button must land where a video's play/pause sits: same size, same corner. */
+{
+  const css = fs.readFileSync(
+    path.join(__dirname, "..", "static", "style.css"),
+    "utf8"
+  );
+  const shared =
+    /\.preview-sound-btn,\s*\.preview-video-pause,\s*\.preview-live-btn\s*\{([^}]*)\}/.exec(
+      css
+    );
+  check("the three round controls share one rule", Boolean(shared), true);
+  if (shared) {
+    check("shared width", /width:\s*38px/.test(shared[1]), true);
+    check("shared height", /height:\s*38px/.test(shared[1]), true);
+    check("shared bottom offset", /bottom:\s*12px/.test(shared[1]), true);
+  }
+  check(
+    "the live button shares the video control's corner",
+    /\.preview-video-pause,\s*\.preview-live-btn\s*\{[^}]*right:\s*12px/.test(css),
+    true
+  );
+}
+
+/* --------------------------------------------------- scroll anchor on "load more"
+   Pressing 展开更多回忆 appends cards. The first press is also what wakes card
+   culling up, and culling used to resize the cards it collapsed - which shoved
+   everything below them and made the page appear to jump backwards. The anchor
+   pair has to be a no-op when nothing moved, and equal-and-opposite when it did. */
+section("scroll anchor (展开更多回忆)");
+
+const ANCHOR_RESTORE = extract("restoreScrollAnchor");
+
+function restoreWith(card) {
+  const calls = [];
+  const fn = new Function(
+    "$",
+    "window",
+    `const state = {photos: [1]};
+     ${ANCHOR_RESTORE}
+     return restoreScrollAnchor;`
+  )(
+    (id) => (id === "gallery" ? { querySelector: () => card } : null),
+    { scrollBy: (opts) => calls.push(opts) }
+  );
+  return { calls, restore: fn };
+}
+
+{
+  const { calls, restore } = restoreWith({
+    getBoundingClientRect: () => ({ top: 40 }),
+  });
+  restore({ id: "7", top: 40 });
+  check("nothing moved, nothing scrolls", calls.length, 0);
+
+  restore({ id: "7", top: 10 });
+  check("a 30px drift is corrected by 30px", calls.length, 1);
+  check("in the right direction", calls[0].top, 30);
+  check("instantly, not smoothly", calls[0].behavior, "instant");
+}
+
+{
+  const { calls, restore } = restoreWith(null);
+  restore({ id: "gone", top: 10 });
+  check("a removed anchor is not chased", calls.length, 0);
+}
+
+check(
+  "loadMorePhotos holds the anchor rather than restoring once",
+  /holdScrollAnchor\(anchor\)/.test(src),
+  true
+);
+check(
+  "culling pins the measured height so it cannot resize a card",
+  /function cullCard\(/.test(src) && /containIntrinsicSize/.test(src),
+  true
+);
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`

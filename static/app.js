@@ -925,10 +925,82 @@ function applyQuietRefresh(nextPhotos) {
   }
 }
 
+/**
+ * Record what the reader is currently looking at, so a layout change can put it
+ * back under their eyes.
+ *
+ * Appending cards is safe for the content *below* the fold, but the grid is
+ * re-laid out as a whole: culling cards above the viewport, a card changing
+ * height, or the very first activation of `content-visibility` all move
+ * everything below them. `scrollTop` is preserved by the browser, so the page
+ * appears to jump backwards even though the scroll offset never changed.
+ *
+ * Anchoring on an element rather than on a pixel offset is what makes the
+ * correction exact: the delta measured from the same card is precisely how far
+ * the content moved.
+ */
+function captureScrollAnchor() {
+  const gallery = $("gallery");
+  if (!gallery || !gallery.children.length) return null;
+  const cards = gallery.children;
+  for (let i = 0; i < cards.length; i += 1) {
+    const rect = cards[i].getBoundingClientRect();
+    // The first card still showing: everything above it is off-screen, which is
+    // exactly the content whose height change displaces the view.
+    if (rect.bottom > 0) return { id: cards[i].dataset.id, top: rect.top };
+  }
+  return null;
+}
+
+function restoreScrollAnchor(anchor) {
+  if (!anchor) return;
+  const gallery = $("gallery");
+  if (!gallery) return;
+  const card = gallery.querySelector(`.polaroid-card[data-id="${anchor.id}"]`);
+  // The anchor itself may have been removed (a delete, a filter change), in
+  // which case there is nothing meaningful to restore to.
+  if (!card) return;
+  const delta = card.getBoundingClientRect().top - anchor.top;
+  // A sub-pixel difference is rounding noise, and scrolling for it would fight
+  // the browser's own anchoring.
+  if (Math.abs(delta) >= 1) {
+    window.scrollBy({ top: delta, left: 0, behavior: "instant" });
+  }
+}
+
+/**
+ * Hold the view still until the grid has stopped moving under it.
+ *
+ * Appending the first page past `CARD_CULL_MIN_CARDS` is what wakes culling up,
+ * and culling does not run at append time: it waits for the debounced sweep and
+ * the thumbnail observer's first delivery, which lands a few hundred ms later.
+ * `cullCard` pins each card's placeholder height so that step no longer moves
+ * anything, but the grid still settles its row heights over the following
+ * frames - so the correction is re-applied on a short schedule rather than once.
+ * Each pass measures where the anchor *actually* is and scrolls by the
+ * difference, which makes it a no-op once nothing is moving.
+ */
+const SCROLL_HOLD_PASSES = [0, 120, 260, 420, 620, 900];
+
+function holdScrollAnchor(anchor) {
+  if (!anchor) return;
+  for (const delay of SCROLL_HOLD_PASSES) {
+    if (delay === 0) {
+      restoreScrollAnchor(anchor);
+      continue;
+    }
+    setTimeout(() => restoreScrollAnchor(anchor), delay);
+  }
+}
+
 async function loadMorePhotos() {
   if (state.loadingMore || !state.hasMore) return;
   state.loadingMore = true;
   $("loadMoreBtn").classList.add("loading");
+  // Captured before the grid grows: the first append is also what wakes the
+  // culling up (it needs CARD_CULL_MIN_CARDS rows), and that can move content
+  // that is already on screen.
+  const anchor = captureScrollAnchor();
   try {
     const params = getFilterParams(state.offset);
     const data = await api(`/api/photos?${params.toString()}`);
@@ -938,6 +1010,7 @@ async function loadMorePhotos() {
     state.hasMore = !!data.has_more;
     renderGallery({ append: true, animate: true });
     updateLoadMoreButton();
+    holdScrollAnchor(anchor);
   } catch (e) {
     showToast("加载更多照片失败：" + e.message, "error");
   } finally {
@@ -1126,7 +1199,7 @@ function cardObserverInstance() {
         } else {
           if (shouldReleaseThumb(img)) releaseThumb(img);
           if (card && card.dataset.seen && state.photos.length >= CARD_CULL_MIN_CARDS) {
-            card.classList.add("is-culled");
+            cullCard(card, card.getBoundingClientRect().height);
           }
         }
       }
@@ -1189,10 +1262,18 @@ function sweepCardState() {
   const top = -CARD_MARGIN_PX;
   const bottom = viewport + CARD_MARGIN_PX;
 
+  // Culling the cards above the fold collapses them to contain-intrinsic-size,
+  // which shortens everything above the reader. Measuring the first visible card
+  // before and after keeps the view on the same photo instead of letting it
+  // appear to scroll backwards.
+  const anchor = captureScrollAnchor();
+
   const near = new Array(cards.length);
+  const heights = new Array(cards.length);
   for (let i = 0; i < cards.length; i += 1) {
     const rect = cards[i].getBoundingClientRect();
     near[i] = rect.bottom > top && rect.top < bottom;
+    heights[i] = rect.height;
   }
   for (let i = 0; i < cards.length; i += 1) {
     const card = cards[i];
@@ -1203,9 +1284,33 @@ function sweepCardState() {
       card.classList.remove("is-culled");
     } else if (enough && card.dataset.seen) {
       if (img && shouldReleaseThumb(img)) releaseThumb(img);
-      card.classList.add("is-culled");
+      cullCard(card, heights[i]);
     }
   }
+  restoreScrollAnchor(anchor);
+}
+
+/**
+ * Take a card out of the render tree without moving anything around it.
+ *
+ * `contain-intrinsic-size: auto 586px` in the stylesheet is a single guess for
+ * every card, but a polaroid's height depends on its photo's aspect ratio and how
+ * many lines its caption takes. Culling a column of cards therefore *changed
+ * their heights*, and since the placeholder only applies to cards the browser
+ * has not measured, the ones above the fold silently grew or shrank - pushing
+ * everything below them and making the page appear to jump backwards mid-scroll.
+ *
+ * Pinning the placeholder to the height the card actually has right now makes
+ * culling a pure rendering decision: no layout change, no shift, nothing for the
+ * scroll anchor to correct.
+ */
+function cullCard(card, height) {
+  if (height > 0) {
+    // Sub-pixel precision: rounding to whole pixels is what left a few px of
+    // drift per culled card, which adds up to ~18 px over a column of sixteen.
+    card.style.containIntrinsicSize = `auto ${height}px`;
+  }
+  card.classList.add("is-culled");
 }
 
 /** Start observing a card's image (called for every card that enters the DOM). */
@@ -2752,8 +2857,9 @@ function applyPreviewMedia(photo, options = {}) {
   stopPreviewVideo();
   if (soundBtn) soundBtn.classList.add("hidden");
   // Cleared through the same helper the playback path uses, so the button's
-  // state never depends on which code path ran last.
-  setLiveButtonVisible(false);
+  // state never depends on which code path ran last. Photos without a motion
+  // hide it outright; the one below is shown again by the `hasLive` branch.
+  hideLiveButton();
   $("previewImage").classList.toggle("hidden", false);
 
   if (isVideo) {
@@ -3044,13 +3150,37 @@ function playLiveMotion(photo, options = {}) {
 /**
  * Show or hide the Live Photo replay button, with the fade declared in CSS.
  *
- * ``is-hidden`` rather than the ``hidden`` utility class: the latter removes the
- * element from the layout on the spot, which is the opposite of a fade.
+ * Two classes are in play and they mean different things:
+ *
+ * - ``hidden`` is the layout gate. The button ships with it in index.html so it
+ *   never flashes on a photo that turns out not to be a Live Photo, and it used
+ *   to be cleared by nobody - which is why the button never appeared at all on
+ *   a motionless frame. Showing it has to lift this first; ``display: none``
+ *   beats any opacity the CSS would otherwise animate.
+ * - ``is-hidden`` is the fade. It is used while the motion plays, so the control
+ *   is out of the way but still in the layout, and it fades back in with the
+ *   still rather than blinking.
+ *
+ * Order matters: drop ``hidden`` before touching ``is-hidden`` so the element is
+ * laid out (and its transition armed) before the opacity is asked to change.
  */
 function setLiveButtonVisible(visible) {
   const btn = $("previewLiveBtn");
   if (!btn) return;
-  btn.classList.toggle("is-hidden", !visible);
+  if (visible) {
+    btn.classList.remove("hidden");
+    btn.classList.remove("is-hidden");
+    return;
+  }
+  btn.classList.add("is-hidden");
+}
+
+/** Put the button away entirely, for photos that have no motion at all. */
+function hideLiveButton() {
+  const btn = $("previewLiveBtn");
+  if (!btn) return;
+  btn.classList.add("is-hidden");
+  btn.classList.add("hidden");
 }
 
 

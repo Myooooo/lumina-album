@@ -790,10 +790,15 @@ select {
 
    None of this can be seen: the observer only culls cards several viewports
    away, so the card on screen keeps its tilt, its shadows, its tape, its hover
-   lift and its entrance animation exactly as before. `auto <height>` makes the
-   browser remember each card's real height once it has been rendered, so the
-   placeholder only applies to cards never seen - which keeps the scrollbar
-   length stable. */
+   lift and its entrance animation exactly as before.
+
+   `auto <height>` makes the browser remember each card's real height once it has
+   been rendered, so the placeholder only applies to cards never seen. JS also
+   pins the exact measured height on every card it culls (see `cullCard`): a
+   polaroid's height depends on its photo's aspect ratio, so a single number here
+   is wrong for most cards, and getting it wrong moves everything below the card
+   - which showed up as the page appearing to jump when the grid first grew past
+   the culling threshold. */
 .polaroid-card.is-culled {
   content-visibility: auto;
   contain-intrinsic-size: auto 586px;
@@ -1789,13 +1794,21 @@ select {
   to   { opacity: 1; }
 }
 
-/* Round controls floating on the frame. */
+/* Round controls floating on the frame. All three share one skin: the Live Photo
+   replay button sits exactly where a video's play/pause does, at the same size,
+   so switching between the two never moves the control under the pointer. */
 .preview-sound-btn,
-.preview-video-pause {
+.preview-video-pause,
+.preview-live-btn {
   position: absolute;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 7px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  bottom: 12px;
   border-radius: 99px;
   border: 1px solid rgba(247, 239, 228, 0.24);
   background: rgba(14, 12, 10, 0.58);
@@ -1811,28 +1824,21 @@ select {
 /* Sound on the left, play/pause on the right: the transport control belongs at
    the corner the eye reads last, and the speaker is the secondary one. */
 .preview-sound-btn {
-  bottom: 12px;
   left: 12px;
-  width: 38px;
-  height: 38px;
-  justify-content: center;
-  padding: 0;
 }
 
-.preview-video-pause {
-  bottom: 12px;
+.preview-video-pause,
+.preview-live-btn {
   right: 12px;
-  width: 38px;
-  height: 38px;
-  justify-content: center;
-  padding: 0;
 }
 
 .preview-sound-btn svg,
-.preview-video-pause svg { width: 17px; height: 17px; }
+.preview-video-pause svg,
+.preview-live-btn svg { width: 17px; height: 17px; }
 
 .preview-sound-btn:hover,
-.preview-video-pause:hover {
+.preview-video-pause:hover,
+.preview-live-btn:hover {
   background: rgba(24, 20, 16, 0.78);
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
@@ -1854,31 +1860,15 @@ select {
   cursor: default;
 }
 
-/* The replay button on the corner of the picture, where it has always been. */
+/* The replay button's skin and position come from the shared round-control rule
+   above, so it lines up with a video's play/pause. Only the fade lives here. */
 .preview-live-btn {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 38px;
-  height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border-radius: 99px;
-  border: 1px solid rgba(247, 239, 228, 0.35);
-  background: rgba(14, 12, 10, 0.5);
-  color: #f7efe4;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   /* Opacity is part of the transition because the button fades away while the
      Live Photo's motion plays, then fades back in with the still. */
   transition: transform var(--dur-ui) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out),
               opacity var(--dur-ui) var(--ease-out),
               visibility 0s linear 0s;
-  z-index: 4;
 }
 
 /* Hidden for the duration of the motion. `visibility` flips only after the fade
@@ -1892,11 +1882,6 @@ select {
   transition: transform var(--dur-ui) var(--ease-out),
               opacity var(--dur-ui) var(--ease-out),
               visibility 0s linear var(--dur-ui);
-}
-
-.preview-live-btn:hover {
-  background: rgba(24, 20, 16, 0.72);
-  transform: translateY(-2px);
 }
 
 /* A plain play mark, nudged right so the triangle looks centred in its circle -
