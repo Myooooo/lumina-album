@@ -773,21 +773,42 @@ section("endless gallery (下拉继续)");
 check("the bottom slack is small enough to be exact", /AT_BOTTOM_SLACK = 4/.test(src), true);
 check("there is a pull threshold", /PULL_THRESHOLD = 60/.test(src), true);
 check("the gesture is wired up once", (src.match(/initEndlessGallery\(\)/g) || []).length >= 2, true);
+
+/* One fetch per arrival is enforced by comparing the page height against the
+   height recorded once the last fetch had fully settled. Three earlier designs
+   were tried and all failed a real browser test:
+     - an `armed` flag cleared on fetch and set by a `scroll` listener: a
+       programmatic jump to the top and back emits no intermediate event, so the
+       flag stayed disarmed for the rest of the session;
+     - re-arming on a timer since the last fetch: it let a long momentum scroll
+       queue a second page;
+     - recording the height in the fetch's `finally`: the grid is still laying
+       out then, so the captured height was an intermediate one. */
 check(
-  "a fetch disarms until the reader leaves the bottom",
-  /stateful\.armed = false/.test(src) && /stateful\.armed = true/.test(src),
+  "a fetch records the settled page height",
+  /firedAtHeight = pageHeight\(\)/.test(src) &&
+    /setTimeout\(\(\) => \{[\s\S]{0,120}firedAtHeight/.test(src),
   true
 );
 check(
-  "re-arming only happens away from the bottom",
-  // Re-arming while still at the end would let the tail of one momentum scroll
-  // queue a second fetch - the "only once per visit" rule would be a lie.
-  /const rearm = \(\) => \{\s*if \(!isAtPageBottom\(\)\) \{/.test(src),
+  "a pull counts only when the page has grown since that fetch",
+  /pageHeight\(\) <= stateful\.firedAtHeight/.test(src),
   true
 );
 check(
-  "scrolling away re-arms it",
-  /addEventListener\("scroll", rearm/.test(src),
+  "a fetch in flight cannot be started twice",
+  /stateful\.settling/.test(src),
+  true
+);
+check(
+  "the height is read from both the body and the document element",
+  /document\.body \? document\.body\.scrollHeight/.test(src) &&
+    /document\.documentElement \? document\.documentElement\.scrollHeight/.test(src),
+  true
+);
+check(
+  "the old armed flag is gone, not left half-wired",
+  !/stateful\.armed/.test(src) && !/\brearm\b/.test(src),
   true
 );
 check(
