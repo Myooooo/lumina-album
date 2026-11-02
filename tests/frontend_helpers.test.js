@@ -1172,6 +1172,66 @@ check(
   check("an empty stack means nothing to close", stack.length, 0);
 }
 
+/* ------------------------------------------------------------- toolbar layout
+   Ten controls in one wrapping flex line left one or two of them stranded on a
+   second row at ordinary window widths - measured at 1468px, 重复照片 and the
+   settings gear ended up alone on row two, which reads as a layout accident. The
+   browsing entries now have their own row, so every control has a reason to be
+   where it is. */
+section("toolbar layout");
+
+{
+  const html = fs.readFileSync(
+    path.join(__dirname, "..", "static", "index.html"),
+    "utf8"
+  );
+  check("there are two toolbar rows", (html.match(/class="folder-row/g) || []).length, 2);
+  check("the browsing row is marked", /class="folder-row row-secondary"/.test(html), true);
+  check(
+    "the browsing entries live on the second row",
+    /row-secondary[\s\S]{0,400}footprintsBtn[\s\S]{0,300}memoriesBtn[\s\S]{0,300}duplicatesBtn/
+      .test(html),
+    true
+  );
+  check(
+    "the album controls stay on the first row",
+    /folder-row[\s\S]{0,2200}scanBtn[\s\S]{0,600}importBtn[\s\S]{0,900}cardStatusBtn/
+      .test(html),
+    true
+  );
+  check(
+    "settings is pushed to the end of its row",
+    /id="settingsBtn"[^>]*class="[^"]*row-end/.test(html) ||
+      /class="[^"]*row-end[^"]*"[^>]*id="settingsBtn"/.test(html),
+    true
+  );
+}
+
+{
+  const css = fs.readFileSync(
+    path.join(__dirname, "..", "static", "style.css"),
+    "utf8"
+  );
+  check("the secondary row has its own spacing", /\.folder-row\.row-secondary/.test(css), true);
+  check(
+    "the end-of-row item is pushed right",
+    /\.folder-row \.row-end[\s\S]{0,60}margin-left:\s*auto/.test(css),
+    true
+  );
+  check(
+    "every button shares one height",
+    // The rule puts the fixed height a little way into the block, after the flex
+    // and gap declarations.
+    /\.btn \{[\s\S]{0,900}?height:\s*38px/.test(css),
+    true
+  );
+  check(
+    "a disabled button looks disabled",
+    /\.btn:disabled,[\s\S]{0,40}\.btn\[disabled\][\s\S]{0,120}opacity/.test(css),
+    true
+  );
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`
