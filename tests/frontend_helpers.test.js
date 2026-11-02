@@ -779,6 +779,13 @@ check(
   true
 );
 check(
+  "re-arming only happens away from the bottom",
+  // Re-arming while still at the end would let the tail of one momentum scroll
+  // queue a second fetch - the "only once per visit" rule would be a lie.
+  /const rearm = \(\) => \{\s*if \(!isAtPageBottom\(\)\) \{/.test(src),
+  true
+);
+check(
   "scrolling away re-arms it",
   /addEventListener\("scroll", rearm/.test(src),
   true

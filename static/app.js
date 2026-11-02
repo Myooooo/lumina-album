@@ -1480,13 +1480,15 @@ function isAtPageBottom() {
  */
 function initEndlessGallery() {
   const stateful = {
+    // Armed means "a pull at the bottom would fetch". It is re-armed whenever the
+    // reader is seen somewhere other than the end of the page.
     armed: true,
     // Accumulated downward intent since arriving at the bottom.
     pull: 0,
   };
 
   const rearm = () => {
-    if (isAtPageBottom()) {
+    if (!isAtPageBottom()) {
       stateful.armed = true;
       stateful.pull = 0;
     }
@@ -1502,8 +1504,8 @@ function initEndlessGallery() {
   const accumulate = (delta) => {
     // Only downward motion at the bottom is a request for more.
     if (delta <= 0 || !state.hasMore || state.loadingMore) return;
-    if (!isAtPageBottom()) return;
     if (!stateful.armed) return;
+    if (!isAtPageBottom()) return;
     stateful.pull += delta;
     if (stateful.pull >= PULL_THRESHOLD) requestMore();
   };
