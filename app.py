@@ -19,7 +19,10 @@ obvious where to point the browser.
 """
 
 import errno
+import os
 import socket
+import threading
+import webbrowser
 
 from photo_reviewer.config import CONFIG
 from photo_reviewer.server import create_app
@@ -27,7 +30,43 @@ from photo_reviewer.server import create_app
 #: How many ports to try after the configured one before giving up.
 PORT_ATTEMPTS = 40
 
+#: How long to wait before opening the browser. The server starts listening a
+#: moment after ``app.run`` is entered, and a browser that arrives before that
+#: shows the "can't connect" page and has to be refreshed by hand.
+OPEN_BROWSER_DELAY = 1.0
+
 app = create_app(CONFIG)
+
+
+def _browser_disabled() -> bool:
+    """Whether the user asked for no browser window (headless, tests, servers)."""
+    value = os.getenv("PHOTO_OPEN_BROWSER", "").strip().lower()
+    return value in {"0", "false", "no", "off"}
+
+
+def open_browser_later(url: str) -> None:
+    """Open ``url`` in the default browser once the server is listening.
+
+    A timer thread rather than a call before ``app.run``: the bind happens inside
+    ``app.run``, so opening first would race it. Daemon so it never keeps the
+    process alive, and every failure is swallowed - a machine with no browser
+    (or a headless session) must still serve the app, with the URL printed as
+    before.
+    """
+    if _browser_disabled():
+        return
+
+    def worker() -> None:
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001 - no browser is not a fatal error
+            # Headless sessions and machines with no default handler land here.
+            # The URL is already printed, so there is nothing to recover from.
+            print(f"没能自动打开浏览器，请手动访问： {url}", flush=True)
+
+    timer = threading.Timer(OPEN_BROWSER_DELAY, worker)
+    timer.daemon = True
+    timer.start()
 
 
 def _port_is_free(host: str, port: int) -> bool:
@@ -63,9 +102,12 @@ def main() -> int:
             continue
         if offset:
             print(f"改用端口 {port}（原端口 {CONFIG.port} 不可用）。", flush=True)
-        print(f"拾光相册已启动： http://{host}:{port}", flush=True)
+        url = f"http://{host}:{port}"
+        print(f"拾光相册已启动： {url}", flush=True)
+        open_browser_later(url)
         # ``use_reloader`` stays off: it re-runs this module in a child process,
-        # which would probe and bind a second time.
+        # which would probe and bind a second time - and would open a second
+        # browser tab.
         app.run(
             host=host,
             port=port,

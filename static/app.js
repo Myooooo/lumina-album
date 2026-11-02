@@ -1431,6 +1431,135 @@ function updateCardFavorite(id) {
    as long as the cards were on the page.
    ========================================================================== */
 
+/* ==========================================================================
+   Endless gallery
+   ========================================================================== */
+
+//: How close to the bottom counts as "at the end", in pixels.
+const AT_BOTTOM_SLACK = 4;
+
+//: How far a gesture has to travel at the bottom before it pulls more in. Small
+//: enough that a normal flick triggers it, large enough that the tail of the
+//: scroll that *reached* the bottom does not.
+const PULL_THRESHOLD = 60;
+
+function isAtPageBottom() {
+  const doc = document.documentElement;
+  const scrolled = window.scrollY || window.pageYOffset || doc.scrollTop || 0;
+  const height = Math.max(
+    document.body ? document.body.scrollHeight : 0,
+    doc.scrollHeight || 0
+  );
+  return scrolled + window.innerHeight >= height - AT_BOTTOM_SLACK;
+}
+
+/**
+ * Pull the next page in when the reader asks for it by continuing past the end.
+ *
+ * The button is still there for anyone who prefers it, but the gesture people
+ * actually make at the bottom of a gallery is "keep scrolling", and nothing used
+ * to happen. Two details make this feel right rather than twitchy:
+ *
+ * - Only movement *at* the bottom counts. The wheel or touch that carries the
+ *   reader to the bottom is consumed by that scroll, so it must not immediately
+ *   fetch another page (that is the difference between "I reached the end" and
+ *   "I want more").
+ * - One fetch per visit to the bottom. `armed` goes false the moment a pull is
+ *   requested and only comes back once the page has actually left the bottom, so
+ *   a momentum scroll or a thumb resting on the trackpad cannot queue several
+ *   pages at once.
+ */
+function initEndlessGallery() {
+  const stateful = {
+    armed: true,
+    // Accumulated downward intent since arriving at the bottom.
+    pull: 0,
+  };
+
+  const rearm = () => {
+    if (isAtPageBottom()) {
+      stateful.armed = true;
+      stateful.pull = 0;
+    }
+  };
+
+  const requestMore = () => {
+    if (!stateful.armed || state.loadingMore || !state.hasMore) return;
+    stateful.armed = false;
+    stateful.pull = 0;
+    loadMorePhotos();
+  };
+
+  const accumulate = (delta) => {
+    // Only downward motion at the bottom is a request for more.
+    if (delta <= 0 || !state.hasMore || state.loadingMore) return;
+    if (!isAtPageBottom()) return;
+    if (!stateful.armed) return;
+    stateful.pull += delta;
+    if (stateful.pull >= PULL_THRESHOLD) requestMore();
+  };
+
+  // A wheel event at the bottom has nowhere to scroll, so the browser reports the
+  // whole delta here instead of consuming it.
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      // Let the dialogs and the fullscreen viewer keep their own scrolling.
+      if (state.currentPreviewId || isOverlayOpen()) return;
+      accumulate(e.deltaY);
+    },
+    { passive: true }
+  );
+
+  // Touch: a drag past the end is the same gesture.
+  let touchY = null;
+  window.addEventListener(
+    "touchstart",
+    (e) => {
+      touchY = e.touches.length === 1 ? e.touches[0].clientY : null;
+      stateful.pull = 0;
+    },
+    { passive: true }
+  );
+  window.addEventListener(
+    "touchmove",
+    (e) => {
+      if (touchY === null || e.touches.length !== 1) return;
+      if (state.currentPreviewId || isOverlayOpen()) return;
+      const y = e.touches[0].clientY;
+      // Finger moving up means content moving down.
+      accumulate(touchY - y);
+      touchY = y;
+    },
+    { passive: true }
+  );
+  window.addEventListener("touchend", () => {
+    touchY = null;
+  });
+
+  // Leaving the bottom re-arms, so the next visit can pull again. This also
+  // covers the page growing after a fetch: the reader is no longer at the end.
+  window.addEventListener("scroll", rearm, { passive: true });
+  window.addEventListener("resize", rearm);
+
+  // The button path must not be blocked by the gesture state.
+  const btn = $("loadMoreBtn");
+  if (btn) {
+    btn.addEventListener("click", () => {
+      stateful.pull = 0;
+    });
+  }
+}
+
+/** True when a dialog or the fullscreen viewer is on top of the gallery. */
+function isOverlayOpen() {
+  const fullscreen = $("fullscreenModal");
+  if (fullscreen && !fullscreen.classList.contains("hidden")) return true;
+  return Array.from(document.querySelectorAll(".modal")).some(
+    (modal) => !modal.classList.contains("hidden")
+  );
+}
+
 function initGalleryEvents() {
   const gallery = $("gallery");
   if (!gallery) return;
@@ -1439,6 +1568,8 @@ function initGalleryEvents() {
   // re-derive the culled state once things are still.
   window.addEventListener("scroll", scheduleCardSweep, { passive: true });
   window.addEventListener("resize", scheduleCardSweep);
+
+  initEndlessGallery();
 
   gallery.addEventListener("click", async (e) => {
     const card = e.target.closest(".polaroid-card");

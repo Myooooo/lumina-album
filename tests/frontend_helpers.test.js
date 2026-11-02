@@ -762,6 +762,62 @@ check(
   true
 );
 
+/* ------------------------------------------------------ endless gallery gesture
+   At the bottom of the gallery, continuing to scroll should pull the next page
+   in. Two rules make it feel right: only movement *at* the bottom counts (the
+   scroll that carried you there must not immediately fetch another page), and a
+   visit to the bottom buys exactly one fetch however hard the reader keeps
+   scrolling. */
+section("endless gallery (下拉继续)");
+
+check("the bottom slack is small enough to be exact", /AT_BOTTOM_SLACK = 4/.test(src), true);
+check("there is a pull threshold", /PULL_THRESHOLD = 60/.test(src), true);
+check("the gesture is wired up once", (src.match(/initEndlessGallery\(\)/g) || []).length >= 2, true);
+check(
+  "a fetch disarms until the reader leaves the bottom",
+  /stateful\.armed = false/.test(src) && /stateful\.armed = true/.test(src),
+  true
+);
+check(
+  "scrolling away re-arms it",
+  /addEventListener\("scroll", rearm/.test(src),
+  true
+);
+check(
+  "wheel and touch both count",
+  /addEventListener\(\s*"wheel"/.test(src) && /addEventListener\(\s*"touchmove"/.test(src),
+  true
+);
+check(
+  "overlays keep their own scrolling",
+  /state\.currentPreviewId \|\| isOverlayOpen\(\)/.test(src),
+  true
+);
+
+/* The bottom test itself is arithmetic, so it can be exercised directly. */
+{
+  const factory = new Function(
+    "window",
+    "document",
+    `${extractConst("AT_BOTTOM_SLACK")}
+     ${extract("isAtPageBottom")}
+     return isAtPageBottom();`
+  );
+  const probe = (scrollY, height, inner) =>
+    factory(
+      { scrollY, pageYOffset: scrollY, innerHeight: inner },
+      {
+        documentElement: { scrollTop: scrollY, scrollHeight: height },
+        body: { scrollHeight: height },
+      }
+    );
+
+  check("scrolled exactly to the end counts as the bottom", probe(1200, 2000, 800), true);
+  check("a couple of px short is still the bottom", probe(1198, 2000, 800), true);
+  check("a visible gap is not the bottom", probe(1190, 2000, 800), false);
+  check("half way down is not the bottom", probe(600, 2000, 800), false);
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`
