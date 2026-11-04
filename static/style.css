@@ -1596,6 +1596,21 @@ select {
   animation: modalBackdrop .3s ease both;
 }
 
+/* The detail dialog is always above whatever opened it.
+   Every modal shares z-index 100, so stacking fell back to document order - and
+   #previewModal is the first modal in the markup, which meant 足迹, 那年今日 and
+   重复回忆 painted straight over it. Clicking a photo in any of those sheets
+   produced a dialog the reader could not see or use. The confirm dialog sits at
+   1000 and this goes between them. */
+#previewModal {
+  z-index: 400;
+}
+
+/* The fullscreen viewer is above the detail dialog, since it is opened from it. */
+#fullscreenModal {
+  z-index: 500;
+}
+
 .modal-content {
   background:
     linear-gradient(150deg, rgba(255, 255, 255, 0.94), rgba(255, 251, 245, 0.97)),
@@ -4000,6 +4015,32 @@ select {
   color: var(--muted);
 }
 
+/* A group whose photos are all ticked would lose the picture entirely. The header
+   turns the warning colour and says so; the group's own border follows. */
+.dup-group.is-emptied {
+  border-color: rgba(194, 89, 83, 0.42);
+  background: rgba(194, 89, 83, 0.035);
+}
+
+.dup-group-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 99px;
+  background: rgba(194, 89, 83, 0.12);
+  color: var(--danger);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  animation: dupWarnIn var(--dur-ui) var(--ease-out) both;
+}
+
+@keyframes dupWarnIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
 /* The per-group shortcut. A quiet text button rather than another chip: it shares
    the row with the group's own heading and must not compete with it. */
 .dup-group-keep {
@@ -4052,16 +4093,16 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-solid);
-  cursor: pointer;
-  transition: transform var(--dur-ui) var(--ease-out),
-              border-color var(--dur-fast) var(--ease-out),
+  /* No pointer cursor and no hover lift on the card itself: it is a container now.
+     The picture inside is the control, and it lifts on its own. */
+  transition: border-color var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-ui) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out);
 }
 
-.dup-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-card);
+.dup-card.is-keeper:hover,
+.dup-card.is-chosen:hover {
+  border-color: inherit;
 }
 
 /* Ticked for removal: dimmed and tinted, so the intended outcome is visible at a
@@ -4082,11 +4123,6 @@ select {
   box-shadow: 0 0 0 3px rgba(179, 125, 86, 0.1);
 }
 
-.dup-card.is-keeper .dup-check {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
 .dup-check {
   position: absolute;
   top: 12px;
@@ -4103,16 +4139,36 @@ select {
 .dup-shot {
   position: relative;
   display: block;
+  width: 100%;
   /* Not a fixed aspect ratio: the whole judgement is "is this the same
      picture?", and a 4:3 box crops a portrait into a strip that hides exactly
      the framing being compared. A bounded height keeps every card the same size
      while `object-fit: contain` shows the photo whole. */
   height: 150px;
+  padding: 0;
+  border: none;
   border-radius: 8px;
   overflow: hidden;
+  cursor: zoom-in;
   background:
     linear-gradient(160deg, rgba(60, 40, 20, 0.05), rgba(60, 40, 20, 0.02));
-  transition: opacity var(--dur-fast) var(--ease-out);
+  transition: opacity var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out);
+}
+
+/* The picture is the control: it says "look closer" and lifts a little, which the
+   card no longer does. */
+.dup-shot:hover {
+  box-shadow: 0 6px 18px rgba(60, 40, 20, 0.16);
+}
+
+.dup-shot:active {
+  transform: scale(0.995);
+}
+
+.dup-shot:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .dup-img {
@@ -4385,6 +4441,35 @@ select {
   transform: scale(1.04);
 }
 
+/* Photos the model has already read carry a small mark, so a memory with a written
+   sentence is distinguishable from one without before it is opened. Same corner and
+   weight as the badges on the gallery cards, scaled for a 150px thumbnail. */
+.memory-mark {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(179, 125, 86, 0.92);
+  color: #fff8ef;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(60, 40, 20, 0.24);
+}
+
+.memory-mark svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* The analysed badge is small but must not disappear into a busy photo. */
+.memory-card.is-analysed .memory-img {
+  filter: saturate(1.02);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .memory-year,
   .memories-empty {
@@ -4518,8 +4603,15 @@ select {
 .memories-actions {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   margin: -8px 0 12px;
+}
+
+/* Both entries are the same height as every other small button, so the pair reads
+   as one control group rather than two leftovers. */
+.memories-actions .btn {
+  height: 30px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4623,15 +4715,116 @@ select {
   cursor: pointer;
   text-align: left;
   font-family: inherit;
-  animation: footprintCardIn var(--dur-panel) var(--ease-out) backwards;
   transition: transform var(--dur-ui) var(--ease-out),
               box-shadow var(--dur-ui) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out);
 }
 
-@keyframes footprintCardIn {
-  from { opacity: 0; transform: translateY(12px) scale(0.99); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+/* The grid arrives as one block.
+   Staggering the cards individually meant each one sat at `scale(0.99)` during its
+   delay (`animation-fill-mode: backwards`) and jumped to `scale(1)` when its turn
+   came, so with fourteen of them the grid appeared to shrink in two steps after the
+   sheet had finished opening. A single movement on the container has none of that,
+   and it does not compete with the sheet's own entrance. */
+.footprint-grid {
+  animation: footprintGridIn var(--dur-panel) var(--ease-out) both;
+}
+
+@keyframes footprintGridIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- One opened place ---------- */
+
+/* The back control sits above the title, at the size of the sheet's own small
+   buttons, so it reads as a way out rather than as a second heading. */
+.footprints-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+
+.footprints-back:hover {
+  color: var(--primary);
+  border-color: rgba(179, 125, 86, 0.32);
+  background: rgba(255, 253, 249, 0.9);
+}
+
+.footprints-back:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-press);
+}
+
+.footprints-back svg {
+  width: 15px;
+  height: 15px;
+}
+
+.footprint-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  animation: footprintPhotosIn var(--dur-panel) var(--ease-out) both;
+}
+
+@keyframes footprintPhotosIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.footprint-photo {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(60, 40, 20, 0.04);
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform var(--dur-ui) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+
+.footprint-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+.footprint-photo:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+  border-color: rgba(179, 125, 86, 0.42);
+}
+
+.footprint-photo:hover img {
+  transform: scale(1.05);
+}
+
+.footprint-photo:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: var(--dur-press);
+}
+
+.footprint-photo:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .footprint-card:hover {
@@ -4713,7 +4906,8 @@ select {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .footprint-card,
+  .footprint-grid,
+  .footprint-photos,
   .footprints-empty {
     animation: none !important;
   }

@@ -1231,6 +1231,16 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         if "import_source" in data:
             staged["import_source"] = str(data["import_source"] or "").strip()[:512]
 
+        # The duplicate sheet's similarity threshold. Remembered because it is a
+        # judgement the reader has already made once - finding 6 again after
+        # settling on 4 would mean re-deciding every time the page is opened.
+        if "dup_threshold" in data:
+            try:
+                value = int(data["dup_threshold"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "dup_threshold 必须是整数"}), 400
+            staged["dup_threshold"] = max(0, min(value, 24))
+
         if not staged:
             return jsonify({"error": "没有可保存的字段"}), 400
         database.save_ui_state(staged)
@@ -1719,6 +1729,27 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                             "filename": item.photos[0].get("filename") or "",
                             "thumb_version": item.photos[0].get("phash") or "",
                         },
+                        # The place opens to its own grid, so the rows come with it
+                        # rather than needing a second request per click. Kept to
+                        # the fields a thumbnail and the dialog's first paint read:
+                        # the full payload is thirty fields, and a place with 832
+                        # photos turned that into a two-megabyte response.
+                        "photos": [
+                            {
+                                "id": photo["id"],
+                                "filename": photo.get("filename") or "",
+                                "size": photo.get("size") or 0,
+                                "width": photo.get("width") or 0,
+                                "height": photo.get("height") or 0,
+                                "status": photo.get("status") or "",
+                                "media_kind": photo.get("media_kind") or "photo",
+                                "score": photo.get("score"),
+                                "favorite": bool(photo.get("favorite")),
+                                "location": photo.get("location"),
+                                "thumb_version": photo.get("phash") or "",
+                            }
+                            for photo in item.photos
+                        ],
                     }
                     for item in footprints
                 ],

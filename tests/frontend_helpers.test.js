@@ -1033,9 +1033,39 @@ check(
   /dup-group-keep/.test(src) && /applyKeepOneRule\(index\)/.test(src),
   true
 );
+/* The suggested keeper is selectable now. "Keep the best copy" is advice, and
+   there are real cases where the higher-resolution file is the one to drop - the
+   reader decides, so nothing is locked. What the app does instead is warn when a
+   whole group would be removed. */
 check(
-  "the keeper's checkbox is disabled",
-  /isKeeper \? "disabled" : ""/.test(src),
+  "the keeper's checkbox is selectable",
+  !/isKeeper \? "disabled" : ""/.test(src) &&
+    /aria-label="收起这张"/.test(src),
+  true
+);
+check(
+  "a group with everything ticked is called out",
+  /is-emptied/.test(src) && /整组都会被收起/.test(src),
+  true
+);
+check(
+  "the confirmation counts emptied groups",
+  /dupEmptiedGroups\(\)/.test(src) && /会被全部收起/.test(src),
+  true
+);
+check(
+  "the picture opens the photo, the checkbox ticks",
+  /class="dup-shot"/.test(src) && /data-open/.test(src),
+  true
+);
+check(
+  "the duplicate card is not a label any more",
+  !/<label class="dup-card/.test(src),
+  true
+);
+check(
+  "the threshold is remembered",
+  /saveUiState\(\{ dup_threshold/.test(src) && /saved\.dup_threshold/.test(src),
   true
 );
 check(

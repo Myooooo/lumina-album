@@ -6306,6 +6306,72 @@ class FootprintsApiTests(unittest.TestCase):
         self.assertEqual(body["places"], [])
         self.assertEqual(body["total"], 0)
 
+    def test_a_place_carries_its_own_photos(self) -> None:
+        """A place opens to a grid of its photos, so the rows have to come with it.
+
+        It used to return only a cover, which meant clicking a place could open
+        nothing but that one photo.
+        """
+        self._add("a.jpg", "北京市海淀区A路", "2024:01:01 08:00:00")
+        self._add("b.jpg", "北京市朝阳区B路", "2025:01:01 08:00:00")
+        place = self.client.get("/api/footprints").get_json()["places"][0]
+        self.assertEqual(len(place["photos"]), 2)
+        ids = {photo["id"] for photo in place["photos"]}
+        self.assertEqual(len(ids), 2)
+
+    def test_place_photos_carry_what_the_dialog_paints(self) -> None:
+        """The detail dialog reads these before its own payload lands.
+
+        A narrower select raised `KeyError: 'size'` the first time a place was
+        opened, because the rows had been trimmed for a cover thumbnail.
+        """
+        self._add("a.jpg", "北京市海淀区A路", "2024:01:01 08:00:00")
+        photo = self.client.get("/api/footprints").get_json()["places"][0]["photos"][0]
+        for key in ("id", "filename", "size", "width", "height", "status",
+                    "media_kind", "thumb_version"):
+            self.assertIn(key, photo)
+
+
+class DuplicateThresholdStateTests(unittest.TestCase):
+    """The duplicate sheet remembers the threshold the reader settled on."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_the_duplicate_threshold_is_remembered(self) -> None:
+        """A judgement the reader already made should survive a reload.
+
+        The sheet used to open at 6 every time, so anyone who had settled on a
+        tighter value re-decided it on every visit.
+        """
+        self.client.post("/api/ui-state", json={"dup_threshold": 4})
+        saved = self.client.get("/api/ui-state").get_json()["state"]
+        self.assertEqual(saved["dup_threshold"], 4)
+
+    def test_the_threshold_is_clamped(self) -> None:
+        self.client.post("/api/ui-state", json={"dup_threshold": 99})
+        saved = self.client.get("/api/ui-state").get_json()["state"]
+        self.assertLessEqual(saved["dup_threshold"], 24)
+
+    def test_a_non_numeric_threshold_is_rejected(self) -> None:
+        resp = self.client.post("/api/ui-state", json={"dup_threshold": "abc"})
+        self.assertEqual(resp.status_code, 400)
+
+    def test_an_unknown_key_is_still_rejected(self) -> None:
+        """The endpoint is writable from the browser; it must stay bounded."""
+        resp = self.client.post("/api/ui-state", json={"nonsense": 1})
+        self.assertEqual(resp.status_code, 400)
+
 
 class VisualSearchTests(unittest.TestCase):
     """Asking the vision model which pictures match.

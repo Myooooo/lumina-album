@@ -13,6 +13,19 @@ const state = {
   selected: new Set(),
   currentDirPath: "",
   currentPreviewId: null,
+  //: Set when a sheet (足迹 / 那年今日 / 重复回忆) owns the detail dialog:
+  //: ``{ids, title}``. Navigation then walks ``ids`` instead of the gallery, because
+  //: those sheets show photos the album page may not have loaded at all.
+  previewContext: null,
+  //: The places 足迹 has loaded, and the one currently opened. The place view
+  //: replaces the list inside the same sheet, so both live here rather than in the
+  //: DOM alone - going back has to redraw the grid without a second request.
+  footprintPlaces: [],
+  //: How many of the open place's photos have been painted so far.
+  footprintShown: 0,
+  footprintPlace: null,
+  //: The payload 那年今日 last rendered, so a thumbnail click can walk that day.
+  memoriesData: null,
   previewNavToken: 0,
   pollingTimer: null,
   pollTick: 0,
@@ -151,6 +164,28 @@ function photoById(id) {
   return state.photoById.get(id) || null;
 }
 
+/**
+ * Make ``rows`` available to the detail dialog without changing the gallery.
+ *
+ * Rows are written into the lookup map only. `state.photos` is left alone on
+ * purpose: it is the grid's list, and appending a place's photos to it would make
+ * the grid render cards that belong to no album page and would reorder the
+ * arrow-key walk for every other photo.
+ *
+ * A row already known is not overwritten, so a photo that the gallery has loaded -
+ * with its detail payload applied - keeps its richer copy.
+ */
+function adoptPhotos(rows) {
+  if (!Array.isArray(rows)) return;
+  for (const row of rows) {
+    if (!row || !Number.isFinite(Number(row.id))) continue;
+    if (state.photoById.has(row.id)) continue;
+    const detail = state.details.get(row.id);
+    if (detail) applyPhotoDetail(row, detail);
+    state.photoById.set(row.id, row);
+  }
+}
+
 /** Position of a photo in the loaded list, or -1. */
 function photoIndexById(id) {
   const index = state.photoIndex.get(id);
@@ -174,6 +209,12 @@ async function loadUiState() {
       : [];
     state.importSource =
       typeof saved.import_source === "string" ? saved.import_source : "";
+    // The duplicate sheet's threshold is a judgement the reader already made;
+    // restoring it is the difference between a remembered preference and having
+    // to re-decide every time the page opens.
+    if (Number.isFinite(Number(saved.dup_threshold))) {
+      dupState.threshold = Math.max(0, Math.min(Number(saved.dup_threshold), 24));
+    }
   } catch (e) {
     // A brand-new database has no state yet; an empty one is a fine default.
     console.warn("读取界面状态失败", e);
@@ -2480,14 +2521,18 @@ function applyPreviewAfterRemoval(nextId) {
  * and the keyboard says so.
  */
 async function navigatePreview(delta) {
-  let order = visiblePhotoOrder();
+  // A sheet that owns the dialog defines the order; otherwise it is the gallery.
+  let order = state.previewContext
+    ? state.previewContext.ids.slice()
+    : visiblePhotoOrder();
   if (!order.length) return;
   let idx = order.indexOf(state.currentPreviewId);
   if (idx < 0) return;
 
   // At the end of the loaded pages, fetch the next page before deciding that
-  // there is genuinely no next photo.
-  if (delta > 0 && idx === order.length - 1 && state.hasMore) {
+  // there is genuinely no next photo. Only for the gallery: a sheet's list is
+  // complete already.
+  if (delta > 0 && idx === order.length - 1 && state.hasMore && !state.previewContext) {
     const loadedBefore = state.photos.length;
     await loadMorePhotos();
     if (state.photos.length > loadedBefore) {
@@ -2877,9 +2922,18 @@ function resetFullscreenZoom() {
   applyFsTransform();
 }
 
-function openPreview(id) {
+/**
+ * Show one photo in the detail dialog.
+ *
+ * ``context`` is ``{ids, title}`` when a sheet is opening it - 足迹's places, 那年今日's
+ * days, 重复回忆's groups. The dialog then walks that list with the arrow keys and
+ * labels itself with the title, instead of falling back to the album's rows, which
+ * may not contain the photo at all.
+ */
+function openPreview(id, context = null) {
   state.previewNavToken += 1;
   state.currentPreviewId = id;
+  state.previewContext = context && context.ids && context.ids.length ? context : null;
   showModal($("previewModal"));
   pushModal($("previewModal"));
   updatePreview();
@@ -3377,6 +3431,7 @@ function closeModal(id, onHidden) {
     // closed dialog until something else happened to stop it.
     stopPreviewVideo();
     state.currentPreviewId = null;
+    state.previewContext = null;
     state.previewNavToken += 1;
     $("previewImage").classList.remove("preview-switch-left", "preview-switch-right");
   }
@@ -5268,7 +5323,7 @@ function footprintCardHtml(place, index) {
     : '<span class="footprint-noimg"></span>';
   return `
     <button class="footprint-card" type="button" data-city="${escapeHtml(place.city)}"
-            data-photo="${cover.id || ""}"
+            data-index="${index}"
             style="animation-delay:${Math.min(index, 14) * 0.04}s">
       <span class="footprint-shot">${img}<span class="footprint-count">${place.count}</span></span>
       <span class="footprint-body">
@@ -5278,10 +5333,22 @@ function footprintCardHtml(place, index) {
     </button>`;
 }
 
+/** One thumbnail inside an opened place. */
+function footprintPhotoHtml(photo) {
+  return `
+    <button class="footprint-photo" type="button" data-id="${photo.id}"
+            title="${escapeHtml(photo.filename || "")}">
+      <img src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename || "")}"
+           loading="lazy" decoding="async" />
+    </button>`;
+}
+
+/** The place list: every city with a cover. */
 function renderFootprints(data) {
   const body = $("footprintsBody");
   if (!body) return;
-  if (!data.places.length) {
+  state.footprintPlaces = data.places || [];
+  if (!state.footprintPlaces.length) {
     body.innerHTML = `
       <div class="footprints-empty">
         <span class="footprints-empty-icon" data-icon="pin"></span>
@@ -5291,14 +5358,123 @@ function renderFootprints(data) {
     renderAllIcons(body);
     return;
   }
-  body.innerHTML = `<div class="footprint-grid">${data.places.map(footprintCardHtml).join("")}</div>`;
+  body.innerHTML = `<div class="footprint-grid">${state.footprintPlaces
+    .map(footprintCardHtml)
+    .join("")}</div>`;
+  body.scrollTop = 0;
+}
+
+/**
+ * Open one place: its own grid of photos, in the same sheet.
+ *
+ * The exchange is a fade rather than a slide because the two views occupy the same
+ * space - sliding would suggest a page moved aside, which is not what happened.
+ */
+function openPlace(index) {
+  const place = (state.footprintPlaces || [])[index];
+  if (!place) return;
+  state.footprintPlace = place;
+
+  const photos = place.photos || [];
+  // The dialog needs these rows to render at all: a place's photos may not be in
+  // the gallery's current page.
+  adoptPhotos(photos);
+
+  const body = $("footprintsBody");
+  const title = $("footprintsTitle");
+  const lede = $("footprintsLede");
+  const back = $("footprintsBackBtn");
+  if (title) title.textContent = place.city;
+  if (lede) {
+    const years = place.years || [];
+    const span =
+      years.length > 1
+        ? ` · ${years[0]} – ${years[years.length - 1]}`
+        : years.length === 1
+          ? ` · ${years[0]}`
+          : "";
+    lede.textContent = `${place.count} 张回忆${span}`;
+  }
+  if (back) back.classList.remove("hidden");
+  if (!body) return;
+  if (!photos.length) {
+    body.innerHTML = '<div class="footprints-empty"><p>这个地方的照片暂时打不开。</p></div>';
+    return;
+  }
+  // First batch only. A place can hold several hundred photos, and building them
+  // all in one innerHTML call made the sheet lay out every card at once - the
+  // first screen showed two thumbnails and a wall of empty boxes while the rest
+  // queued behind `loading="lazy"`.
+  state.footprintShown = 0;
+  body.innerHTML = '<div class="footprint-photos"></div>';
+  appendPlacePhotos();
+  body.scrollTop = 0;
+  body.classList.remove("is-fading");
+  void body.offsetWidth;
+}
+
+//: How many of a place's photos to paint at a time.
+const PLACE_PAGE_SIZE = 60;
+
+/** Append the next batch of the open place's photos. */
+function appendPlacePhotos() {
+  const list = document.querySelector("#footprintsBody .footprint-photos");
+  const place = state.footprintPlace;
+  if (!list || !place) return;
+  const photos = place.photos || [];
+  const from = state.footprintShown || 0;
+  const to = Math.min(from + PLACE_PAGE_SIZE, photos.length);
+  if (from >= to) return;
+  list.insertAdjacentHTML(
+    "beforeend",
+    photos.slice(from, to).map(footprintPhotoHtml).join("")
+  );
+  state.footprintShown = to;
+  // A short list leaves the sheet with nothing to scroll, so fill it now rather
+  // than waiting for a scroll that can never happen.
+  const body = $("footprintsBody");
+  if (body && body.scrollHeight <= body.clientHeight + 40 && to < photos.length) {
+    appendPlacePhotos();
+  }
+}
+
+/** Return from one place to the list of places. */
+function closePlace() {
+  state.footprintPlace = null;
+  state.footprintShown = 0;
+  const title = $("footprintsTitle");
+  const lede = $("footprintsLede");
+  const back = $("footprintsBackBtn");
+  if (title) title.textContent = "足迹";
+  if (back) back.classList.add("hidden");
+  const total = (state.footprintPlaces || []).length;
+  if (lede) {
+    lede.textContent = total
+      ? `这些回忆散落在 ${total} 个地方，共 ${state.footprintPlaces.reduce(
+          (sum, place) => sum + place.count,
+          0
+        )} 张。`
+      : "还没有记录的足迹。";
+  }
+  const body = $("footprintsBody");
+  if (!body) return;
+  body.innerHTML = `<div class="footprint-grid">${(state.footprintPlaces || [])
+    .map(footprintCardHtml)
+    .join("")}</div>`;
+  body.scrollTop = 0;
 }
 
 async function openFootprints() {
   showSheet($("footprintsModal"));
   const body = $("footprintsBody");
   const lede = $("footprintsLede");
+  const title = $("footprintsTitle");
+  const back = $("footprintsBackBtn");
+  state.footprintPlace = null;
+  if (title) title.textContent = "足迹";
+  if (back) back.classList.add("hidden");
   if (body) body.innerHTML = '<div class="footprints-empty">正在整理走过的地方…</div>';
+  if (lede) lede.textContent = "正在整理走过的地方…";
   try {
     const params = new URLSearchParams();
     if (state.folder) params.set("folder", state.folder);
@@ -5321,15 +5497,42 @@ function initFootprints() {
   const btn = $("footprintsBtn");
   if (btn) btn.addEventListener("click", openFootprints);
 
+  const back = $("footprintsBackBtn");
+  if (back) back.addEventListener("click", closePlace);
+
   const body = $("footprintsBody");
-  if (body) {
-    body.addEventListener("click", (e) => {
-      const card = e.target.closest(".footprint-card");
-      if (!card) return;
-      const id = Number(card.dataset.photo);
-      if (Number.isFinite(id) && id > 0) openPreview(id);
-    });
-  }
+  if (!body) return;
+
+  // Growing the place as the reader reaches the bottom of the sheet's own scroll
+  // area. Debounced by the natural scroll cadence rather than a timer: the append
+  // is cheap and the guard below stops it running twice for one position.
+  body.addEventListener("scroll", () => {
+    const place = state.footprintPlace;
+    if (!place) return;
+    const photos = place.photos || [];
+    if ((state.footprintShown || 0) >= photos.length) return;
+    if (body.scrollTop + body.clientHeight < body.scrollHeight - 320) return;
+    appendPlacePhotos();
+  }, { passive: true });
+
+  body.addEventListener("click", (e) => {
+    const photo = e.target.closest(".footprint-photo");
+    if (photo) {
+      const id = Number(photo.dataset.id);
+      const place = state.footprintPlace;
+      if (!Number.isFinite(id) || !place) return;
+      // The place's photos become the dialog's order, so 上一张 / 下一张 stay inside
+      // the place the reader is looking at.
+      openPreview(id, {
+        ids: (place.photos || []).map((row) => row.id),
+        title: place.city,
+      });
+      return;
+    }
+    const card = e.target.closest(".footprint-card");
+    if (!card) return;
+    openPlace(Number(card.dataset.index));
+  });
 }
 
 /* ==========================================================================
@@ -5349,12 +5552,21 @@ function yearsAgoText(years) {
   return `${years} 年前的今天`;
 }
 
+/**
+ * One memory thumbnail.
+ *
+ * ``analysed`` puts a small mark on photos the model has already read. Without it
+ * a memory that carries a written sentence looked the same as one that does not,
+ * and the only way to find out was to open it.
+ */
 function memoryCardHtml(photo) {
+  const analysed = photo.status === "analyzed" && photo.score !== null;
   return `
-    <button class="memory-card" type="button" data-id="${photo.id}"
-            title="${escapeHtml(photo.filename)}">
+    <button class="memory-card${analysed ? " is-analysed" : ""}" type="button"
+            data-id="${photo.id}" title="${escapeHtml(photo.filename)}">
       <img class="memory-img" src="${thumbnailUrl(photo)}"
            alt="${escapeHtml(photo.filename)}" loading="lazy" decoding="async" />
+      ${analysed ? '<span class="memory-mark" data-icon="sparkles"></span>' : ""}
     </button>`;
 }
 
@@ -5384,7 +5596,9 @@ function renderMemories(data) {
     renderAllIcons(body);
     return;
   }
+  state.memoriesData = data;
   body.innerHTML = data.years.map(memoryYearHtml).join("");
+  renderAllIcons(body);
 }
 
 /**
@@ -5526,6 +5740,24 @@ async function openMemories() {
   }
 }
 
+/**
+ * The ids in 那年今日 that the model has not read yet.
+ *
+ * A photo counts as read when it has both a status of ``analyzed`` and a score -
+ * the same test the gallery uses, so the two views agree about what "已收录" means.
+ */
+function memoryIdsNeedingAnalysis() {
+  const data = state.memoriesData;
+  if (!data || !Array.isArray(data.years)) return [];
+  const ids = [];
+  for (const bucket of data.years) {
+    for (const photo of bucket.photos || []) {
+      if (photo.status !== "analyzed" || photo.score === null) ids.push(photo.id);
+    }
+  }
+  return ids;
+}
+
 function initMemories() {
   const btn = $("memoriesBtn");
   if (btn) btn.addEventListener("click", openMemories);
@@ -5539,7 +5771,52 @@ function initMemories() {
       if (!card) return;
       const id = Number(card.dataset.id);
       if (!Number.isFinite(id)) return;
-      openPreview(id);
+      // Walk this day's photos, not the gallery's - the sheet shows a set the
+      // album page may not have loaded.
+      const day = state.memoriesData;
+      adoptPhotos(day ? day.years.flatMap((bucket) => bucket.photos) : []);
+      openPreview(id, {
+        ids: day
+          ? day.years
+              .slice()
+              .reverse()
+              .flatMap((bucket) => bucket.photos.map((row) => row.id))
+          : [id],
+        title: "那年今日",
+      });
+    });
+  }
+
+  const analyzeBtn = $("memoriesAnalyzeBtn");
+  if (analyzeBtn) {
+    analyzeBtn.addEventListener("click", async () => {
+      const ids = memoryIdsNeedingAnalysis();
+      if (!ids.length) {
+        showToast("这一天的照片都已经解读过了。", "info");
+        return;
+      }
+      const confirmed = await confirmDialog(
+        `把这一天还没解读的 ${ids.length} 张照片交给大模型？\n任务在后台进行，可以随时取消。`,
+        { title: "一键整理", confirmText: "开始整理" }
+      );
+      if (!confirmed) return;
+      try {
+        const data = await api("/api/analyze/batch", {
+          method: "POST",
+          body: JSON.stringify({
+            ids,
+            folder: state.folder || "",
+            subtitle: "那年今日",
+          }),
+        });
+        state.currentJobId = data.job_id;
+        showProgress(`正在解读这一天的 ${data.total} 张回忆…`);
+        pollScan();
+        // The marks on the thumbnails come from the fresh payload once the job
+        // reports back, so the sheet is left alone until then.
+      } catch (e) {
+        showToast("整理失败：" + e.message, "error");
+      }
     });
   }
 
@@ -5603,32 +5880,39 @@ function dupCardHtml(photo, keepId) {
   const isKeeper = photo.id === keepId;
   const chosen = dupState.chosen.has(photo.id);
   const pixels = photo.width && photo.height ? `${photo.width} × ${photo.height}` : "";
+  // A div, not a label: the picture has to open the photo for comparison, and a
+  // label would tick the checkbox instead - exactly the mis-click reported.
   return `
-    <label class="dup-card${isKeeper ? " is-keeper" : ""}${chosen ? " is-chosen" : ""}"
-           data-id="${photo.id}">
+    <div class="dup-card${isKeeper ? " is-keeper" : ""}${chosen ? " is-chosen" : ""}"
+         data-id="${photo.id}">
       <input type="checkbox" class="dup-check" ${chosen ? "checked" : ""}
-             ${isKeeper ? "disabled" : ""} />
-      <span class="dup-shot">
+             title="选中后会移到回收站" aria-label="收起这张" />
+      <button class="dup-shot" type="button" data-open="${photo.id}"
+              title="查看这张照片">
         <img class="dup-img" src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}"
              loading="lazy" decoding="async" />
         ${isKeeper ? '<span class="dup-keep-badge">建议保留</span>' : ""}
-      </span>
+      </button>
       <span class="dup-meta">
         <span class="dup-name" title="${escapeHtml(photo.filename)}">${escapeHtml(photo.filename)}</span>
         <span class="dup-spec">${pixels ? `${pixels} · ` : ""}${fmtSize(photo.size)}</span>
       </span>
-    </label>`;
+    </div>`;
 }
 
 function dupGroupHtml(group, index) {
   const wasted = dupWastedText(group.wasted_bytes);
-  // A per-group shortcut, because "keep the best one here" is the common answer
-  // for one group even though it must never be the default for all of them.
+  // A group where everything is ticked would remove the picture from the album
+  // altogether. That is allowed - the reader may genuinely want all of them gone -
+  // but it must not happen by accident, so the header says so loudly.
+  const allChosen = group.photos.every((photo) => dupState.chosen.has(photo.id));
   return `
-    <section class="dup-group" data-group="${index}" style="animation-delay:${Math.min(index, 12) * 0.03}s">
+    <section class="dup-group${allChosen ? " is-emptied" : ""}" data-group="${index}"
+             style="animation-delay:${Math.min(index, 12) * 0.03}s">
       <header class="dup-group-head">
         <span class="dup-group-title">${group.photos.length} 张相似</span>
         ${wasted ? `<span class="dup-group-wasted">${wasted}</span>` : ""}
+        ${allChosen ? '<span class="dup-group-warning">整组都会被收起</span>' : ""}
         <button class="dup-group-keep" type="button" data-keep="${index}">只留建议的那张</button>
       </header>
       <div class="dup-grid">
@@ -5644,7 +5928,7 @@ function renderDuplicates() {
     body.innerHTML = `
       <div class="duplicates-empty">
         <span class="duplicates-empty-icon" data-icon="sparkles"></span>
-        <p>没有找到看起来重复的照片。</p>
+        <p>没有找到看起来重复的回忆。</p>
         <p class="duplicates-empty-hint">把「相似程度」调低一点也许多少能找出几张。</p>
       </div>`;
     renderAllIcons(body);
@@ -5652,7 +5936,42 @@ function renderDuplicates() {
     return;
   }
   body.innerHTML = dupState.groups.map(dupGroupHtml).join("");
+  renderAllIcons(body);
   updateDupSelection();
+}
+
+/** Groups where every photo is ticked - about to disappear from the album. */
+function dupEmptiedGroups() {
+  return dupState.groups.filter(
+    (group) =>
+      group.photos.length > 0 &&
+      group.photos.every((photo) => dupState.chosen.has(photo.id))
+  );
+}
+
+/** Restyle the group headers after a tick, without re-rendering the list. */
+function markEmptiedGroups() {
+  const body = $("duplicatesBody");
+  if (!body) return;
+  for (const section of body.querySelectorAll(".dup-group")) {
+    const index = Number(section.dataset.group);
+    const group = dupState.groups[index];
+    if (!group) continue;
+    const allChosen = group.photos.every((photo) => dupState.chosen.has(photo.id));
+    section.classList.toggle("is-emptied", allChosen);
+    const head = section.querySelector(".dup-group-head");
+    if (!head) continue;
+    let warning = head.querySelector(".dup-group-warning");
+    if (allChosen && !warning) {
+      warning = document.createElement("span");
+      warning.className = "dup-group-warning";
+      warning.textContent = "整组都会被收起";
+      const keep = head.querySelector(".dup-group-keep");
+      head.insertBefore(warning, keep || null);
+    } else if (!allChosen && warning) {
+      warning.remove();
+    }
+  }
 }
 
 function updateDupSelection() {
@@ -5790,8 +6109,14 @@ function openDuplicates() {
 async function trashChosenDuplicates() {
   const ids = [...dupState.chosen];
   if (!ids.length) return;
+  // A group where every photo is ticked would lose the picture completely. Say so
+  // in the confirmation rather than letting it happen quietly.
+  const emptied = dupEmptiedGroups();
+  const warning = emptied.length
+    ? `\n\n注意：有 ${emptied.length} 组照片会被全部收起，这些画面将不再出现在相册里。`
+    : "";
   const confirmed = await confirmDialog(
-    `确定把选中的 ${ids.length} 张相似照片收起吗？\n它们会先进回收站，随时可以恢复。`,
+    `确定把选中的 ${ids.length} 张相似照片收起吗？\n它们会先进回收站，随时可以恢复。${warning}`,
     { title: "收起重复的回忆", confirmText: "收起", danger: true }
   );
   if (!confirmed) return;
@@ -5820,6 +6145,8 @@ function initDuplicates() {
 
   const body = $("duplicatesBody");
   if (body) {
+    // Ticking a box is the only thing that selects. The whole card used to be a
+    // <label>, so clicking the picture to compare it ticked the box instead.
     body.addEventListener("change", (e) => {
       const check = e.target.closest(".dup-check");
       if (!check) return;
@@ -5829,7 +6156,25 @@ function initDuplicates() {
       if (check.checked) dupState.chosen.add(id);
       else dupState.chosen.delete(id);
       card.classList.toggle("is-chosen", check.checked);
+      // The group header reports "整组都会被收起", so it has to follow the tick.
+      markEmptiedGroups();
       updateDupSelection();
+    });
+
+    // The picture opens the photo, so the two can be compared side by side.
+    body.addEventListener("click", (e) => {
+      const shot = e.target.closest(".dup-shot");
+      if (!shot) return;
+      const id = Number(shot.dataset.open);
+      if (!Number.isFinite(id)) return;
+      const group = (dupState.groups || []).find((item) =>
+        item.photos.some((photo) => photo.id === id)
+      );
+      adoptPhotos(group ? group.photos : []);
+      openPreview(id, {
+        ids: group ? group.photos.map((photo) => photo.id) : [id],
+        title: group ? `${group.photos.length} 张相似` : "重复回忆",
+      });
     });
   }
 
@@ -5845,6 +6190,9 @@ function initDuplicates() {
       const value = Number(slider.value);
       if (pending) clearTimeout(pending);
       pending = setTimeout(() => loadDuplicates(value), 60);
+      // Remembered with the rest of the UI state: a reader who settled on 4
+      // should not find 6 again next time.
+      saveUiState({ dup_threshold: value });
     });
   }
 

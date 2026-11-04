@@ -39,7 +39,7 @@
     <div class="folder-row row-secondary">
       <button id="footprintsBtn" class="btn" title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
       <button id="memoriesBtn" class="btn" title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
-      <button id="duplicatesBtn" class="btn" title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复照片</button>
+      <button id="duplicatesBtn" class="btn" title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复回忆</button>
       <button id="settingsBtn" class="btn icon-only row-end" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
     <div id="cardBanner" class="card-banner hidden">
@@ -252,7 +252,10 @@
   <div id="footprintsModal" class="modal hidden">
     <div class="modal-content footprints-content">
       <button class="modal-close" data-close="footprintsModal"><span class="btn-icon" data-icon="close"></span></button>
-      <h2><span class="modal-title-icon" data-icon="pin"></span>足迹</h2>
+      <button id="footprintsBackBtn" class="footprints-back hidden" type="button">
+        <span class="btn-icon" data-icon="chevronLeft"></span>所有地方
+      </button>
+      <h2><span class="modal-title-icon" data-icon="pin"></span><span id="footprintsTitle">足迹</span></h2>
       <p class="footprints-lede" id="footprintsLede">正在整理走过的地方…</p>
       <div id="footprintsBody" class="footprints-body">
         <div class="footprints-empty">正在整理走过的地方…</div>
@@ -296,8 +299,13 @@
       <h2><span class="modal-title-icon" data-icon="sun"></span>那年今日</h2>
       <p class="memories-lede" id="memoriesLede">正在翻找旧时光…</p>
       <div class="memories-actions" id="memoriesActions" hidden>
-        <button id="memoriesExportHtmlBtn" class="btn small" type="button">
-          <span class="btn-icon" data-icon="file"></span>导出这份回忆
+        <button id="memoriesAnalyzeBtn" class="btn small" type="button"
+                title="把这一天还没解读过的照片交给大模型">
+          <span class="btn-icon" data-icon="sparkles"></span>一键整理
+        </button>
+        <button id="memoriesExportHtmlBtn" class="btn small" type="button"
+                title="把这一天收进一份可以带走的回忆里">
+          <span class="btn-icon" data-icon="file"></span>重建回忆
         </button>
       </div>
       <div id="memoriesBody" class="memories-body">
@@ -486,7 +494,6 @@
                 <option value="1">前后 1 天</option>
                 <option value="2">前后 2 天</option>
                 <option value="3">前后 3 天</option>
-                <option value="7">前后 7 天</option>
               </select>
             </label>
             <p class="settings-hint full-row">范围越宽，越容易找出一段旅程；同时也会带进一些相近的日子。</p>

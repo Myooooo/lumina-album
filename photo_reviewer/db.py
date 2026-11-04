@@ -1601,9 +1601,9 @@ class Database:
     def located_photos(self, folder: str | None = None) -> list[dict[str, Any]]:
         """Every photo that carries a place, for the footprint view.
 
-        A narrow select for the same reason as ``duplicate_candidates``: the
-        grouping only needs the location, a thumbnail and a capture time, and
-        decoding full rows for a few thousand photos costs more than the work.
+        The selection covers what ``_photo_payload`` reads, because a place now
+        opens to its own grid and the same rows feed the detail dialog - a narrower
+        select raised ``KeyError: 'size'`` the first time a place was opened.
         """
         where = ["location IS NOT NULL", "location != ''", "status != 'deleted'"]
         params: list[Any] = []
@@ -1611,9 +1611,11 @@ class Database:
             where.append("folder = ?")
             params.append(folder)
         sql = (
-            "SELECT id, path, raw_path, location, filename, thumb_path, "
-            "proxy_path, phash, exif, status, score, media_kind, favorite, "
-            "width, height "
+            "SELECT id, path, raw_path, original_path, location, filename, size, "
+            "width, height, thumb_path, proxy_path, phash, exif, tags, reason, "
+            "title, dimensions, recommendation, score, status, media_kind, "
+            "favorite, analyzed_at, error, model, geocoded, duration_ms, "
+            "video_info, live_path "
             f"FROM photos WHERE {' AND '.join(where)}"
         )
         with self._lock:
