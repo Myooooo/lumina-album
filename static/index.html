@@ -103,7 +103,7 @@
       <section class="filters">
         <div class="filter-group sort-group" data-filter-key="sort">
           <label><span class="label-icon" data-icon="dimensions"></span>排序方式</label>
-          <select id="sortFilter">
+          <select id="sortFilter" data-prefix="排序">
             <option value="score_desc" selected>总分从高到低</option>
             <option value="score_asc">总分从低到高</option>
             <option value="time_desc">拍摄时间从晚到早</option>
@@ -115,7 +115,7 @@
         </div>
         <div class="filter-group" data-filter-key="kind">
           <label><span class="label-icon" data-icon="video"></span>类型</label>
-          <select id="kindFilter">
+          <select id="kindFilter" data-prefix="类型">
             <option value="">全部</option>
             <option value="photo">照片</option>
             <option value="video">视频</option>
@@ -124,7 +124,7 @@
         </div>
         <div class="filter-group" data-filter-key="min_score">
           <label><span class="label-icon" data-icon="score"></span>总分</label>
-          <select id="minScoreFilter">
+          <select id="minScoreFilter" data-prefix="总分">
             <option value="">不限</option>
             <option value="2">2+</option>
             <option value="4">4+</option>
@@ -134,28 +134,30 @@
         </div>
         <div class="filter-group tag-group" data-filter-key="tag">
           <label><span class="label-icon" data-icon="tag"></span>回忆标签</label>
-          <select id="tagFilter">
+          <select id="tagFilter" data-prefix="标签">
             <option value="">全部标签</option>
           </select>
         </div>
         <div class="filter-group" data-filter-key="year">
           <label><span class="label-icon" data-icon="calendar"></span>拍摄年份</label>
-          <select id="yearFilter">
+          <select id="yearFilter" data-prefix="年份">
             <option value="">全部年份</option>
           </select>
         </div>
-        <div class="filter-group" data-filter-key="search_mode">
-          <label><span class="label-icon" data-icon="scan"></span>搜索方式</label>
-          <select id="searchMode">
-            <option value="smart">探索回忆</option>
-            <option value="visual">看图搜索</option>
-          </select>
+        <div class="search-capsule">
+          <div class="filter-group search-mode-segment" data-filter-key="search_mode">
+            <label><span class="label-icon" data-icon="scan"></span>搜索方式</label>
+            <select id="searchMode">
+              <option value="smart">探索回忆</option>
+              <option value="visual">看图搜索</option>
+            </select>
+          </div>
+          <div class="filter-group search-input-segment grow" data-filter-key="search">
+            <label><span class="label-icon" data-icon="search"></span>探索回忆</label>
+            <input id="searchInput" type="search" placeholder="例如：去年秋天的金黄落叶、西湖落日…" />
+          </div>
+          <button id="searchBtn" class="btn search-submit-btn" title="搜索"><span class="btn-icon" data-icon="search"></span>搜索</button>
         </div>
-        <div class="filter-group grow" data-filter-key="search">
-          <label><span class="label-icon" data-icon="search"></span>探索回忆</label>
-          <input id="searchInput" type="search" placeholder="例如：去年秋天的金黄落叶、西湖落日…" />
-        </div>
-        <button id="searchBtn" class="btn" title="搜索"><span class="btn-icon" data-icon="search"></span>搜索</button>
         <button id="resetFiltersBtn" class="btn" title="重置筛选"><span class="btn-icon" data-icon="reset"></span>重置</button>
       </section>
     </div>
@@ -180,7 +182,8 @@
     </div>
     <div id="emptyState" class="empty-state hidden">
       <span class="empty-icon" data-icon="sparkles"></span>
-      <p>这一册还是空白。<br>在上方选定存放照片的文件夹，点「开始整理」翻开第一页。</p>
+      <p id="emptyStateText">这一册还是空白。<br>在上方选定存放照片的文件夹，点「开始整理」翻开第一页。</p>
+      <button id="emptyResetFiltersBtn" class="btn hidden" type="button"><span class="btn-icon" data-icon="reset"></span>重置筛选条件</button>
     </div>
 
   

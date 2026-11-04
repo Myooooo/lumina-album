@@ -1449,6 +1449,27 @@ function renderGallery(options = {}) {
     state.renderedCount = 0;
   }
   if (!state.photos.length) {
+    const totalInAlbum = Number(($("statTotal") && $("statTotal").textContent) || 0);
+    const hasFilterOrSearch =
+      ($("searchInput") && $("searchInput").value.trim() !== "") ||
+      ($("kindFilter") && $("kindFilter").value !== "") ||
+      ($("minScoreFilter") && $("minScoreFilter").value !== "") ||
+      ($("tagFilter") && $("tagFilter").value !== "") ||
+      ($("yearFilter") && $("yearFilter").value !== "") ||
+      ($("statusFilter") && $("statusFilter").value !== "all" && totalInAlbum > 0);
+    const textEl = $("emptyStateText");
+    const resetBtn = $("emptyResetFiltersBtn");
+    if (textEl) {
+      if (hasFilterOrSearch && totalInAlbum > 0) {
+        textEl.innerHTML =
+          "没有寻访到相符的回忆。<br>不妨放宽筛选条件，或换一个词再试一次。";
+        if (resetBtn) resetBtn.classList.remove("hidden");
+      } else {
+        textEl.innerHTML =
+          "这一册还是空白。<br>在上方选定存放照片的文件夹，点「开始整理」翻开第一页。";
+        if (resetBtn) resetBtn.classList.add("hidden");
+      }
+    }
     empty.classList.remove("hidden");
     updateLoadMoreButton();
     return;
@@ -5180,6 +5201,9 @@ function init() {
   $("settingsBtn").addEventListener("click", openSettings);
   $("searchBtn").addEventListener("click", loadPhotos);
   $("resetFiltersBtn").addEventListener("click", resetFilters);
+  if ($("emptyResetFiltersBtn")) {
+    $("emptyResetFiltersBtn").addEventListener("click", resetFilters);
+  }
   $("loadMoreBtn").addEventListener("click", loadMorePhotos);
   $("cancelScanBtn").addEventListener("click", async () => {
     if (state.currentJobId) {
@@ -5196,7 +5220,17 @@ function init() {
   $("tagFilter").addEventListener("change", loadPhotos);
   $("favoriteFilter").addEventListener("change", loadPhotos);
   $("yearFilter").addEventListener("change", loadPhotos);
-  $("searchMode").addEventListener("change", loadPhotos);
+  $("searchMode").addEventListener("change", () => {
+    const mode = $("searchMode").value;
+    const input = $("searchInput");
+    if (input) {
+      input.placeholder =
+        mode === "visual"
+          ? "描述画面细节，让模型看图寻找（如：逆光的侧影、红衣女孩）…"
+          : "例如：去年秋天的金黄落叶、西湖落日…";
+    }
+    loadPhotos();
+  });
 
   $("deleteSelectedBtn").addEventListener("click", () => deletePhotos([...state.selected]));
   $("restoreSelectedBtn").addEventListener("click", () => restorePhotos([...state.selected]));

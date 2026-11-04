@@ -115,7 +115,11 @@ window.LuminaUI = (() => {
     trigger.className = "custom-select-trigger";
     trigger.setAttribute("aria-haspopup", "listbox");
     trigger.setAttribute("aria-expanded", "false");
-    trigger.innerHTML = '<span class="custom-select-label"></span><span class="custom-select-arrow"></span>';
+    const prefixText = select.dataset.prefix || "";
+    const prefixMarkup = prefixText
+      ? `<span class="custom-select-prefix">${prefixText} ·</span>`
+      : "";
+    trigger.innerHTML = `${prefixMarkup}<span class="custom-select-label"></span><span class="custom-select-arrow"></span>`;
     wrapper.appendChild(trigger);
 
     const menu = document.createElement("div");

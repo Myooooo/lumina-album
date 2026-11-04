@@ -1323,7 +1323,7 @@ section("toolbar layout");
     "every button shares one height",
     // The rule puts the fixed height a little way into the block, after the flex
     // and gap declarations.
-    /\.btn \{[\s\S]{0,900}?height:\s*38px/.test(css),
+    /\.btn \{[\s\S]{0,900}?height:\s*36px/.test(css),
     true
   );
   check(
@@ -1573,11 +1573,30 @@ section("cross-view stability");
     true
   );
   check(
-    "filter controls and custom select triggers share the 38px toolbar height",
-    /\.filter-group select,\s*\.filter-group input \{[\s\S]{0,80}height:\s*38px/.test(
+    "filter controls and custom select triggers share the 36px toolbar height",
+    /\.filter-group select,\s*\.filter-group input \{[\s\S]{0,80}height:\s*36px/.test(
       stylesheet
     ) &&
-      /\.custom-select-trigger \{[\s\S]{0,80}height:\s*38px/.test(stylesheet),
+      /\.custom-select-trigger \{[\s\S]{0,80}height:\s*36px/.test(stylesheet),
+    true
+  );
+  check(
+    "segmented search capsule integrates searchMode, searchInput, and searchBtn",
+    /class="search-capsule"[\s\S]{0,600}id="searchMode"[\s\S]{0,400}id="searchInput"[\s\S]{0,300}id="searchBtn"/.test(
+      htmlDoc
+    ) && /\.search-capsule \{/.test(stylesheet),
+    true
+  );
+  check(
+    "curated photobook palette tokens (#f8f4ec, #261f19, #ae764e) are active in :root",
+    /--bg:\s*#f8f4ec/i.test(stylesheet) &&
+      /--text:\s*#261f19/i.test(stylesheet) &&
+      /--primary:\s*#ae764e/i.test(stylesheet),
+    true
+  );
+  check(
+    "empty state distinguishes filter/search miss from an empty folder",
+    /没有寻访到相符的回忆/.test(script) && /id="emptyResetFiltersBtn"/.test(htmlDoc),
     true
   );
 }
