@@ -1248,15 +1248,23 @@ section("toolbar layout");
     path.join(__dirname, "..", "static", "index.html"),
     "utf8"
   );
-  check("there are two toolbar rows", (html.match(/class="folder-row/g) || []).length, 2);
+  /* The four views are a tab strip now, not a row of buttons: it sits on its own
+     centred line, and the settings gear is pinned to that line's right edge so it
+     cannot pull the tabs off centre. */
+  check("the switcher has its own row", /class="view-switcher-row"/.test(html), true);
   check(
-    "the browsing row is marked",
-    /class="folder-row row-secondary view-switcher"/.test(html),
+    "the switcher is a tablist",
+    /class="view-switcher" role="tablist"/.test(html),
     true
   );
   check(
-    "the switcher has four tabs plus settings",
-    (html.match(/class="[^"]*view-tab[^"]*"/g) || []).length,
+    "it has a sliding ink element",
+    /class="view-ink" id="viewInk"/.test(html),
+    true
+  );
+  check(
+    "there are four tabs",
+    (html.match(/class="view-tab"/g) || []).length,
     4
   );
   check(
@@ -1265,27 +1273,37 @@ section("toolbar layout");
     true
   );
   check(
+    "the third tab reads 相似回忆",
+    /duplicatesBtn[\s\S]{0,220}相似回忆/.test(html),
+    true
+  );
+  check(
     "the album is the default view",
-    /id="albumView" class="page-view"/.test(html) &&
-      !/id="footprintsView" class="page-view "/.test(html),
+    /id="albumView" class="page-view"/.test(html),
     true
   );
   check(
-    "the browsing entries live on the second row",
-    /row-secondary[\s\S]{0,400}footprintsBtn[\s\S]{0,300}memoriesBtn[\s\S]{0,300}duplicatesBtn/
-      .test(html),
-    true
-  );
-  check(
-    "the album controls stay on the first row",
+    "the album controls stay in the toolbar",
     /folder-row[\s\S]{0,2200}scanBtn[\s\S]{0,600}importBtn[\s\S]{0,900}cardStatusBtn/
       .test(html),
     true
   );
   check(
-    "settings is pushed to the end of its row",
-    /id="settingsBtn"[^>]*class="[^"]*row-end/.test(html) ||
-      /class="[^"]*row-end[^"]*"[^>]*id="settingsBtn"/.test(html),
+    "settings lives on the switcher's row",
+    /view-switcher-row[\s\S]{0,1400}id="settingsBtn"/.test(html),
+    true
+  );
+  check(
+    "the multi-select shelf sits outside the album view",
+    // Inside `#albumView` the page's entrance transform would become its containing
+    // block and push this fixed bar below the fold. It is a sibling of the view now,
+    // placed just above the preview dialog.
+    (() => {
+      const album = html.indexOf('id="albumView"');
+      const shelf = html.indexOf('id="selectionBar"');
+      const preview = html.indexOf('id="previewModal"');
+      return album < shelf && shelf < preview;
+    })(),
     true
   );
 }
@@ -1411,10 +1429,20 @@ section("photobook layout and motion system");
     true
   );
   check(
-    "Memories uses a full-bleed responsive photobook grid instead of a 150px strip",
-    /\.memory-strip \{[\s\S]{0,160}display:\s*grid;[\s\S]{0,160}minmax\(230px,\s*1fr\)/.test(
-      css
-    ),
+    "Memories reuses the album's polaroid in a column flow",
+    /\.memory-strip \{[\s\S]{0,140}column-width:/.test(css) &&
+      /\.memory-strip \.polaroid-card\b/.test(css),
+    true
+  );
+  check(
+    "足迹's place grid uses the same card and flow",
+    /\.footprint-photos \{[\s\S]{0,140}column-width:/.test(css) &&
+      /\.footprint-photos \.polaroid-card\b/.test(css),
+    true
+  );
+  check(
+    "the bespoke memory card is gone",
+    !/\.memory-card \{/.test(css) && !/\.footprint-photo \{/.test(css),
     true
   );
   check(

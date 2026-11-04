@@ -1005,7 +1005,7 @@ select {
 .polaroid-card.is-video .polaroid-inner {
   background: #14120f;
   border: 1px solid #2b2620;
-  border-radius: 3px;
+  border-radius: 2px;
   box-shadow: 0 10px 26px rgba(18, 14, 10, 0.32);
   /* Wide enough for the sprocket column on each side; the picture sits between
      them, so the holes never land on the frame. */
@@ -1657,7 +1657,7 @@ select {
 /* The detail dialog is always above whatever opened it.
    Every modal shares z-index 100, so stacking fell back to document order - and
    #previewModal is the first modal in the markup, which meant 足迹, 那年今日 and
-   重复回忆 painted straight over it. Clicking a photo in any of those sheets
+   相似回忆 painted straight over it. Clicking a photo in any of those sheets
    produced a dialog the reader could not see or use. The confirm dialog sits at
    1000 and this goes between them. */
 #previewModal {
@@ -3928,7 +3928,7 @@ select {
 }
 
 /* ---------- Pages ----------
-   The album, 足迹, 那年今日 and 重复回忆 are four pages, not a page and three dialogs.
+   The album, 足迹, 那年今日 and 相似回忆 are four pages, not a page and three dialogs.
    Only one carries `hidden` at a time; `showView` owns that. */
 
 .page-view {
@@ -3961,7 +3961,7 @@ select {
   margin: 0;
 }
 
-/* Editorial chapter header shared by 足迹 / 那年今日 / 重复回忆 */
+/* Editorial chapter header shared by 足迹 / 那年今日 / 相似回忆 */
 .view-header {
   display: flex;
   align-items: flex-end;
@@ -3999,44 +3999,178 @@ select {
   color: var(--primary);
 }
 
-/* The switcher. Four peers in a warm linen pill trough, plus the settings gear. */
-.view-switcher {
-  padding-top: 2px;
-}
+/* ---------- The view switcher ----------
+   The settings panel's tab strip, reused: a linen trough with a paper ink that
+   slides under the selected label. Four peers describing where you are, centred on
+   their own line, with the settings gear parked at the row's right edge because it
+   is not one of them. */
 
-.view-switcher .view-tab {
+.view-switcher-row {
   position: relative;
-  border-color: rgba(130, 100, 70, 0.16);
-  background: rgba(255, 253, 249, 0.68);
-  transition: transform var(--dur-press) var(--ease-out),
-              color var(--dur-fast) var(--ease-out),
-              background-color var(--dur-fast) var(--ease-out),
-              border-color var(--dur-fast) var(--ease-out),
-              box-shadow var(--dur-ui) var(--ease-out);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
 }
 
-/* The selected page: a distinct framed & filled capsule with a subtle outer halo. */
-.view-switcher .view-tab.is-active {
-  background: linear-gradient(150deg, #c08c63, var(--primary));
-  border-color: var(--primary-dark);
-  color: #fff8ef;
+/* The gear sits at the edge without pulling the tabs off centre: it is taken out of
+   the centring calculation and pinned instead. */
+.view-switcher-row #settingsBtn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.view-switcher {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(179, 129, 90, 0.075);
+  border: 1px solid rgba(179, 129, 90, 0.14);
+  box-shadow: inset 0 1px 2px rgba(130, 100, 70, 0.05);
+}
+
+/* The ink. Width and offset come from JS, measured off the real tab, so the motion
+   follows the label whatever the font resolves to. The slight overshoot is the
+   settings panel's curve: it is what makes a tab change read as a slide rather than
+   a cut. */
+.view-ink {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 0;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  box-shadow: 0 2px 10px rgba(60, 40, 20, 0.1),
+              inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+  opacity: 0;
+  transition: transform .34s cubic-bezier(.34, 1.3, .5, 1),
+              width .34s cubic-bezier(.34, 1.3, .5, 1),
+              opacity .2s ease;
+}
+
+.view-tab {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              transform var(--dur-press) var(--ease-out);
+}
+
+.view-tab svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.view-tab:hover {
+  color: var(--text);
+}
+
+.view-tab:hover svg {
+  color: var(--primary);
+}
+
+.view-tab:active {
+  transform: scale(0.97);
+}
+
+.view-tab.is-active {
+  color: var(--primary-dark);
   font-weight: 600;
-  box-shadow: 0 0 0 3px var(--primary-glow), 0 4px 14px rgba(179, 125, 86, 0.28);
 }
 
-.view-switcher .view-tab.is-active:hover {
-  background: linear-gradient(150deg, #c08c63, var(--primary));
-  border-color: var(--primary-dark);
-  color: #fff8ef;
+.view-tab.is-active svg {
+  color: var(--primary);
 }
 
-.view-switcher .view-tab.is-active svg {
-  color: #fff8ef;
-}
-
-.view-switcher .view-tab:focus-visible {
+.view-tab:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view-ink {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .view-switcher {
+    padding: 3px;
+    gap: 2px;
+  }
+  .view-tab {
+    height: 32px;
+    padding: 0 11px;
+    font-size: 12.5px;
+  }
+}
+
+/* ---------- The toolbar and the filters, joined ----------
+   On the album these two blocks sit one on top of the other, so a border and a
+   shadow between them drew a seam through what is one header. With `data-view`
+   on the body this is a per-view decision: flat and continuous on the album, and
+   the toolbar's own edge and shadow everywhere else, where it floats over content
+   that scrolls beneath it. */
+
+body[data-view="album"] .topbar {
+  border-bottom-color: transparent;
+  box-shadow: none;
+  /* The same paper the filter bar uses, so no tint step shows at the join. */
+  background: rgba(249, 246, 240, 0.92);
+}
+
+body[data-view="album"] .album-sticky-bar {
+  /* It is the lower half of the header now, not a separate shelf: no top edge, and
+     the pair share one shadow cast by the bar that ends the header. */
+  border-bottom-color: var(--border);
+  box-shadow: 0 10px 26px rgba(60, 40, 20, 0.05);
+  transition: box-shadow var(--dur-ui) var(--ease-out);
+}
+
+/* A hairline where the actions end and the filters begin, inside the one surface -
+   an inner division rather than an outer edge. */
+body[data-view="album"] .album-sticky-bar::before {
+  content: "";
+  position: absolute;
+  left: var(--page-pad-x);
+  right: var(--page-pad-x);
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--border) 12%,
+    var(--border) 88%,
+    transparent
+  );
+}
+
+/* Away from the album the toolbar keeps its shadow, and it deepens once the page
+   has scrolled so the header stays legible over photographs. */
+body:not([data-view="album"]) .topbar {
+  box-shadow: 0 4px 24px rgba(60, 40, 20, 0.055);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4599,100 +4733,41 @@ select {
 }
 
 /* Full-bleed responsive photobook grid for each year's memories. */
+/* The gallery's own flow. A polaroid is a fixed-aspect picture in a variable-height
+   mount, so equal-height grid cells would stretch the shorter captions. Columns pack
+   by height, which is what makes a row of cards look hand-arranged rather than
+   tabulated - the same reason the album uses them. */
 .memory-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 20px;
+  column-width: 232px;
+  column-gap: 22px;
+  padding: 8px 0 4px;
 }
 
-.memory-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  padding: 10px 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--panel-solid);
-  box-shadow: 0 4px 16px rgba(60, 40, 20, 0.05);
-  overflow: hidden;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  transition: transform var(--dur-ui) var(--ease-out),
-              box-shadow var(--dur-ui) var(--ease-out),
-              border-color var(--dur-fast) var(--ease-out);
-}
-
-.memory-shot {
-  position: relative;
-  display: block;
+/* The gallery's own flow. A polaroid is a fixed-aspect picture in a variable-height
+   mount, so equal-height grid cells would stretch the shorter captions. Columns pack
+   by height, which is what makes a row of cards look hand-arranged. */
+.memory-strip .polaroid-card {
+  display: inline-block;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  border-radius: 8px;
-  overflow: hidden;
-  background: rgba(60, 40, 20, 0.04);
+  margin: 0 0 22px;
+  break-inside: avoid;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .memory-card:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-card);
-    border-color: rgba(179, 125, 86, 0.42);
-  }
-  .memory-card:hover .memory-img {
-    transform: scale(1.04);
-  }
-}
-
-.memory-card:active {
-  transform: translateY(0) scale(0.985);
-  transition-duration: var(--dur-press);
-}
-
-.memory-card:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
-
-.memory-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  transition: transform var(--dur-slow) var(--ease-out);
-}
-
-.memory-caption {
-  margin-top: 10px;
-  padding: 0 2px;
-  font-family: var(--font-serif);
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.memory-caption.is-muted {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--muted);
-}
-
-/* Photos the model has already read carry a small mark. */
+/* Photos the model has already read carry a small mark, so a memory with a written
+   sentence is distinguishable before it is opened. It sits inside the frame, where
+   the gallery puts its own badges. */
 .memory-mark {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: rgba(179, 125, 86, 0.92);
+  background: rgba(179, 125, 86, 0.94);
   color: #fff8ef;
   pointer-events: none;
   box-shadow: 0 2px 6px rgba(60, 40, 20, 0.28);
@@ -4703,22 +4778,10 @@ select {
   height: 13px;
 }
 
-.memory-card.is-analysed .memory-img {
-  filter: saturate(1.02);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .memory-year,
   .memories-empty {
     animation: none !important;
-  }
-  .memory-card,
-  .memory-img {
-    transition: border-color var(--dur-fast) var(--ease-out);
-  }
-  .memory-card:hover,
-  .memory-card:hover .memory-img {
-    transform: none;
   }
 }
 
@@ -4727,8 +4790,11 @@ select {
     padding: 16px;
   }
   .memory-strip {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
+    column-width: 150px;
+    column-gap: 12px;
+  }
+  .memory-strip .polaroid-card {
+    margin-bottom: 12px;
   }
 }
 
@@ -4994,11 +5060,20 @@ select {
   height: 15px;
 }
 
+/* Same flow as the album and 那年今日, so a place's photos and the day's photos are
+   visibly the same kind of object. */
 .footprint-photos {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 20px;
+  column-width: 232px;
+  column-gap: 22px;
+  padding: 8px 0 4px;
   animation: footprintPhotosIn var(--dur-panel) var(--ease-out) both;
+}
+
+.footprint-photos .polaroid-card {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 22px;
+  break-inside: avoid;
 }
 
 @keyframes footprintPhotosIn {
@@ -5006,40 +5081,10 @@ select {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.footprint-photo {
-  position: relative;
-  aspect-ratio: 4 / 3;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--panel-solid);
-  box-shadow: 0 4px 16px rgba(60, 40, 20, 0.05);
-  overflow: hidden;
-  cursor: pointer;
-  transition: transform var(--dur-ui) var(--ease-out),
-              box-shadow var(--dur-ui) var(--ease-out),
-              border-color var(--dur-fast) var(--ease-out);
-}
 
-.footprint-photo img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 8px;
-  display: block;
-  transition: transform var(--dur-slow) var(--ease-out);
-}
 
 @media (hover: hover) and (pointer: fine) {
-  .footprint-photo:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-card);
-    border-color: rgba(179, 125, 86, 0.42);
-  }
-  .footprint-photo:hover img {
-    transform: scale(1.04);
-  }
-  .footprint-card:hover {
+      .footprint-card:hover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-card);
     border-color: rgba(179, 125, 86, 0.42);
@@ -5049,15 +5094,7 @@ select {
   }
 }
 
-.footprint-photo:active {
-  transform: translateY(0) scale(0.985);
-  transition-duration: var(--dur-press);
-}
 
-.footprint-photo:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-}
 
 .footprint-card:active {
   transform: translateY(-1px) scale(0.985);
@@ -5156,7 +5193,10 @@ select {
     gap: 14px;
   }
   .footprint-photos {
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 12px;
+    column-width: 150px;
+    column-gap: 12px;
+  }
+  .footprint-photos .polaroid-card {
+    margin-bottom: 12px;
   }
 }

@@ -107,7 +107,19 @@ VISUAL_SEARCH_BATCH = 4
 
 #: The search modes ``/api/search`` understands. ``visible`` looks at the pixels,
 #: the other three read the index.
-SEARCH_MODES = ("keyword", "semantic", "smart", "visual")
+#: The search strategies offered to the user.
+#:
+#: Two, not four. See the module note above the search endpoint: `keyword` only
+#: matched a word that happened to be in a caption (0 results for 4 of 5 ordinary
+#: queries), and `semantic` was strictly dominated by `smart` - same model call, no
+#: local recall, and a hard 502 instead of a graceful fallback. `visual` stays
+#: because it answers a different question by different means.
+SEARCH_MODES = ("smart", "visual")
+
+#: Modes that are no longer offered but are still accepted, so a bookmarked request
+#: or an old cached page does not fail with "不支持的搜索方式". They are mapped onto
+#: the mode that supersedes them.
+_LEGACY_SEARCH_MODES = {"keyword": "smart", "semantic": "smart"}
 
 
 def _duplicate_payload(photo: dict[str, Any]) -> dict[str, Any]:
@@ -1944,6 +1956,9 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         folder = data.get("folder", "").strip() or None
         query = data.get("query", "").strip()
         mode = data.get("mode", "smart") or "smart"
+        # A retired mode is redirected rather than rejected: the page is a single
+        # long-lived tab, so it can still be holding the old option value.
+        mode = _LEGACY_SEARCH_MODES.get(mode, mode)
         if mode not in SEARCH_MODES:
             # An unknown mode used to fall through every branch and return an
             # empty result set, which reads as "nothing matches" rather than

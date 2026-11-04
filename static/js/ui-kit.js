@@ -20,12 +20,34 @@ window.LuminaUI = (() => {
    * Cancels a pending exit as well: re-opening a dialog within the closing
    * window must not let the earlier timer hide it again a moment later.
    */
+  //: Where dynamic dialog layers start. Above every static layer in style.css
+  //: except the toast (2000), which must stay above all dialogs.
+  const MODAL_LAYER_BASE = 1100;
+
+  //: Monotonic, so a dialog opened later always wins. Bounded by releasing the
+  //: value when a dialog closes, which keeps it from growing without limit over a
+  //: long session.
+  let modalLayerCounter = 0;
+
+  /**
+   * Open a dialog, on a layer above whatever is already open.
+   *
+   * Every `.modal` inherits `z-index: 100` and `#previewModal` overrides it at 400,
+   * so a dialog raised *from* the preview - 编辑回忆, 暂时收起 - opened underneath it and
+   * its buttons looked broken. Static layers cannot express "whichever opened last",
+   * which is the actual rule, so the layer is assigned here.
+   */
   function showModal(el) {
     if (!el) return;
     if (el._luminaExitTimer) {
       clearTimeout(el._luminaExitTimer);
       el._luminaExitTimer = null;
     }
+    // Re-opening the same dialog (a second confirm on top of the first) must also
+    // move it to the front.
+    modalLayerCounter += 1;
+    el.style.zIndex = String(MODAL_LAYER_BASE + modalLayerCounter);
+    el._luminaLayer = MODAL_LAYER_BASE + modalLayerCounter;
     el.classList.remove("closing");
     el.classList.remove("hidden");
   }
@@ -46,6 +68,12 @@ window.LuminaUI = (() => {
       el._luminaExitTimer = null;
       el.classList.remove("closing");
       el.classList.add("hidden");
+      // Hand the layer back: the dialog is gone, and a counter that only ever
+      // climbs would eventually outgrow what the stylesheet expects.
+      if (el._luminaLayer) {
+        el._luminaLayer = 0;
+        el.style.zIndex = "";
+      }
       if (typeof onHidden === "function") onHidden();
     };
     if (prefersReducedMotion()) {
@@ -160,6 +188,21 @@ window.LuminaUI = (() => {
 
     select.classList.add("native-hidden");
     updateLabel();
+
+    // A dropdown must cover the dialog it lives in. The dialogs take 1100+ layers
+    // from `showModal`, so the menu cannot use a constant: it reads the owning
+    // dialog's layer when it opens and sits just above it.
+    if (menu) {
+      const ownerLayer = () => {
+        const dialog = wrapper.closest(".modal");
+        if (!dialog || !dialog._luminaLayer) return "";
+        return String(dialog._luminaLayer + 1);
+      };
+      trigger.addEventListener("click", () => {
+        const value = ownerLayer();
+        menu.style.zIndex = value;
+      });
+    }
   }
 
   function setSelectValue(select, value) {

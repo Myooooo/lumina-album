@@ -13,7 +13,7 @@ const state = {
   selected: new Set(),
   currentDirPath: "",
   currentPreviewId: null,
-  //: Set when a sheet (足迹 / 那年今日 / 重复回忆) owns the detail dialog:
+  //: Set when a sheet (足迹 / 那年今日 / 相似回忆) owns the detail dialog:
   //: ``{ids, title}``. Navigation then walks ``ids`` instead of the gallery, because
   //: those sheets show photos the album page may not have loaded at all.
   previewContext: null,
@@ -1196,6 +1196,50 @@ function cardHtml(photo) {
 }
 
 /**
+ * The album's polaroid card, for a read-only grid.
+ *
+ * 那年今日 and a place in 足迹 both show photos the reader can look at but not act on
+ * from here, so the card carries the tape, the frame, the caption, the location and
+ * the tags - and none of the per-card buttons. Wrapping it in the same classes as the
+ * gallery means the tilt cycle, the entrance and the hover all come from CSS that
+ * already exists; a second, nearly-identical card would drift away from it.
+ */
+function memoryPolaroidHtml(photo, options = {}) {
+  const { deactivate = false } = options;
+  const isVideo = photo.media_kind === "video";
+  const tags = Array.isArray(photo.tags) ? photo.tags.slice(0, 3) : [];
+  const tagsHtml = tags.length
+    ? `<div class="back-tags">${tags
+        .map((tag) => `<span class="tag">${escapeHtml(String(tag))}</span>`)
+        .join("")}</div>`
+    : "";
+  const score =
+    photo.score !== null && photo.score !== undefined
+      ? `<span class="score-pill total">${Number(photo.score).toFixed(1)}</span>`
+      : "";
+  const comment = (photo.reason || photo.title || "").trim();
+  return `
+    <div class="polaroid-card${isVideo ? " is-video" : ""}${deactivate ? " is-static" : ""}"
+         data-id="${photo.id}">
+      <div class="polaroid-inner">
+        <div class="polaroid-front">
+          ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape"></div>'}
+          <div class="polaroid-photo-frame">
+            <img class="polaroid-photo" data-src="${thumbnailUrl(photo)}"
+                 alt="${escapeHtml(photo.filename || "")}" loading="lazy" decoding="async" />
+          </div>
+          <div class="polaroid-body">
+            ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
+            ${comment ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(comment)}</div>` : ""}
+            ${tagsHtml}
+            ${score ? `<div class="card-pills">${score}</div>` : ""}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/**
  * The thumbnail URL for a card.
  *
  * ``v`` is the row's content hash, which changes whenever the JPEG is
@@ -1372,6 +1416,18 @@ function cullCard(card, height) {
     card.style.containIntrinsicSize = `auto ${height}px`;
   }
   card.classList.add("is-culled");
+}
+
+/**
+ * Register every polaroid inside ``root`` with the lazy loader.
+ *
+ * The gallery calls `watchThumb` card by card as it builds the grid. 那年今日 and 足迹
+ * insert a block of cards in one `innerHTML`, so they need the whole subtree swept -
+ * without it the pictures stay `data-src` and the cards render empty.
+ */
+function watchPolaroids(root) {
+  if (!root) return;
+  for (const card of root.querySelectorAll(".polaroid-card")) watchThumb(card);
 }
 
 /** Start observing a card's image (called for every card that enters the DOM). */
@@ -1719,11 +1775,17 @@ function showView(name) {
     }
   }
 
+  // Slide the ink under the selected label. Measured from the element, so it
+  // follows the real text rather than an assumed width.
+  moveViewInk(target.button);
   // A playing clip must not keep decoding behind a hidden panel, and the dialog
   // belongs to the view it was opened from.
   if (state.currentPreviewId) closeModal("previewModal");
   state.view = target.name;
   state.previewContext = null;
+  // CSS joins the toolbar to the filter bar on the album and keeps them separate
+  // elsewhere; the difference is a fact about the page, so it lives on the body.
+  document.body.dataset.view = target.name;
   saveUiState({ view: target.name });
 
   if (viewTransitionTimer) {
@@ -1778,6 +1840,30 @@ function showView(name) {
     viewTransitionTimer = null;
     activateTarget();
   }, 140);
+}
+
+/**
+ * Put the ink under the given switcher button.
+ *
+ * Uses `offsetLeft`/`offsetWidth`, which are layout numbers rather than a transform,
+ * so the ink's own CSS transition can animate between them. A button that is hidden
+ * or not yet laid out measures 0, in which case the ink is simply hidden rather than
+ * parked in the top-left corner.
+ */
+function moveViewInk(buttonId) {
+  const ink = $("viewInk");
+  const button = $(buttonId);
+  if (!ink || !button) return;
+  const wrapper = ink.parentElement;
+  if (!wrapper) return;
+  const width = button.offsetWidth;
+  if (!width) {
+    ink.style.opacity = "0";
+    return;
+  }
+  ink.style.opacity = "1";
+  ink.style.width = `${width}px`;
+  ink.style.transform = `translateX(${button.offsetLeft}px)`;
 }
 
 /** The view named in the URL hash, or the album. */
@@ -2768,7 +2854,7 @@ async function navigatePreview(delta) {
  * Whether there is a photo in that direction to move to.
  *
  * Reads the same order `navigatePreview` walks. It used to measure the gallery's
- * order unconditionally, so a photo opened from 足迹 or 重复回忆 was either missing
+ * order unconditionally, so a photo opened from 足迹 or 相似回忆 was either missing
  * from that order or alone in it and both arrows vanished - the sheet's own list
  * was never consulted.
  */
@@ -3123,7 +3209,7 @@ function resetFullscreenZoom() {
  * Show one photo in the detail dialog.
  *
  * ``context`` is ``{ids, title}`` when a sheet is opening it - 足迹's places, 那年今日's
- * days, 重复回忆's groups. The dialog then walks that list with the arrow keys and
+ * days, 相似回忆's groups. The dialog then walks that list with the arrow keys and
  * labels itself with the title, instead of falling back to the album's rows, which
  * may not contain the photo at all.
  */
@@ -5531,14 +5617,9 @@ function footprintCardHtml(place, index) {
     </button>`;
 }
 
-/** One thumbnail inside an opened place. */
+/** One print inside an opened place: the album's card again. */
 function footprintPhotoHtml(photo) {
-  return `
-    <button class="footprint-photo" type="button" data-id="${photo.id}"
-            title="${escapeHtml(photo.filename || "")}">
-      <img src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename || "")}"
-           loading="lazy" decoding="async" />
-    </button>`;
+  return memoryPolaroidHtml(photo, { deactivate: true });
 }
 
 /** The place list: every city with a cover. */
@@ -5641,10 +5722,10 @@ function appendPlacePhotos() {
   const from = state.footprintShown || 0;
   const to = Math.min(from + PLACE_PAGE_SIZE, photos.length);
   if (from >= to) return;
-  list.insertAdjacentHTML(
-    "beforeend",
-    photos.slice(from, to).map(footprintPhotoHtml).join("")
-  );
+  const html = photos.slice(from, to).map(footprintPhotoHtml).join("");
+  list.insertAdjacentHTML("beforeend", html);
+  // The new cards are `data-src` until the observer knows about them.
+  watchPolaroids(list);
   state.footprintShown = to;
   // A short list leaves the sheet with nothing to scroll, so fill it now rather
   // than waiting for a scroll that can never happen.
@@ -5753,11 +5834,14 @@ function initFootprints() {
   }, { passive: true });
 
   body.addEventListener("click", (e) => {
-    const photo = e.target.closest(".footprint-photo");
+    // The shared card: a polaroid in an opened place.
+    const photo = e.target.closest(".polaroid-card");
     if (photo) {
       const id = Number(photo.dataset.id);
       const place = state.footprintPlace;
       if (!Number.isFinite(id) || !place) return;
+      // Ignore a click that landed on the card's own controls, if any are added.
+      if (e.target.closest("button:not(.polaroid-card)")) return;
       // The place's photos become the dialog's order, so 上一张 / 下一张 stay inside
       // the place the reader is looking at.
       openPreview(id, {
@@ -5797,20 +5881,15 @@ function yearsAgoText(years) {
  */
 function memoryCardHtml(photo) {
   const analysed = photo.status === "analyzed" && photo.score !== null;
-  const note = (photo.title || photo.reason || "").trim();
-  const captionHtml = note
-    ? `<span class="memory-caption">${escapeHtml(note)}</span>`
-    : `<span class="memory-caption is-muted">${escapeHtml(photo.filename || "")}</span>`;
-  return `
-    <button class="memory-card${analysed ? " is-analysed" : ""}" type="button"
-            data-id="${photo.id}" title="${escapeHtml(photo.filename)}">
-      <span class="memory-shot">
-        <img class="memory-img" src="${thumbnailUrl(photo)}"
-             alt="${escapeHtml(photo.filename)}" loading="lazy" decoding="async" />
-        ${analysed ? '<span class="memory-mark" data-icon="sparkles"></span>' : ""}
-      </span>
-      ${captionHtml}
-    </button>`;
+  // The album's own card, so a memory looks like the photo it is.
+  const card = memoryPolaroidHtml(photo);
+  if (!analysed) return card;
+  // The analysed mark sits inside the frame, where the gallery puts its badges.
+  return card.replace(
+    '<div class="polaroid-photo-frame">',
+    '<div class="polaroid-photo-frame">'
+      + '<span class="memory-mark" data-icon="sparkles"></span>'
+  );
 }
 
 function memoryYearHtml(bucket, index) {
@@ -5842,6 +5921,7 @@ function renderMemories(data) {
   state.memoriesData = data;
   body.innerHTML = data.years.map(memoryYearHtml).join("");
   renderAllIcons(body);
+  watchPolaroids(body);
 }
 
 /**
@@ -6007,7 +6087,7 @@ function initMemories() {
     // A thumbnail opens that photo in the detail dialog, on top of this sheet -
     // which is what the reader wants: look, then come back to the year strip.
     body.addEventListener("click", (e) => {
-      const card = e.target.closest(".memory-card");
+      const card = e.target.closest(".polaroid-card");
       if (!card) return;
       const id = Number(card.dataset.id);
       if (!Number.isFinite(id)) return;
@@ -6414,7 +6494,7 @@ function initDuplicates() {
       adoptPhotos(group ? group.photos : []);
       openPreview(id, {
         ids: group ? group.photos.map((photo) => photo.id) : [id],
-        title: group ? `${group.photos.length} 张相似` : "重复回忆",
+        title: group ? `${group.photos.length} 张相似` : "相似回忆",
       });
     });
   }

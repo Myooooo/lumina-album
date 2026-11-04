@@ -6373,6 +6373,99 @@ class DuplicateThresholdStateTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
 
 
+class SearchModeTests(unittest.TestCase):
+    """Two search modes, and the retired ones still answered.
+
+    Measured on the real library, `keyword` returned nothing for four of five
+    ordinary Chinese queries - it can only match words that happen to appear in a
+    caption. `semantic` was strictly worse than `smart`: the same model call without
+    the local recall pass, so it took 6.6s where `smart` took 0.8s, and it returned a
+    hard 502 when the model was unreachable where `smart` degraded gracefully.
+    """
+
+    def _modes(self) -> tuple[str, ...]:
+        from photo_reviewer.server import SEARCH_MODES
+
+        return SEARCH_MODES
+
+    def test_only_two_modes_are_offered(self) -> None:
+        self.assertEqual(set(self._modes()), {"smart", "visual"})
+
+    def test_keyword_is_no_longer_offered(self) -> None:
+        self.assertNotIn("keyword", self._modes())
+
+    def test_semantic_is_no_longer_offered(self) -> None:
+        self.assertNotIn("semantic", self._modes())
+
+    def test_visual_survives_because_it_answers_differently(self) -> None:
+        """It looks at pixels, not captions, so it is not a worse `smart`."""
+        self.assertIn("visual", self._modes())
+
+    def test_retired_modes_are_redirected_not_rejected(self) -> None:
+        """A long-lived tab can still be holding an old option value."""
+        from photo_reviewer.server import _LEGACY_SEARCH_MODES
+
+        self.assertEqual(_LEGACY_SEARCH_MODES.get("keyword"), "smart")
+        self.assertEqual(_LEGACY_SEARCH_MODES.get("semantic"), "smart")
+        # A redirect target must itself be offered, or the redirect is a dead end.
+        for target in _LEGACY_SEARCH_MODES.values():
+            self.assertIn(target, self._modes())
+
+
+class ExportStyleTests(unittest.TestCase):
+    """The keepsake has to look like the app it came from."""
+
+    def test_html_uses_the_site_typography(self) -> None:
+        """Serif for prose, the hand face for the model's sentence."""
+        from photo_reviewer.exporter import build_html
+
+        html = build_html([], title="那年今日")
+        self.assertIn("--font-serif", html)
+        self.assertIn("--font-hand", html)
+        self.assertIn("font-family: var(--font-hand)", html)
+
+    def test_html_carries_the_site_palette(self) -> None:
+        from photo_reviewer.exporter import build_html
+
+        html = build_html([], title="那年今日")
+        # The paper, ink and warm accent the album itself uses.
+        for token in ("#f9f6f0", "#2c241d", "#b37d56"):
+            self.assertIn(token, html)
+
+    def test_html_animates_on_entry_and_respects_reduced_motion(self) -> None:
+        from photo_reviewer.exporter import build_html
+
+        html = build_html([], title="那年今日")
+        self.assertIn("printDrop", html)
+        self.assertIn("prefers-reduced-motion", html)
+
+    def test_html_still_prints_flat(self) -> None:
+        """The tilt and the shadow are screen decoration; paper gets neither."""
+        from photo_reviewer.exporter import build_html
+
+        html = build_html([], title="那年今日")
+        self.assertIn("@media print", html)
+        self.assertIn("transform: none", html)
+
+    def test_the_tall_image_keeps_the_paper_tone(self) -> None:
+        from photo_reviewer.exporter import ExportPhoto, build_tall_image
+
+        photos = [ExportPhoto(filename="a.jpg", path="", thumbnail_path=None)]
+        image = build_tall_image(photos, title="那年今日")
+        self.assertIsNotNone(image)
+        # The top-left corner is the paper the whole canvas is washed with.
+        pixel = image.getpixel((4, 4))
+        self.assertGreater(pixel[0], 230)
+        self.assertGreater(pixel[0], pixel[2])
+
+    def test_a_missing_file_is_said_plainly(self) -> None:
+        from photo_reviewer.exporter import ExportPhoto, build_html
+
+        photos = [ExportPhoto(filename="gone.jpg", path="/nope", thumbnail_path=None)]
+        html = build_html(photos, title="那年今日")
+        self.assertIn("已经不在原处", html)
+
+
 class VisualSearchTests(unittest.TestCase):
     """Asking the vision model which pictures match.
 

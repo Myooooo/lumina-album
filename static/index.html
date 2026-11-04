@@ -36,20 +36,24 @@
          line left two of them stranded on a second line at common widths, which
          reads as a layout accident rather than a group. Splitting them keeps the
          row above about "this album" and this row about "elsewhere in it". -->
-    <!-- The four views. Exactly one is on screen; the selected one is marked with
-         a filled chip, which is visible at a glance without a tab strip - the row
-         already carries icon buttons and an underline would read as settings tabs. -->
-    <div class="folder-row row-secondary view-switcher" role="tablist"
-         aria-label="切换页面">
-      <button id="albumViewBtn" class="btn view-tab" role="tab" aria-selected="true"
-              title="按画廊浏览这个相册"><span class="btn-icon" data-icon="collection"></span>相册</button>
-      <button id="footprintsBtn" class="btn view-tab" role="tab" aria-selected="false"
-              title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
-      <button id="memoriesBtn" class="btn view-tab" role="tab" aria-selected="false"
-              title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
-      <button id="duplicatesBtn" class="btn view-tab" role="tab" aria-selected="false"
-              title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复回忆</button>
-      <button id="settingsBtn" class="btn icon-only row-end" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
+    <!-- The four views, as the settings panel's tab strip: one row of peers with a
+         sliding ink behind the selected label. Centred on its own line, because
+         "where am I" is a different question from the album commands above it.
+         The gear moves to the toolbar's right edge for the same reason - it is not a
+         view. -->
+    <div class="view-switcher-row">
+      <div class="view-switcher" role="tablist" aria-label="切换页面">
+        <span class="view-ink" id="viewInk" aria-hidden="true"></span>
+        <button id="albumViewBtn" class="view-tab" role="tab" aria-selected="true"
+                title="按画廊浏览这个相册"><span class="btn-icon" data-icon="collection"></span>相册</button>
+        <button id="footprintsBtn" class="view-tab" role="tab" aria-selected="false"
+                title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
+        <button id="memoriesBtn" class="view-tab" role="tab" aria-selected="false"
+                title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
+        <button id="duplicatesBtn" class="view-tab" role="tab" aria-selected="false"
+                title="找出看起来相似的回忆"><span class="btn-icon" data-icon="rawLayers"></span>相似回忆</button>
+      </div>
+      <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
     <div id="cardBanner" class="card-banner hidden">
       <span class="btn-icon" data-icon="sdCard"></span>
@@ -149,9 +153,7 @@
         <div class="filter-group" data-filter-key="search_mode">
           <label><span class="label-icon" data-icon="scan"></span>搜索方式</label>
           <select id="searchMode">
-            <option value="smart">智能语义搜索</option>
-            <option value="keyword">关键词匹配</option>
-            <option value="semantic">大模型语义</option>
+            <option value="smart">探索回忆</option>
             <option value="visual">看图搜索</option>
           </select>
         </div>
@@ -187,17 +189,29 @@
       <p>还没有照片。<br>选择一份装满回忆的文件夹，开启温暖的时光旅程吧。</p>
     </div>
 
-    <div id="selectionBar" class="selection-bar hidden">
-      <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
-      <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
-      <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
-      <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
-      <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
-      <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
-      <button id="clearSelectionBtn" class="btn" title="取消选择"><span class="btn-icon" data-icon="close"></span>取消</button>
-    </div>
+  
 
   </div>
+
+  <!-- The multi-select shelf. Deliberately outside #albumView: that element
+       keeps a transform after its entrance animation, which would make it the
+       containing block for this fixed bar and push it off the bottom of the
+       screen. A shelf over the whole app belongs at the top level. -->
+
+
+  <!-- The multi-select shelf. Deliberately outside #albumView: that element
+       keeps a transform after its entrance animation, which makes it the
+       containing block for this fixed bar and pushes it below the fold. A shelf
+       over the whole app belongs at the top level. -->
+  <div id="selectionBar" class="selection-bar hidden">
+    <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
+    <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
+    <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
+    <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
+    <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
+    <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
+    <button id="clearSelectionBtn" class="btn" title="取消选择"><span class="btn-icon" data-icon="close"></span>取消</button>
+    </div>
 
   <!-- Immersive Lightbox Preview modal -->
   <div id="previewModal" class="modal hidden">
@@ -342,7 +356,7 @@
     <div class="view-inner">
       <header class="view-header">
         <div class="view-header-main">
-          <h2><span class="modal-title-icon" data-icon="rawLayers"></span>重复的回忆</h2>
+          <h2><span class="modal-title-icon" data-icon="rawLayers"></span>相似的回忆</h2>
           <p class="duplicates-lede" id="duplicatesLede">正在比对…</p>
         </div>
       </header>
