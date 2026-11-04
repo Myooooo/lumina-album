@@ -1429,15 +1429,15 @@ section("photobook layout and motion system");
     true
   );
   check(
-    "Memories reuses the album's polaroid in a column flow",
-    /\.memory-strip \{[\s\S]{0,140}column-width:/.test(css) &&
-      /\.memory-strip \.polaroid-card\b/.test(css),
+    "Memories uses the album's polaroid and the album's grid",
+    /\.memory-strip \{[\s\S]{0,200}grid-template-columns: repeat\(auto-fill, minmax\(300px, 1fr\)\)/
+      .test(css),
     true
   );
   check(
-    "足迹's place grid uses the same card and flow",
-    /\.footprint-photos \{[\s\S]{0,140}column-width:/.test(css) &&
-      /\.footprint-photos \.polaroid-card\b/.test(css),
+    "足迹's place grid uses the same card and the same grid",
+    /\.footprint-photos \{[\s\S]{0,200}grid-template-columns: repeat\(auto-fill, minmax\(300px, 1fr\)\)/
+      .test(css),
     true
   );
   check(
@@ -1462,6 +1462,90 @@ section("photobook layout and motion system");
   check(
     "no ease-in rule remains in style.css",
     !/:\s*[^;]*\bease-in\b(?!-out)/.test(css),
+    true
+  );
+}
+
+/* ------------------------------------------------------- cross-view stability
+   The four views differ in height, so switching between them adds and removes a
+   scrollbar. That took 8px of width and shifted every centred element by 4px, which
+   reads as the page jumping when only the content changed. */
+section("cross-view stability");
+
+{
+  // Read the sources here: this block runs at file scope, after the scopes that
+  // defined `css` and `src` for the earlier sections.
+  const stylesheet = fs.readFileSync(
+    path.join(__dirname, "..", "static", "style.css"),
+    "utf8"
+  );
+  const script = fs.readFileSync(
+    path.join(__dirname, "..", "static", "app.js"),
+    "utf8"
+  );
+
+  check(
+    "the scrollbar gutter is reserved",
+    /html \{[\s\S]{0,80}scrollbar-gutter: stable/.test(stylesheet),
+    true
+  );
+  check(
+    "older browsers get the fallback",
+    /@supports not \(scrollbar-gutter: stable\)[\s\S]{0,80}overflow-y: scroll/.test(
+      stylesheet
+    ),
+    true
+  );
+
+  /* A polaroid must fill its track. Without `width: 100%` a card takes its content's
+     width, so the album's card (with action buttons) filled the column while a
+     place's card - which has none - shrank by a few pixels. */
+  check(
+    "the polaroid fills its track",
+    /\.polaroid-card \{[\s\S]{0,400}?width: 100%/.test(stylesheet),
+    true
+  );
+  check(
+    "那年今日 does not inset its grid",
+    /\.memory-year \{[\s\S]{0,240}padding: 0/.test(stylesheet),
+    true
+  );
+  check(
+    "all three grids share one column rule",
+    (stylesheet.match(/repeat\(auto-fill, minmax\(300px, 1fr\)\)/g) || []).length >= 3,
+    true
+  );
+
+  /* Re-entering a view replaces its markup, so the pictures must be re-registered
+     with the lazy loader - otherwise they stay at `data-src` and `opacity: 0`. */
+  check(
+    "rendering 那年今日 registers its pictures",
+    /function renderMemories[\s\S]{0,900}watchPolaroids\(body\)/.test(script),
+    true
+  );
+  check(
+    "appending a place's pictures registers them too",
+    /list\.insertAdjacentHTML[\s\S]{0,200}watchPolaroids\(list\)/.test(script),
+    true
+  );
+  check(
+    "the reveal is not scoped to the gallery",
+    /document\.addEventListener\(/.test(script) &&
+      !/gallery\.addEventListener\([\s\S]{0,40}"load"/.test(script),
+    true
+  );
+
+  /* Changing the album must refresh whatever view is on screen, not just the gallery. */
+  check(
+    "changing the album refreshes the open view",
+    /function reloadCurrentView\(\)/.test(script) &&
+      /case "footprints":/.test(script) &&
+      /case "memories":/.test(script),
+    true
+  );
+  check(
+    "the folder input goes through it",
+    /state\.folder = val;[\s\S]{0,200}reloadCurrentView\(\)/.test(script),
     true
   );
 }

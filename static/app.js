@@ -1905,6 +1905,30 @@ function initViews() {
   else openViewByName(initial);
 }
 
+/**
+ * Re-fetch whatever view is on screen.
+ *
+ * The folder can change from the input, from the history list, or from the picker;
+ * each of those used to call `loadPhotos()` alone, which only refreshes the gallery.
+ * The other three views kept their old album's photos until they were reopened.
+ */
+async function reloadCurrentView() {
+  switch (state.view) {
+    case "footprints":
+      openFootprints();
+      break;
+    case "memories":
+      openMemories();
+      break;
+    case "duplicates":
+      loadDuplicates(dupState.threshold);
+      break;
+    default:
+      await loadPhotos();
+      break;
+  }
+}
+
 /** True when a dialog or the fullscreen viewer is on top of the gallery. */
 function isOverlayOpen() {
   const fullscreen = $("fullscreenModal");
@@ -1970,24 +1994,21 @@ function initGalleryEvents() {
   });
 
   // `load`/`error` do not bubble, so they are caught on the way down.
-  gallery.addEventListener(
-    "load",
-    (e) => {
-      if (e.target.classList && e.target.classList.contains("polaroid-photo")) {
-        e.target.classList.add("is-loaded");
-      }
-    },
-    true
-  );
-  gallery.addEventListener(
-    "error",
-    (e) => {
-      if (e.target.classList && e.target.classList.contains("polaroid-photo")) {
-        e.target.classList.add("is-loaded");
-      }
-    },
-    true
-  );
+  //
+  // Bound to the document rather than to the gallery: a polaroid is also rendered in
+  // 那年今日 and in an opened place in 足迹, and those pictures loaded correctly while
+  // staying at `opacity: 0` because nothing added `is-loaded` outside the grid.
+  for (const event of ["load", "error"]) {
+    document.addEventListener(
+      event,
+      (e) => {
+        if (e.target.classList && e.target.classList.contains("polaroid-photo")) {
+          e.target.classList.add("is-loaded");
+        }
+      },
+      true
+    );
+  }
 }
 
 /** Flip one photo's favourite flag and repaint just that card. */
@@ -2983,7 +3004,7 @@ function selectFolder(folder) {
   rememberFolder(clean);
   saveUiState({ folder: clean });
   $("folderInput").value = clean;
-  loadPhotos();
+  reloadCurrentView();
 }
 
 async function openFolder() {
@@ -4404,7 +4425,7 @@ async function removeCurrentFolder() {
     state.folder = await selectBestFolder();
     saveUiState({ folder: state.folder });
     $("folderInput").value = state.folder;
-    await loadPhotos();
+    await reloadCurrentView();
     updateTrashActions();
     const fallback = state.folder
       ? `已自动回到上一个有效目录：${state.folder}`
@@ -5124,7 +5145,7 @@ function init() {
       state.folder = val;
       rememberFolder(val);
       saveUiState({ folder: val });
-      loadPhotos();
+      reloadCurrentView();
     }
   });
 
@@ -5291,7 +5312,7 @@ function init() {
     saveUiState({ folder: state.folder });
     $("folderInput").value = state.folder;
     closeModal("dirModal");
-    loadPhotos();
+    reloadCurrentView();
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
@@ -5880,16 +5901,12 @@ function yearsAgoText(years) {
  * its poetic caption/title on the Polaroid frame underneath.
  */
 function memoryCardHtml(photo) {
-  const analysed = photo.status === "analyzed" && photo.score !== null;
   // The album's own card, so a memory looks like the photo it is.
-  const card = memoryPolaroidHtml(photo);
-  if (!analysed) return card;
-  // The analysed mark sits inside the frame, where the gallery puts its badges.
-  return card.replace(
-    '<div class="polaroid-photo-frame">',
-    '<div class="polaroid-photo-frame">'
-      + '<span class="memory-mark" data-icon="sparkles"></span>'
-  );
+  //
+  // No "already analysed" badge: in this view nearly every card has been read, so the
+  // mark was on almost all of them and distinguished nothing. The caption, the
+  // location and the tags are what tell one memory from another.
+  return memoryPolaroidHtml(photo);
 }
 
 function memoryYearHtml(bucket, index) {
@@ -5921,6 +5938,9 @@ function renderMemories(data) {
   state.memoriesData = data;
   body.innerHTML = data.years.map(memoryYearHtml).join("");
   renderAllIcons(body);
+  // Register the new pictures with the lazy loader here, not at the call site:
+  // re-entering the view re-runs this function and replaces the markup, and a caller
+  // that forgot the second step left every picture at `data-src` and `opacity: 0`.
   watchPolaroids(body);
 }
 

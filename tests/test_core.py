@@ -6412,6 +6412,49 @@ class SearchModeTests(unittest.TestCase):
             self.assertIn(target, self._modes())
 
 
+class ExportSourceTests(unittest.TestCase):
+    """The export reads the proxy render, not the thumbnail.
+
+    `rows_to_export` used to pass `thumb_path or proxy_path`, so every keepsake was
+    built from a ~400px thumbnail and then displayed in a ~700px slot - visibly soft.
+    """
+
+    def test_the_proxy_is_preferred(self) -> None:
+        from photo_reviewer.exporter import ExportPhoto, _image_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            proxy = os.path.join(tmp, "proxy.jpg")
+            thumb = os.path.join(tmp, "thumb.jpg")
+            for path in (proxy, thumb):
+                with open(path, "wb") as handle:
+                    handle.write(b"x")
+            photo = ExportPhoto(
+                filename="a.jpg", path="", proxy_path=proxy, thumbnail_path=thumb
+            )
+            self.assertEqual(_image_source(photo), proxy)
+
+    def test_the_thumbnail_is_the_last_resort(self) -> None:
+        from photo_reviewer.exporter import ExportPhoto, _image_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            thumb = os.path.join(tmp, "thumb.jpg")
+            with open(thumb, "wb") as handle:
+                handle.write(b"x")
+            photo = ExportPhoto(
+                filename="a.jpg", path="/gone", proxy_path=None, thumbnail_path=thumb
+            )
+            self.assertEqual(_image_source(photo), thumb)
+
+    def test_rows_carry_the_proxy_through(self) -> None:
+        from photo_reviewer.exporter import rows_to_export
+
+        photos = rows_to_export(
+            [{"filename": "a.jpg", "path": "/a", "proxy_path": "/p", "thumb_path": "/t"}]
+        )
+        self.assertEqual(photos[0].proxy_path, "/p")
+        self.assertEqual(photos[0].thumbnail_path, "/t")
+
+
 class ExportStyleTests(unittest.TestCase):
     """The keepsake has to look like the app it came from."""
 

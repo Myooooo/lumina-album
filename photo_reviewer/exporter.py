@@ -40,7 +40,7 @@ TALL_IMAGE_WIDTH = 1080
 _TALL_MARGIN = 48
 _TALL_GAP = 28
 #: Longest side of the picture inside the tall image.
-_TALL_PHOTO_MAX = 620
+_TALL_PHOTO_MAX = 1240
 
 #: JPEG quality for the embedded copy. 82 keeps a 300px thumbnail around 20 KB,
 #: which matters: the HTML carries every image inline, so a 200-photo export is
@@ -54,6 +54,9 @@ class ExportPhoto:
 
     filename: str
     path: str
+    #: The mid-size render (long edge ~2000px). This is what both exports read: a
+    #: thumbnail is ~400px and shows as a soft blur in a 700px slot.
+    proxy_path: str | None = None
     thumbnail_path: str | None = None
     caption: str = ""
     title: str = ""
@@ -81,17 +84,23 @@ def _load_rgb(path: str, max_side: int) -> Image.Image | None:
         return None
 
 
-def _thumbnail_source(photo: ExportPhoto) -> str | None:
-    """Prefer the small thumbnail, fall back to the original."""
-    for candidate in (photo.thumbnail_path, photo.path):
+def _image_source(photo: ExportPhoto) -> str | None:
+    """The best available file for an export, biggest first.
+
+    The proxy render is the intended source: it is the size the picture is actually
+    displayed at, and it costs no more to embed than an upscaled thumbnail does. The
+    original is next - always sharp, but a 24MB RAW makes a keepsake nobody can send.
+    The thumbnail is the last resort, used only when it is all there is.
+    """
+    for candidate in (photo.proxy_path, photo.path, photo.thumbnail_path):
         if candidate and os.path.exists(candidate):
             return candidate
     return None
 
 
-def _embedded_data_uri(photo: ExportPhoto, max_side: int = 480) -> str:
+def _embedded_data_uri(photo: ExportPhoto, max_side: int = 1400) -> str:
     """A base64 JPEG of the photo, or "" when nothing can be read."""
-    source = _thumbnail_source(photo)
+    source = _image_source(photo)
     if not source:
         return ""
     image = _load_rgb(source, max_side)
@@ -620,7 +629,7 @@ def build_tall_image(
     total_height += header_height
 
     for photo in photos:
-        source_path = _thumbnail_source(photo)
+        source_path = _image_source(photo)
         image = _load_rgb(source_path, _TALL_PHOTO_MAX) if source_path else None
         if image is not None:
             ratio = inner / image.width
@@ -791,7 +800,8 @@ def rows_to_export(rows: list[dict[str, Any]]) -> list[ExportPhoto]:
             ExportPhoto(
                 filename=row.get("filename") or "",
                 path=row.get("path") or "",
-                thumbnail_path=row.get("thumb_path") or row.get("proxy_path"),
+                proxy_path=row.get("proxy_path"),
+                thumbnail_path=row.get("thumb_path"),
                 caption=row.get("reason") or "",
                 title=row.get("title") or "",
                 tags=[str(tag) for tag in tags],

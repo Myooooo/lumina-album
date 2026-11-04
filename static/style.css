@@ -95,6 +95,24 @@
   padding: 0;
 }
 
+/* ---------- A stable scrollbar gutter ----------
+   The four views differ in height, so switching between them adds and removes a
+   scrollbar - and with it 8px of usable width. Every centred element then shifts by
+   4px, which reads as the page jumping when only the content changed.
+
+   Reserving the space removes the shift at its source. `scrollbar-gutter` is the
+   precise tool; `overflow-y: scroll` is the fallback for browsers that do not know
+   it yet. It keeps a permanent track, which is why it is second. */
+html {
+  scrollbar-gutter: stable;
+}
+
+@supports not (scrollbar-gutter: stable) {
+  html {
+    overflow-y: scroll;
+  }
+}
+
 body {
   margin: 0;
   font-family: var(--font-sans);
@@ -866,6 +884,10 @@ select {
 }
 
 .polaroid-card {
+  /* Fill the track. Without this the card takes its content's width, so a card with
+     action buttons filled the column while one without them shrank by a few pixels -
+     the same photo printed at two sizes in two views. */
+  width: 100%;
   break-inside: avoid;
   margin: 0;
   cursor: pointer;
@@ -4692,13 +4714,18 @@ body:not([data-view="album"]) .topbar {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* A year is a chapter, not a card. It used to carry a 24px inner padding inside a
+   bordered panel, which inset the grid to 1344px against the album's 1394px: the same
+   photo printed one size smaller here than there, and a column short. The chapter now
+   spans the content width, and the rule under its heading separates it. */
 .memory-year {
-  padding: 22px 24px 26px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: rgba(255, 254, 251, 0.72);
-  box-shadow: var(--shadow-soft);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   animation: memoryYearIn var(--dur-panel) var(--ease-out) backwards;
+  margin-bottom: 34px;
 }
 
 @keyframes memoryYearIn {
@@ -4707,6 +4734,7 @@ body:not([data-view="album"]) .topbar {
 }
 
 .memory-year-head {
+  padding: 0 2px;
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -4732,25 +4760,17 @@ body:not([data-view="album"]) .topbar {
   font-variant-numeric: tabular-nums;
 }
 
-/* Full-bleed responsive photobook grid for each year's memories. */
-/* The gallery's own flow. A polaroid is a fixed-aspect picture in a variable-height
-   mount, so equal-height grid cells would stretch the shorter captions. Columns pack
-   by height, which is what makes a row of cards look hand-arranged rather than
-   tabulated - the same reason the album uses them. */
+/* The album's own grid, unchanged. A column flow looked close but not the same:
+   narrower prints, ragged bottoms, breaks in different places - it read as a different
+   product. `align-items: start` keeps each print its natural height while the tracks
+   stay even, which is exactly what the gallery does. */
 .memory-strip {
-  column-width: 232px;
-  column-gap: 22px;
-  padding: 8px 0 4px;
-}
-
-/* The gallery's own flow. A polaroid is a fixed-aspect picture in a variable-height
-   mount, so equal-height grid cells would stretch the shorter captions. Columns pack
-   by height, which is what makes a row of cards look hand-arranged. */
-.memory-strip .polaroid-card {
-  display: inline-block;
-  width: 100%;
-  margin: 0 0 22px;
-  break-inside: avoid;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-auto-flow: row;
+  gap: 26px 28px;
+  align-items: start;
+  padding: 0;
 }
 
 /* Photos the model has already read carry a small mark, so a memory with a written
@@ -4790,11 +4810,8 @@ body:not([data-view="album"]) .topbar {
     padding: 16px;
   }
   .memory-strip {
-    column-width: 150px;
-    column-gap: 12px;
-  }
-  .memory-strip .polaroid-card {
-    margin-bottom: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px 14px;
   }
 }
 
@@ -5063,17 +5080,13 @@ body:not([data-view="album"]) .topbar {
 /* Same flow as the album and 那年今日, so a place's photos and the day's photos are
    visibly the same kind of object. */
 .footprint-photos {
-  column-width: 232px;
-  column-gap: 22px;
-  padding: 8px 0 4px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-auto-flow: row;
+  gap: 26px 28px;
+  align-items: start;
+  padding: 0;
   animation: footprintPhotosIn var(--dur-panel) var(--ease-out) both;
-}
-
-.footprint-photos .polaroid-card {
-  display: inline-block;
-  width: 100%;
-  margin: 0 0 22px;
-  break-inside: avoid;
 }
 
 @keyframes footprintPhotosIn {
@@ -5193,10 +5206,7 @@ body:not([data-view="album"]) .topbar {
     gap: 14px;
   }
   .footprint-photos {
-    column-width: 150px;
-    column-gap: 12px;
-  }
-  .footprint-photos .polaroid-card {
-    margin-bottom: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px 14px;
   }
 }
