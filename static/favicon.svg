@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="seal" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#382E25"/>
+      <stop offset="100%" stop-color="#221B15"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="14" y1="14" x2="50" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DFB38C"/>
+      <stop offset="50%" stop-color="#B37D56"/>
+      <stop offset="100%" stop-color="#8E5D38"/>
+    </linearGradient>
+  </defs>
+  <!-- Warm darkroom walnut seal base -->
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="url(#seal)"/>
+  <rect x="7.5" y="7.5" width="49" height="49" rx="11" stroke="url(#gold)" stroke-width="1.2" stroke-opacity="0.45"/>
+  <!-- Outer lens ring -->
+  <circle cx="32" cy="32" r="17.5" stroke="url(#gold)" stroke-width="1.8"/>
+  <!-- Subtle aperture blades hint -->
+  <circle cx="32" cy="32" r="13" stroke="#D9A882" stroke-width="0.9" stroke-dasharray="4 3" stroke-opacity="0.55"/>
+  <!-- Inner warm light spark (Lumina) -->
+  <path d="M32 18.5L34.9 29.1L45.5 32L34.9 34.9L32 45.5L29.1 34.9L18.5 32L29.1 29.1L32 18.5Z" fill="#FFF8EF"/>
+  <circle cx="32" cy="32" r="2.6" fill="#B37D56"/>
+</svg>

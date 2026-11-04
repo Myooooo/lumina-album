@@ -6268,8 +6268,8 @@ function renderDuplicates() {
     body.innerHTML = `
       <div class="duplicates-empty">
         <span class="duplicates-empty-icon" data-icon="sparkles"></span>
-        <p>没有找到看起来重复的回忆。</p>
-        <p class="duplicates-empty-hint">把「相似程度」调低一点也许多少能找出几张。</p>
+        <p>没有找到看起来相似的回忆。</p>
+        <p class="duplicates-empty-hint">把「相似程度」放宽一点，也许能找出同一场景下的连拍。</p>
       </div>`;
     renderAllIcons(body);
     updateDupSelection();
@@ -6354,7 +6354,7 @@ async function loadDuplicates(threshold) {
     if (lede) {
       lede.textContent = summary.groups
         ? `找到 ${summary.groups} 组相似的回忆，共 ${summary.photos} 张。收起多余的就够了，原图会先进回收站。`
-        : "没有找到看起来重复的照片。";
+        : "没有找到看起来相似的照片。";
     }
     renderDuplicates();
   } catch (e) {

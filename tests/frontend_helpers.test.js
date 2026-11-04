@@ -1548,6 +1548,38 @@ section("cross-view stability");
     /state\.folder = val;[\s\S]{0,200}reloadCurrentView\(\)/.test(script),
     true
   );
+
+  const htmlDoc = fs.readFileSync(
+    path.join(__dirname, "..", "static", "index.html"),
+    "utf8"
+  );
+  check(
+    "page title is 拾光相册 / Lumina without Album",
+    /<title>拾光相册 \/ Lumina<\/title>/.test(htmlDoc) &&
+      !/<title>[^<]*Album/i.test(htmlDoc),
+    true
+  );
+  check(
+    "favicon.svg is linked in the document head and exists on disk",
+    /<link rel="icon" type="image\/svg\+xml" href="\/static\/favicon\.svg"/.test(htmlDoc) &&
+      fs.existsSync(path.join(__dirname, "..", "static", "favicon.svg")),
+    true
+  );
+  check(
+    "brand sits inside the top view-switcher-row without a left icon",
+    /class="view-switcher-row"[\s\S]{0,160}class="brand"[\s\S]{0,160}<h1>拾光相册/.test(
+      htmlDoc
+    ) && !/class="brand"[\s\S]{0,120}data-icon/.test(htmlDoc),
+    true
+  );
+  check(
+    "filter controls and custom select triggers share the 38px toolbar height",
+    /\.filter-group select,\s*\.filter-group input \{[\s\S]{0,80}height:\s*38px/.test(
+      stylesheet
+    ) &&
+      /\.custom-select-trigger \{[\s\S]{0,80}height:\s*38px/.test(stylesheet),
+    true
+  );
 }
 
 console.log(

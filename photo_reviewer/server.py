@@ -1189,6 +1189,13 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     def index():
         return send_file(os.path.join(static_dir, "index.html"))
 
+    @app.get("/favicon.ico")
+    @app.get("/favicon.svg")
+    def favicon():
+        return send_file(
+            os.path.join(static_dir, "favicon.svg"), mimetype="image/svg+xml"
+        )
+
     @app.get("/api/config")
     def api_config():
         return jsonify(cfg.to_dict())

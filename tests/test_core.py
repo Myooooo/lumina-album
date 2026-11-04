@@ -6856,5 +6856,35 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(sequence[0], 5050)
 
 
+class FaviconAndTitleTests(unittest.TestCase):
+    """The document title and the custom SVG favicon."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_index_title_drops_album_and_links_favicon(self) -> None:
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn("<title>拾光相册 / Lumina</title>", html)
+        self.assertNotIn("Lumina Album", html)
+        self.assertIn('href="/static/favicon.svg"', html)
+
+    def test_favicon_routes_serve_svg(self) -> None:
+        for route in ("/static/favicon.svg", "/favicon.svg", "/favicon.ico"):
+            resp = self.client.get(route)
+            self.assertEqual(resp.status_code, 200, route)
+            self.assertIn("image/svg+xml", resp.content_type)
+            self.assertIn("<svg", resp.get_data(as_text=True))
+
+
 if __name__ == "__main__":
     unittest.main()
