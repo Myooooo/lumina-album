@@ -192,7 +192,7 @@ window.LuminaUI = (() => {
 
     setTimeout(() => {
       el.classList.add("removing");
-      setTimeout(() => el.remove(), 350);
+      setTimeout(() => el.remove(), 180);
     }, 3600);
   }
 

@@ -68,8 +68,12 @@
   --dur-press: 120ms;
   --dur-fast: 160ms;
   --dur-ui: 220ms;
-  --dur-panel: 320ms;
-  --dur-slow: 460ms;
+  --dur-panel: 260ms;
+  --dur-slow: 420ms;
+
+  /* ---------- Layout Rhythm ---------- */
+  --page-pad-x: 32px;
+  --topbar-height: 138px;
 
   /* ---------- Type scale ----------
      Tracking and leading are size-specific, never one value everywhere: large
@@ -124,13 +128,13 @@ svg {
 .topbar {
   position: sticky;
   top: 0;
-  z-index: 30;
-  background: rgba(255, 253, 249, 0.82);
+  z-index: 40;
+  background: rgba(255, 253, 249, 0.88);
   backdrop-filter: blur(20px) saturate(1.15);
   -webkit-backdrop-filter: blur(20px) saturate(1.15);
   border-bottom: 1px solid var(--border);
-  padding: 14px 28px;
-  box-shadow: 0 4px 24px rgba(60, 40, 20, 0.04);
+  padding: 14px var(--page-pad-x);
+  box-shadow: 0 4px 24px rgba(60, 40, 20, 0.035);
 }
 
 .brand {
@@ -483,7 +487,17 @@ svg {
   align-items: center;
   gap: 14px;
   box-shadow: var(--shadow-soft);
-  animation: fadeSlideIn .35s ease;
+  animation: fadeSlideIn var(--dur-ui) var(--ease-out) both;
+}
+
+.scan-progress.closing {
+  animation: bannerSlideOut var(--dur-fast) var(--ease-out) both;
+  pointer-events: none;
+}
+
+@keyframes bannerSlideOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-6px) scale(0.985); }
 }
 
 .progress-text {
@@ -512,7 +526,7 @@ svg {
   background: var(--primary-light);
   border-radius: 99px;
   padding: 1px 9px;
-  animation: etaIn .28s ease both;
+  animation: etaIn var(--dur-ui) var(--ease-out) both;
 }
 
 @keyframes etaIn {
@@ -533,14 +547,30 @@ svg {
   width: 0%;
   background: linear-gradient(90deg, #d9a882, #b37d56);
   border-radius: 99px;
-  transition: width .35s ease;
+  transition: width var(--dur-ui) var(--ease-out);
+}
+
+/* ---------- Sticky Album Console (Stats + Filters) ---------- */
+.album-sticky-bar {
+  position: sticky;
+  top: var(--topbar-height, 138px);
+  z-index: 28;
+  margin: -18px calc(-1 * var(--page-pad-x)) 14px;
+  padding: 12px var(--page-pad-x) 14px;
+  background: rgba(249, 246, 240, 0.88);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(60, 40, 20, 0.04);
+  transition: box-shadow var(--dur-ui) var(--ease-out),
+              background-color var(--dur-ui) var(--ease-out);
 }
 
 /* ---------- Stats & Collection Navigation ---------- */
 .stats {
   display: flex;
   gap: 8px;
-  padding: 14px 28px 6px;
+  padding: 0 0 10px;
   flex-wrap: wrap;
   align-items: center;
 }
@@ -549,7 +579,7 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 253, 249, 0.75);
+  background: rgba(255, 253, 249, 0.78);
   backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -563,6 +593,11 @@ svg {
               box-shadow var(--dur-fast) var(--ease-out);
 }
 
+.stat:active {
+  transform: scale(0.97);
+  transition-duration: var(--dur-press);
+}
+
 /* ``.stat-icon`` / ``.label-icon`` / ``.empty-icon`` / ``.modal-title-icon`` are
    semantic hooks, not styled classes: each holds a ``data-icon`` that the icon
    renderer replaces with an <svg>, and the size and colour come from the
@@ -572,7 +607,7 @@ svg {
   width: 15px;
   height: 15px;
   color: var(--muted);
-  transition: color .2s;
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
 .stat-num {
@@ -581,6 +616,7 @@ svg {
   font-weight: 700;
   color: var(--text);
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
@@ -616,7 +652,7 @@ svg {
 .filters {
   display: flex;
   gap: 10px;
-  padding: 10px 28px 16px;
+  padding: 0;
   align-items: flex-end;
   flex-wrap: wrap;
 }
@@ -778,7 +814,8 @@ svg {
   cursor: pointer;
   font-size: 13px;
   color: var(--text);
-  transition: background-color var(--dur-press) var(--ease-out),
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-press) var(--ease-out),
               color var(--dur-press) var(--ease-out);
 }
 
@@ -786,7 +823,12 @@ svg {
 .custom-select-option.selected {
   background: var(--primary-light);
   color: var(--primary-dark);
-  padding-left: 15px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .custom-select-option:hover {
+    transform: translateX(3px);
+  }
 }
 
 /* Native select fallback */
@@ -820,7 +862,7 @@ select {
   grid-auto-flow: row;
   gap: 26px 28px;
   align-items: start;
-  padding: 20px 32px 100px;
+  padding: 16px 0 100px;
 }
 
 .polaroid-card {
@@ -829,9 +871,9 @@ select {
   cursor: pointer;
   --rot: -0.6deg;
   transform: rotate(var(--rot));
-  transition: transform .4s var(--ease-out), z-index .1s, box-shadow .4s ease;
+  transition: transform var(--dur-panel) var(--ease-out), z-index .1s, box-shadow var(--dur-panel) var(--ease-out);
   position: relative;
-  animation: cardPop .45s ease backwards;
+  animation: cardPop var(--dur-panel) var(--ease-out) backwards;
 }
 
 .polaroid-card:nth-child(4n+1) { --rot: -1deg; }
@@ -1543,6 +1585,11 @@ select {
   animation: selectionBarIn var(--dur-panel) var(--ease-soft) both;
 }
 
+.selection-bar.closing {
+  animation: selectionBarOut var(--dur-fast) var(--ease-out) both;
+  pointer-events: none;
+}
+
 @keyframes selectionBarIn {
   from {
     opacity: 0;
@@ -1551,6 +1598,17 @@ select {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes selectionBarOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.975);
   }
 }
 
@@ -2847,22 +2905,22 @@ select {
   box-shadow: var(--shadow-modal);
   padding: 6px;
   transform-origin: top right;
-  animation: historyDrop .22s cubic-bezier(.34, 1.3, .64, 1) both;
+  animation: historyDrop var(--dur-ui) var(--ease-out) both;
 }
 
 .folder-history.closing {
-  animation: historyLift .16s ease-in both;
+  animation: historyLift var(--dur-fast) var(--ease-out) both;
   pointer-events: none;
 }
 
 @keyframes historyDrop {
-  from { opacity: 0; transform: translateY(-10px) scaleY(.9); }
+  from { opacity: 0; transform: translateY(-8px) scaleY(.94); }
   to   { opacity: 1; transform: translateY(0) scaleY(1); }
 }
 
 @keyframes historyLift {
   from { opacity: 1; transform: translateY(0) scaleY(1); }
-  to   { opacity: 0; transform: translateY(-8px) scaleY(.94); }
+  to   { opacity: 0; transform: translateY(-6px) scaleY(.96); }
 }
 
 .folder-history-item {
@@ -2880,7 +2938,7 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: historyItemIn .24s ease both;
+  animation: historyItemIn var(--dur-ui) var(--ease-out) both;
 }
 
 .folder-history-item:nth-child(1) { animation-delay: .01s; }
@@ -2930,7 +2988,11 @@ select {
 .folder-history-item:hover {
   background: var(--primary-light);
   color: var(--primary-dark);
-  padding-left: 18px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .folder-history-item:hover {
+    transform: translateX(3px);
+  }
 }
 .folder-history-empty {
   padding: 14px;
@@ -3027,6 +3089,12 @@ select {
   background: rgba(251, 241, 224, 0.92);
   color: #7c5718;
   font-size: 13px;
+  animation: fadeSlideIn var(--dur-ui) var(--ease-out) both;
+}
+
+.card-banner.closing {
+  animation: bannerSlideOut var(--dur-fast) var(--ease-out) both;
+  pointer-events: none;
 }
 
 .card-banner svg { width: 15px; height: 15px; flex-shrink: 0; }
@@ -3448,7 +3516,7 @@ select {
 .toast.error { border-left-color: var(--danger); }
 .toast.info { border-left-color: var(--primary); }
 .toast.warning { border-left-color: var(--maybe); }
-.toast.removing { animation: toastOut .3s ease both; }
+.toast.removing { animation: toastOut .18s var(--ease-out) both; }
 
 @keyframes toastIn {
   from { opacity: 0; transform: translateX(30px) scale(0.95); }
@@ -3456,7 +3524,7 @@ select {
 }
 @keyframes toastOut {
   from { opacity: 1; transform: translateX(0) scale(1); }
-  to { opacity: 0; transform: translateX(30px) scale(0.95); }
+  to { opacity: 0; transform: translateX(22px) scale(0.96); }
 }
 
 /* ---------- Confirm & Loading Modals ---------- */
@@ -3584,16 +3652,16 @@ select {
    from view once the reverse animation has played. Durations here must stay in
    step with ``EXIT_MS`` in js/ui-kit.js. */
 .modal.closing {
-  animation: modalBackdropOut .19s ease both;
+  animation: modalBackdropOut .19s var(--ease-out) both;
   pointer-events: none;
 }
 .modal.closing > .modal-content,
 .modal.closing > .preview-content {
-  animation: modalPopOut .19s cubic-bezier(.4,0,.7,.3) both;
+  animation: modalPopOut .19s var(--ease-out) both;
 }
 /* The fullscreen viewer has no dialog box, so only its backdrop fades. */
 .fs-viewer.closing {
-  animation: modalBackdropOut .19s ease both;
+  animation: modalBackdropOut .19s var(--ease-out) both;
   pointer-events: none;
 }
 .custom-select-menu.closing {
@@ -3864,10 +3932,15 @@ select {
    Only one carries `hidden` at a time; `showView` owns that. */
 
 .page-view {
-  /* Same horizontal rhythm as the album's own content, so switching views does not
-     change where the left edge of anything sits. */
-  padding: 18px 32px 96px;
+  /* Full-bleed photobook rhythm: matches the album's own edge-to-edge canvas
+     rather than squeezing into a centered modal box. */
+  padding: 18px var(--page-pad-x) 110px;
   animation: viewIn var(--dur-panel) var(--ease-out) both;
+}
+
+.page-view.view-leaving {
+  animation: viewOut 140ms var(--ease-out) both;
+  pointer-events: none;
 }
 
 @keyframes viewIn {
@@ -3875,38 +3948,85 @@ select {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* The three former sheets declared a dialog's metrics: a max width, a max height
-   and their own scrolling region. On a page those fight the document's scroll. */
+@keyframes viewOut {
+  from { opacity: 1; transform: translateY(0); filter: blur(0px); }
+  to   { opacity: 0; transform: translateY(-4px); filter: blur(1.5px); }
+}
+
+/* Full-bleed spread: no centered 1180px box constraint. The three views spread
+   across the full viewport just like the Polaroid gallery. */
 .page-view .view-inner {
-  max-width: 1180px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* Editorial chapter header shared by 足迹 / 那年今日 / 重复回忆 */
+.view-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 6px 0 18px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.view-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
 
 .page-view h2 {
-  margin: 0 0 6px;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-title);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-/* The switcher. Four peers plus the settings gear, all one height. */
+.page-view h2 .modal-title-icon svg {
+  width: 22px;
+  height: 22px;
+  color: var(--primary);
+}
+
+/* The switcher. Four peers in a warm linen pill trough, plus the settings gear. */
+.view-switcher {
+  padding-top: 2px;
+}
+
 .view-switcher .view-tab {
   position: relative;
-  transition: color var(--dur-fast) var(--ease-out),
+  border-color: rgba(130, 100, 70, 0.16);
+  background: rgba(255, 253, 249, 0.68);
+  transition: transform var(--dur-press) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-ui) var(--ease-out);
 }
 
-/* The selected page. A filled chip rather than an underline: the row already reads
-   as buttons, and an underline would look like a settings tab strip. */
+/* The selected page: a distinct framed & filled capsule with a subtle outer halo. */
 .view-switcher .view-tab.is-active {
   background: linear-gradient(150deg, #c08c63, var(--primary));
-  border-color: transparent;
+  border-color: var(--primary-dark);
   color: #fff8ef;
-  box-shadow: 0 4px 14px rgba(179, 125, 86, 0.28);
+  font-weight: 600;
+  box-shadow: 0 0 0 3px var(--primary-glow), 0 4px 14px rgba(179, 125, 86, 0.28);
 }
 
 .view-switcher .view-tab.is-active:hover {
   background: linear-gradient(150deg, #c08c63, var(--primary));
-  border-color: transparent;
+  border-color: var(--primary-dark);
   color: #fff8ef;
 }
 
@@ -3920,68 +4040,84 @@ select {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .page-view {
+  .page-view,
+  .page-view.view-leaving {
     animation: none !important;
   }
 }
 
 @media (max-width: 720px) {
+  :root {
+    --page-pad-x: 18px;
+  }
   .page-view {
-    padding: 14px 18px 80px;
+    padding: 14px var(--page-pad-x) 90px;
+  }
+  .page-view h2 {
+    font-size: 22px;
   }
 }
 
-/* ---------- Duplicate review sheet ----------
-   A taller, wider dialog than the rest: the decision is made by comparing
-   pictures, so the cards have to be big enough to actually compare. It borrows
-   the same panel gradient, the same radius and the same entrance as every other
-   modal, and the groups stagger in the way the gallery's cards do. */
+/* ---------- Duplicate review page (暗房选片灯箱台) ----------
+   Full-bleed comparison groups with a sticky control bar and a floating
+   confirmation dock. */
 
 .duplicates-content {
-  padding-bottom: 18px;
+  padding-bottom: 32px;
 }
 
 .duplicates-lede {
-  margin: -6px 0 16px;
+  margin: 0;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
-/* ---------- Toolbar: similarity slider + bulk actions ---------- */
+/* ---------- Toolbar: similarity slider + bulk actions (Sticky) ---------- */
 
 .duplicates-toolbar {
+  position: sticky;
+  top: var(--topbar-height, 138px);
+  z-index: 25;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
   flex-wrap: wrap;
-  padding: 12px 14px;
-  margin-bottom: 14px;
-  border: 1px solid var(--border);
+  padding: 12px 18px;
+  margin-bottom: 22px;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background: rgba(255, 253, 249, 0.7);
+  background: rgba(255, 253, 249, 0.9);
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  box-shadow: var(--shadow-soft);
 }
 
 .duplicates-similarity {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--muted);
+  gap: 12px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .duplicates-similarity input[type="range"] {
-  width: 150px;
+  width: 180px;
   accent-color: var(--primary);
   cursor: pointer;
 }
 
 .duplicates-similarity output {
-  min-width: 4.5em;
-  color: var(--text);
+  min-width: 4.8em;
+  padding: 2px 10px;
+  border-radius: 99px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
   font-size: 12.5px;
   font-weight: 600;
+  text-align: center;
   letter-spacing: 0.01em;
 }
 
@@ -3991,16 +4127,11 @@ select {
   gap: 8px;
 }
 
-/* ---------- Scrolling body ---------- */
+/* ---------- Body ---------- */
 
 .duplicates-body {
-  flex: 1 1 auto;
-  min-height: 220px;
-  padding: 4px 4px 8px;
-  /* A soft edge instead of a hard cut: the sheet should look like it continues
-     under the toolbar rather than stopping at a line. */
-  mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  min-height: 260px;
+  padding: 0 0 24px;
 }
 
 .duplicates-empty {
@@ -4008,11 +4139,11 @@ select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 240px;
-  padding: 30px;
+  gap: 12px;
+  min-height: 300px;
+  padding: 40px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 14.5px;
   text-align: center;
   animation: dupEmptyIn var(--dur-panel) var(--ease-out) both;
 }
@@ -4023,8 +4154,8 @@ select {
 
 .duplicates-empty-icon {
   display: inline-flex;
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -4033,12 +4164,12 @@ select {
 }
 
 .duplicates-empty-icon svg {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 
 .duplicates-empty-hint {
-  font-size: 12.5px;
+  font-size: 13px;
   color: rgba(142, 128, 114, 0.85);
 }
 
@@ -4050,12 +4181,15 @@ select {
 /* ---------- One group ---------- */
 
 .dup-group {
-  padding: 14px 16px 16px;
-  margin-bottom: 12px;
+  padding: 18px 20px 20px;
+  margin-bottom: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 254, 251, 0.78);
+  box-shadow: var(--shadow-soft);
   animation: dupGroupIn var(--dur-panel) var(--ease-out) backwards;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
 }
 
 @keyframes dupGroupIn {
@@ -4065,39 +4199,43 @@ select {
 
 .dup-group-head {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 10px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
 }
 
 .dup-group-title {
-  font-size: 13px;
+  font-family: var(--font-serif);
+  font-size: 15.5px;
   font-weight: 600;
   color: var(--text);
   letter-spacing: 0.01em;
 }
 
 .dup-group-wasted {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* A group whose photos are all ticked would lose the picture entirely. The header
    turns the warning colour and says so; the group's own border follows. */
 .dup-group.is-emptied {
-  border-color: rgba(194, 89, 83, 0.42);
-  background: rgba(194, 89, 83, 0.035);
+  border-color: rgba(194, 89, 83, 0.45);
+  background: rgba(194, 89, 83, 0.04);
 }
 
 .dup-group-warning {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 2px 9px;
+  padding: 3px 10px;
   border-radius: 99px;
-  background: rgba(194, 89, 83, 0.12);
+  background: rgba(194, 89, 83, 0.13);
   color: var(--danger);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
   animation: dupWarnIn var(--dur-ui) var(--ease-out) both;
@@ -4108,29 +4246,29 @@ select {
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* The per-group shortcut. A quiet text button rather than another chip: it shares
-   the row with the group's own heading and must not compete with it. */
+/* The per-group shortcut. */
 .dup-group-keep {
   margin-left: auto;
   align-self: center;
-  padding: 3px 10px;
-  border: 1px solid transparent;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
+  background: rgba(255, 253, 249, 0.85);
+  color: var(--text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
-  transition: color var(--dur-fast) var(--ease-out),
+  transition: transform var(--dur-press) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out);
 }
 
 .dup-group-keep:hover {
-  color: var(--primary);
-  border-color: rgba(179, 125, 86, 0.32);
-  background: rgba(255, 253, 249, 0.9);
+  color: var(--primary-dark);
+  border-color: rgba(179, 125, 86, 0.42);
+  background: #ffffff;
 }
 
 .dup-group-keep:active {
@@ -4145,8 +4283,8 @@ select {
 
 .dup-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 16px;
 }
 
 /* ---------- One photo ---------- */
@@ -4155,13 +4293,12 @@ select {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 7px 7px 9px;
+  gap: 9px;
+  padding: 10px 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-solid);
-  /* No pointer cursor and no hover lift on the card itself: it is a container now.
-     The picture inside is the control, and it lifts on its own. */
+  box-shadow: 0 2px 10px rgba(60, 40, 20, 0.03);
   transition: border-color var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-ui) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out);
@@ -4175,62 +4312,65 @@ select {
 /* Ticked for removal: dimmed and tinted, so the intended outcome is visible at a
    glance without hiding the picture - you are still checking it. */
 .dup-card.is-chosen {
-  border-color: rgba(194, 89, 83, 0.45);
-  background: rgba(194, 89, 83, 0.045);
+  border-color: rgba(194, 89, 83, 0.48);
+  background: rgba(194, 89, 83, 0.05);
 }
 
 .dup-card.is-chosen .dup-shot {
-  opacity: 0.55;
+  opacity: 0.52;
 }
 
-/* The copy the app suggests keeping. It cannot be ticked: every group has to
-   leave at least one behind, and the recommendation is the safest default. */
+/* The copy the app suggests keeping. */
 .dup-card.is-keeper {
-  border-color: rgba(179, 125, 86, 0.55);
-  box-shadow: 0 0 0 3px rgba(179, 125, 86, 0.1);
+  border-color: rgba(179, 125, 86, 0.58);
+  box-shadow: 0 0 0 3px rgba(179, 125, 86, 0.11);
 }
 
 .dup-check {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: 16px;
+  left: 16px;
   z-index: 2;
-  width: 17px;
-  height: 17px;
+  width: 18px;
+  height: 18px;
   accent-color: var(--danger);
   cursor: pointer;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.94);
   border-radius: 4px;
+  transition: transform var(--dur-press) var(--ease-out);
+}
+
+.dup-check:active {
+  transform: scale(0.92);
 }
 
 .dup-shot {
   position: relative;
   display: block;
   width: 100%;
-  /* Not a fixed aspect ratio: the whole judgement is "is this the same
-     picture?", and a 4:3 box crops a portrait into a strip that hides exactly
-     the framing being compared. A bounded height keeps every card the same size
-     while `object-fit: contain` shows the photo whole. */
-  height: 150px;
+  height: 200px;
   padding: 0;
   border: none;
   border-radius: 8px;
   overflow: hidden;
   cursor: zoom-in;
   background:
-    linear-gradient(160deg, rgba(60, 40, 20, 0.05), rgba(60, 40, 20, 0.02));
-  transition: opacity var(--dur-fast) var(--ease-out),
+    linear-gradient(160deg, rgba(60, 40, 20, 0.055), rgba(60, 40, 20, 0.02));
+  transition: transform var(--dur-ui) var(--ease-out),
+              opacity var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-ui) var(--ease-out);
 }
 
-/* The picture is the control: it says "look closer" and lifts a little, which the
-   card no longer does. */
-.dup-shot:hover {
-  box-shadow: 0 6px 18px rgba(60, 40, 20, 0.16);
+@media (hover: hover) and (pointer: fine) {
+  .dup-shot:hover {
+    box-shadow: 0 8px 22px rgba(60, 40, 20, 0.16);
+    transform: translateY(-2px);
+  }
 }
 
 .dup-shot:active {
-  transform: scale(0.995);
+  transform: scale(0.99);
+  transition-duration: var(--dur-press);
 }
 
 .dup-shot:focus-visible {
@@ -4247,13 +4387,13 @@ select {
 
 .dup-keep-badge {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
-  padding: 2px 7px;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 9px;
   border-radius: 99px;
-  background: rgba(179, 125, 86, 0.9);
+  background: rgba(179, 125, 86, 0.92);
   color: #fff8ef;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
   backdrop-filter: blur(4px);
@@ -4263,13 +4403,14 @@ select {
 .dup-meta {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   padding: 0 2px;
   min-width: 0;
 }
 
 .dup-name {
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -4277,23 +4418,49 @@ select {
 }
 
 .dup-spec {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------- Footer ---------- */
+/* ---------- Floating Action Dock ---------- */
 
 .duplicates-actions {
+  position: sticky;
+  bottom: 20px;
+  z-index: 30;
+  display: flex;
   align-items: center;
-  padding-top: 14px;
+  justify-content: space-between;
+  gap: 18px;
+  max-width: 560px;
+  margin: 12px auto 0;
+  padding: 10px 14px 10px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255, 253, 249, 0.92);
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  box-shadow: var(--shadow-card);
+  transition: transform var(--dur-ui) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+
+.duplicates-actions.has-selection {
+  border-color: rgba(194, 89, 83, 0.38);
+  box-shadow: var(--shadow-hover);
 }
 
 .duplicates-summary {
-  margin-right: auto;
-  font-size: 12.5px;
-  color: var(--muted);
+  font-size: 13px;
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+}
+
+.duplicates-actions.has-selection .duplicates-summary {
+  color: var(--text);
+  font-weight: 600;
 }
 
 /* Reduced motion: the sheet may still fade, but nothing slides or scales. */
@@ -4306,48 +4473,45 @@ select {
     transition: border-color var(--dur-fast) var(--ease-out),
                 background-color var(--dur-fast) var(--ease-out);
   }
-  .dup-card:hover {
+  .dup-shot:hover {
     transform: none;
   }
 }
 
-/* The sheet is already tight on a narrow window; give the grid fewer columns so
-   a card still reads as a photo rather than a swatch. */
 @media (max-width: 720px) {
-  .duplicates-content {
-    width: calc(100vw - 24px);
-    padding-left: 18px;
-    padding-right: 18px;
-  }
   .dup-grid {
-    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-    gap: 9px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .dup-shot {
+    height: 150px;
   }
   .duplicates-similarity input[type="range"] {
-    width: 110px;
+    width: 120px;
   }
 }
 
-/* ---------- 那年今日 ----------
-   A year strip per group: the date is the anchor, so each year gets its own
-   heading and the photos run sideways underneath it. Same panel, same radius and
-   same staggered entrance as the rest of the app; the strips slide in from below
-   in year order, which reads as turning back through time. */
+/* ---------- 那年今日 (时光散文集) ----------
+   Full-bleed editorial chapters per year. Instead of cramping photos into a
+   150px horizontal scrollbar, each year opens as a photobook spread with
+   generous Polaroid-style frames and captions. */
 
 .memories-content {
-  padding-bottom: 22px;
+  padding-bottom: 32px;
 }
 
 .memories-lede {
-  margin: -6px 0 16px;
+  margin: 0;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .memories-body {
-  flex: 1 1 auto;
-  padding: 4px 2px 4px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 4px 0;
 }
 
 .memories-empty {
@@ -4355,11 +4519,11 @@ select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 220px;
-  padding: 28px;
+  gap: 12px;
+  min-height: 300px;
+  padding: 40px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 14.5px;
   text-align: center;
   animation: memoryFadeIn var(--dur-panel) var(--ease-out) both;
 }
@@ -4370,8 +4534,8 @@ select {
 
 .memories-empty-icon {
   display: inline-flex;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -4380,12 +4544,12 @@ select {
 }
 
 .memories-empty-icon svg {
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
 }
 
 .memories-empty-hint {
-  font-size: 12.5px;
+  font-size: 13px;
   color: rgba(142, 128, 114, 0.85);
 }
 
@@ -4395,91 +4559,93 @@ select {
 }
 
 .memory-year {
-  margin-bottom: 22px;
-  animation: memoryYearIn var(--dur-slow) var(--ease-out) backwards;
-  /* A soft edge instead of a hard cut, so a long day reads as continuing past
-     the panel rather than being clipped by it. Masked rather than covered with a
-     gradient, which would have to match the panel's own background. */
-  -webkit-mask-image: linear-gradient(
-    to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
-  mask-image: linear-gradient(
-    to right, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
+  padding: 22px 24px 26px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 254, 251, 0.72);
+  box-shadow: var(--shadow-soft);
+  animation: memoryYearIn var(--dur-panel) var(--ease-out) backwards;
 }
 
 @keyframes memoryYearIn {
-  from { opacity: 0; transform: translateY(14px); }
+  from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 .memory-year-head {
   display: flex;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 10px;
-  padding-bottom: 7px;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
 }
 
 /* The phrase ("一年前的今天") is the headline; the year and count are the
    small print that answers "which year exactly". */
 .memory-year-title {
-  font-size: 14px;
+  font-family: var(--font-serif);
+  font-size: 19px;
   font-weight: 600;
   color: var(--text);
   letter-spacing: 0.01em;
 }
 
 .memory-year-meta {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-/* A horizontal strip rather than a grid: a day is a sequence, and running them
-   sideways keeps the years from competing for the same column. The scrollbar is
-   hidden on purpose - a permanent track under every year reads as a broken
-   control, and the images cut off at the right edge already say "there is more".
-   Still scrollable, so a trackpad, a shift-wheel and the keyboard all work. */
+/* Full-bleed responsive photobook grid for each year's memories. */
 .memory-strip {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  padding: 4px 2px 8px;
-  scroll-snap-type: x proximity;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-
-.memory-strip::-webkit-scrollbar {
-  height: 0;
-  display: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 20px;
 }
 
 .memory-card {
-  flex: 0 0 auto;
-  width: 150px;
-  height: 150px;
-  padding: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(60, 40, 20, 0.04);
+  background: var(--panel-solid);
+  box-shadow: 0 4px 16px rgba(60, 40, 20, 0.05);
   overflow: hidden;
   cursor: pointer;
-  scroll-snap-align: start;
+  text-align: left;
+  font-family: inherit;
   transition: transform var(--dur-ui) var(--ease-out),
               box-shadow var(--dur-ui) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out);
 }
 
-.memory-card:hover {
-  transform: translateY(-3px) scale(1.015);
-  box-shadow: var(--shadow-card);
-  border-color: rgba(179, 125, 86, 0.4);
+.memory-shot {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(60, 40, 20, 0.04);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .memory-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-card);
+    border-color: rgba(179, 125, 86, 0.42);
+  }
+  .memory-card:hover .memory-img {
+    transform: scale(1.04);
+  }
 }
 
 .memory-card:active {
-  transform: translateY(-1px) scale(0.995);
+  transform: translateY(0) scale(0.985);
   transition-duration: var(--dur-press);
 }
 
@@ -4496,35 +4662,47 @@ select {
   transition: transform var(--dur-slow) var(--ease-out);
 }
 
-.memory-card:hover .memory-img {
-  transform: scale(1.04);
+.memory-caption {
+  margin-top: 10px;
+  padding: 0 2px;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-/* Photos the model has already read carry a small mark, so a memory with a written
-   sentence is distinguishable from one without before it is opened. Same corner and
-   weight as the badges on the gallery cards, scaled for a 150px thumbnail. */
+.memory-caption.is-muted {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* Photos the model has already read carry a small mark. */
 .memory-mark {
   position: absolute;
-  right: 5px;
-  bottom: 5px;
+  right: 8px;
+  bottom: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: rgba(179, 125, 86, 0.92);
   color: #fff8ef;
   pointer-events: none;
-  box-shadow: 0 1px 4px rgba(60, 40, 20, 0.24);
+  box-shadow: 0 2px 6px rgba(60, 40, 20, 0.28);
 }
 
 .memory-mark svg {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
 }
 
-/* The analysed badge is small but must not disappear into a busy photo. */
 .memory-card.is-analysed .memory-img {
   filter: saturate(1.02);
 }
@@ -4545,14 +4723,12 @@ select {
 }
 
 @media (max-width: 720px) {
-  .memories-content {
-    width: calc(100vw - 24px);
-    padding-left: 18px;
-    padding-right: 18px;
+  .memory-year {
+    padding: 16px;
   }
-  .memory-card {
-    width: 118px;
-    height: 118px;
+  .memory-strip {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
   }
 }
 
@@ -4597,15 +4773,17 @@ select {
               box-shadow var(--dur-ui) var(--ease-out);
 }
 
-.export-choice:hover {
-  transform: translateY(-2px);
-  border-color: rgba(179, 125, 86, 0.42);
-  background: rgba(255, 253, 249, 0.96);
-  box-shadow: var(--shadow-card);
+@media (hover: hover) and (pointer: fine) {
+  .export-choice:hover {
+    transform: translateY(-2px);
+    border-color: rgba(179, 125, 86, 0.42);
+    background: rgba(255, 253, 249, 0.96);
+    box-shadow: var(--shadow-card);
+  }
 }
 
 .export-choice:active {
-  transform: translateY(0) scale(0.995);
+  transform: translateY(0) scale(0.99);
   transition-duration: var(--dur-press);
 }
 
@@ -4657,20 +4835,12 @@ select {
   color: var(--muted);
 }
 
-/* The 那年今日 sheet's own export entry sits under the lede, aligned right so it
-   reads as an aside rather than competing with the year headings. */
+/* The 那年今日 header actions sit aligned with the page title. */
 .memories-actions {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 8px;
-  margin: -8px 0 12px;
-}
-
-/* Both entries are the same height as every other small button, so the pair reads
-   as one control group rather than two leftovers. */
-.memories-actions .btn {
-  height: 30px;
+  gap: 10px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4683,26 +4853,33 @@ select {
   }
 }
 
-/* ---------- 足迹 ----------
-   One card per city, cover photo first. No map: a real one needs tiles and a
-   connection, and this app is local on purpose. The cards enter in a stagger, the
-   same rhythm the gallery's cards use, so the sheet feels like part of the app
-   rather than a table droped on top of it. */
+/* ---------- 足迹 (旅途地理图志) ----------
+   Full-bleed chapter spreads per city, opening into an expansive gallery wall. */
 
 .footprints-content {
-  padding-bottom: 22px;
+  padding-bottom: 32px;
 }
 
 .footprints-lede {
-  margin: -6px 0 16px;
+  margin: 0;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
 .footprints-body {
   flex: 1 1 auto;
-  padding: 4px 4px 6px;
+  padding: 4px 0 12px;
+  transition: opacity 140ms var(--ease-out),
+              transform 140ms var(--ease-out),
+              filter 140ms var(--ease-out);
+}
+
+.footprints-body.is-transitioning-out {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.992);
+  filter: blur(1.5px);
+  pointer-events: none;
 }
 
 .footprints-empty {
@@ -4710,11 +4887,11 @@ select {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 220px;
-  padding: 28px;
+  gap: 12px;
+  min-height: 300px;
+  padding: 40px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 14.5px;
   text-align: center;
   animation: footprintFadeIn var(--dur-panel) var(--ease-out) both;
 }
@@ -4725,8 +4902,8 @@ select {
 
 .footprints-empty-icon {
   display: inline-flex;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -4735,12 +4912,12 @@ select {
 }
 
 .footprints-empty-icon svg {
-  width: 23px;
-  height: 23px;
+  width: 24px;
+  height: 24px;
 }
 
 .footprints-empty-hint {
-  font-size: 12.5px;
+  font-size: 13px;
   color: rgba(142, 128, 114, 0.85);
 }
 
@@ -4751,17 +4928,19 @@ select {
 
 .footprint-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 24px;
+  animation: footprintGridIn var(--dur-panel) var(--ease-out) both;
 }
 
 .footprint-card {
   display: flex;
   flex-direction: column;
-  padding: 0;
+  padding: 10px 10px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-solid);
+  box-shadow: 0 4px 18px rgba(60, 40, 20, 0.05);
   overflow: hidden;
   cursor: pointer;
   text-align: left;
@@ -4771,16 +4950,6 @@ select {
               border-color var(--dur-fast) var(--ease-out);
 }
 
-/* The grid arrives as one block.
-   Staggering the cards individually meant each one sat at `scale(0.99)` during its
-   delay (`animation-fill-mode: backwards`) and jumped to `scale(1)` when its turn
-   came, so with fourteen of them the grid appeared to shrink in two steps after the
-   sheet had finished opening. A single movement on the container has none of that,
-   and it does not compete with the sheet's own entrance. */
-.footprint-grid {
-  animation: footprintGridIn var(--dur-panel) var(--ease-out) both;
-}
-
 @keyframes footprintGridIn {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -4788,30 +4957,31 @@ select {
 
 /* ---------- One opened place ---------- */
 
-/* The back control sits above the title, at the size of the sheet's own small
-   buttons, so it reads as a way out rather than as a second heading. */
 .footprints-back {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  margin-bottom: 10px;
-  padding: 4px 10px 4px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
+  gap: 6px;
+  align-self: flex-start;
+  margin-bottom: 4px;
+  padding: 5px 12px 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: rgba(255, 253, 249, 0.85);
+  color: var(--text-secondary);
   font-family: inherit;
   font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out),
+  transition: transform var(--dur-press) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out);
 }
 
 .footprints-back:hover {
-  color: var(--primary);
-  border-color: rgba(179, 125, 86, 0.32);
-  background: rgba(255, 253, 249, 0.9);
+  color: var(--primary-dark);
+  border-color: rgba(179, 125, 86, 0.42);
+  background: #ffffff;
 }
 
 .footprints-back:active {
@@ -4826,8 +4996,8 @@ select {
 
 .footprint-photos {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 20px;
   animation: footprintPhotosIn var(--dur-panel) var(--ease-out) both;
 }
 
@@ -4838,11 +5008,12 @@ select {
 
 .footprint-photo {
   position: relative;
-  aspect-ratio: 1;
-  padding: 0;
+  aspect-ratio: 4 / 3;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(60, 40, 20, 0.04);
+  background: var(--panel-solid);
+  box-shadow: 0 4px 16px rgba(60, 40, 20, 0.05);
   overflow: hidden;
   cursor: pointer;
   transition: transform var(--dur-ui) var(--ease-out),
@@ -4854,22 +5025,32 @@ select {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  border-radius: 8px;
   display: block;
   transition: transform var(--dur-slow) var(--ease-out);
 }
 
-.footprint-photo:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-card);
-  border-color: rgba(179, 125, 86, 0.42);
-}
-
-.footprint-photo:hover img {
-  transform: scale(1.05);
+@media (hover: hover) and (pointer: fine) {
+  .footprint-photo:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-card);
+    border-color: rgba(179, 125, 86, 0.42);
+  }
+  .footprint-photo:hover img {
+    transform: scale(1.04);
+  }
+  .footprint-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-card);
+    border-color: rgba(179, 125, 86, 0.42);
+  }
+  .footprint-card:hover .footprint-img {
+    transform: scale(1.04);
+  }
 }
 
 .footprint-photo:active {
-  transform: translateY(0) scale(0.99);
+  transform: translateY(0) scale(0.985);
   transition-duration: var(--dur-press);
 }
 
@@ -4878,14 +5059,8 @@ select {
   outline-offset: 2px;
 }
 
-.footprint-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-card);
-  border-color: rgba(179, 125, 86, 0.42);
-}
-
 .footprint-card:active {
-  transform: translateY(-1px) scale(0.995);
+  transform: translateY(-1px) scale(0.985);
   transition-duration: var(--dur-press);
 }
 
@@ -4897,7 +5072,10 @@ select {
 .footprint-shot {
   position: relative;
   display: block;
-  height: 132px;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  overflow: hidden;
   background:
     linear-gradient(160deg, rgba(60, 40, 20, 0.07), rgba(60, 40, 20, 0.03));
 }
@@ -4910,38 +5088,35 @@ select {
   transition: transform var(--dur-slow) var(--ease-out);
 }
 
-.footprint-card:hover .footprint-img {
-  transform: scale(1.05);
-}
-
 /* The count sits on the cover like a stamp: it is the number you came for. */
 .footprint-count {
   position: absolute;
-  right: 8px;
-  bottom: 8px;
-  min-width: 24px;
-  padding: 2px 8px;
+  right: 10px;
+  bottom: 10px;
+  min-width: 28px;
+  padding: 3px 10px;
   border-radius: 99px;
-  background: rgba(14, 12, 10, 0.62);
+  background: rgba(20, 16, 12, 0.68);
   color: #f7efe4;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: center;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .footprint-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 11px 13px 13px;
+  gap: 4px;
+  padding: 12px 6px 2px;
   min-width: 0;
 }
 
 .footprint-city {
-  font-size: 13.5px;
+  font-family: var(--font-serif);
+  font-size: 17px;
   font-weight: 600;
   color: var(--text);
   letter-spacing: 0.01em;
@@ -4951,7 +5126,7 @@ select {
 }
 
 .footprint-meta {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -4961,6 +5136,9 @@ select {
   .footprint-photos,
   .footprints-empty {
     animation: none !important;
+  }
+  .footprints-body {
+    transition: none !important;
   }
   .footprint-card,
   .footprint-img {
@@ -4973,16 +5151,12 @@ select {
 }
 
 @media (max-width: 720px) {
-  .footprints-content {
-    width: calc(100vw - 24px);
-    padding-left: 18px;
-    padding-right: 18px;
-  }
   .footprint-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 11px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 14px;
   }
-  .footprint-shot {
-    height: 100px;
+  .footprint-photos {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
   }
 }

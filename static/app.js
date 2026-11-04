@@ -19,6 +19,10 @@ const state = {
   previewContext: null,
   //: Which of the four views is on screen.
   view: "album",
+  //: True once the first view has been painted. The very first showView() has
+  //: nothing to animate away from, so it activates immediately rather than
+  //: waiting out the exit duration behind an empty screen.
+  viewsBooted: false,
   //: The places 足迹 has loaded, and the one currently opened. The place view
   //: replaces the list inside the same sheet, so both live here rather than in the
   //: DOM alone - going back has to redraw the grid without a second request.
@@ -1650,28 +1654,130 @@ const VIEWS = [
   { name: "duplicates", button: "duplicatesBtn", panel: "duplicatesView" },
 ];
 
-/** Show one view and mark it in the switcher. */
+//: Keep `--topbar-height` synced with the sticky header's real height so
+//: `.album-sticky-bar` and `.duplicates-toolbar` dock flush underneath it.
+function syncTopbarHeight() {
+  const topbar = document.querySelector(".topbar");
+  if (!topbar) return;
+  const h = Math.round(topbar.getBoundingClientRect().height);
+  if (h > 0) {
+    document.documentElement.style.setProperty("--topbar-height", `${h}px`);
+  }
+}
+
+let viewTransitionTimer = null;
+
+/**
+ * Show a strip/bar with its entrance animation, cancelling any in-flight exit.
+ */
+function showStrip(el) {
+  if (!el) return;
+  if (el._stripExitTimer) {
+    clearTimeout(el._stripExitTimer);
+    el._stripExitTimer = null;
+  }
+  el.classList.remove("closing");
+  el.classList.remove("hidden");
+  syncTopbarHeight();
+}
+
+/**
+ * Hide a strip/bar after playing its `.closing` exit animation (160ms).
+ */
+function hideStrip(el) {
+  if (!el || el.classList.contains("hidden")) return;
+  if (el._stripExitTimer) return;
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced) {
+    el.classList.remove("closing");
+    el.classList.add("hidden");
+    syncTopbarHeight();
+    return;
+  }
+  el.classList.add("closing");
+  el._stripExitTimer = setTimeout(() => {
+    el._stripExitTimer = null;
+    el.classList.remove("closing");
+    el.classList.add("hidden");
+    syncTopbarHeight();
+  }, 160);
+}
+
+/** Show one view and mark it in the switcher, with an interruptible exit/enter transition. */
 function showView(name) {
   const target = VIEWS.find((view) => view.name === name) || VIEWS[0];
+  const previousName = state.view;
+
   for (const view of VIEWS) {
-    const panel = $(view.panel);
     const button = $(view.button);
     const active = view.name === target.name;
-    if (panel) panel.classList.toggle("hidden", !active);
     if (button) {
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-selected", active ? "true" : "false");
     }
   }
+
   // A playing clip must not keep decoding behind a hidden panel, and the dialog
   // belongs to the view it was opened from.
   if (state.currentPreviewId) closeModal("previewModal");
   state.view = target.name;
   state.previewContext = null;
   saveUiState({ view: target.name });
-  // Entering a view is a fresh visit: its scroll starts at the top so the reader
-  // does not land halfway down a list they have not seen yet.
-  window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+
+  if (viewTransitionTimer) {
+    clearTimeout(viewTransitionTimer);
+    viewTransitionTimer = null;
+  }
+
+  const targetPanel = $(target.panel);
+  const previousView = VIEWS.find((v) => v.name === previousName);
+  const previousPanel =
+    previousView && previousView.name !== target.name ? $(previousView.panel) : null;
+
+  // Hide any third views immediately so rapid clicks never leave two panels visible.
+  for (const view of VIEWS) {
+    if (view.name === target.name) continue;
+    const panel = $(view.panel);
+    if (!panel) continue;
+    if (panel !== previousPanel) {
+      panel.classList.remove("view-leaving");
+      panel.classList.add("hidden");
+    }
+  }
+
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const activateTarget = () => {
+    for (const view of VIEWS) {
+      const panel = $(view.panel);
+      if (!panel) continue;
+      panel.classList.remove("view-leaving");
+      panel.classList.toggle("hidden", view.name !== target.name);
+    }
+    syncTopbarHeight();
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  };
+
+  if (
+    !previousPanel ||
+    previousPanel.classList.contains("hidden") ||
+    reduced ||
+    !state.viewsBooted
+  ) {
+    state.viewsBooted = true;
+    activateTarget();
+    return;
+  }
+
+  previousPanel.classList.add("view-leaving");
+  viewTransitionTimer = setTimeout(() => {
+    viewTransitionTimer = null;
+    activateTarget();
+  }, 140);
 }
 
 /** The view named in the URL hash, or the album. */
@@ -1680,7 +1786,20 @@ function viewFromHash() {
   return VIEWS.some((view) => view.name === hash) ? hash : "album";
 }
 
+function openViewByName(name) {
+  if (name === "footprints") return openFootprints();
+  if (name === "memories") return openMemories();
+  if (name === "duplicates") return openDuplicates();
+  showView("album");
+}
+
 function initViews() {
+  syncTopbarHeight();
+  window.addEventListener("resize", syncTopbarHeight);
+  if (typeof ResizeObserver === "function") {
+    const topbar = document.querySelector(".topbar");
+    if (topbar) new ResizeObserver(syncTopbarHeight).observe(topbar);
+  }
   for (const view of VIEWS) {
     const button = $(view.button);
     if (!button) continue;
@@ -1688,14 +1807,16 @@ function initViews() {
       // The hash keeps the view shareable and survives a reload without a round
       // trip to the server.
       if (viewFromHash() === view.name) {
-        showView(view.name);
+        openViewByName(view.name);
       } else {
         window.location.hash = view.name === "album" ? "" : view.name;
       }
     });
   }
-  window.addEventListener("hashchange", () => showView(viewFromHash()));
-  showView(viewFromHash());
+  window.addEventListener("hashchange", () => openViewByName(viewFromHash()));
+  const initial = viewFromHash();
+  if (initial === "album") showView("album");
+  else openViewByName(initial);
 }
 
 /** True when a dialog or the fullscreen viewer is on top of the gallery. */
@@ -1805,15 +1926,15 @@ async function toggleCardFavorite(photo) {
 function updateSelectionBar() {
   const bar = $("selectionBar");
   const count = state.selected.size;
-  $("selectedCount").textContent = count;
+  if (count > 0) $("selectedCount").textContent = count;
   const hasDeleted = state.photos.some((p) => state.selected.has(p.id) && p.status === "deleted");
   const hasActive = state.photos.some((p) => state.selected.has(p.id) && p.status !== "deleted");
   $("restoreSelectedBtn").classList.toggle("hidden", !hasDeleted);
   $("permanentDeleteSelectedBtn").classList.toggle("hidden", !hasDeleted);
   $("deleteSelectedBtn").classList.toggle("hidden", !hasActive);
   $("reanalyzeSelectedBtn").classList.toggle("hidden", !hasActive);
-  if (count > 0) bar.classList.remove("hidden");
-  else bar.classList.add("hidden");
+  if (count > 0) showStrip(bar);
+  else hideStrip(bar);
 }
 
 /* ==========================================================================
@@ -1936,7 +2057,7 @@ async function startRebuildIndex() {
 }
 
 function showProgress(text) {
-  $("scanProgress").classList.remove("hidden");
+  showStrip($("scanProgress"));
   $("progressText").textContent = text;
   $("progressFill").style.width = "0%";
   state.pollTick = 0;
@@ -1945,7 +2066,7 @@ function showProgress(text) {
 }
 
 function hideProgress() {
-  $("scanProgress").classList.add("hidden");
+  hideStrip($("scanProgress"));
   $("progressEta").classList.add("hidden");
   state.eta = null;
   state.currentJobId = null;
@@ -4625,7 +4746,7 @@ function paintCardStatus() {
   const card = state.card;
   if (!card) {
     btn.classList.add("hidden");
-    $("cardBanner").classList.add("hidden");
+    hideStrip($("cardBanner"));
     return;
   }
   // Same box metrics as the toolbar buttons next to it; only the state class
@@ -4660,9 +4781,9 @@ function paintCardStatus() {
     if (pending.restore_count) bits.push(`${pending.restore_count} 项恢复`);
     if (pending.erase_count) bits.push(`${pending.erase_count} 项彻底清理`);
     $("cardBannerText").textContent = `${card.source} 上有 ${bits.join("、")}待同步。`;
-    banner.classList.remove("hidden");
+    showStrip(banner);
   } else {
-    banner.classList.add("hidden");
+    hideStrip(banner);
   }
 }
 
@@ -5441,11 +5562,14 @@ function renderFootprints(data) {
   body.scrollTop = 0;
 }
 
+let footprintSubTimer = null;
+
 /**
  * Open one place: its own grid of photos, in the same sheet.
  *
- * The exchange is a fade rather than a slide because the two views occupy the same
- * space - sliding would suggest a page moved aside, which is not what happened.
+ * Uses an interruptible 140ms exit on the place list followed by the 240ms
+ * `.footprint-photos` entrance animation so drilling into a city feels like
+ * turning a page in a photobook rather than a hard DOM swap.
  */
 function openPlace(index) {
   const place = (state.footprintPlaces || [])[index];
@@ -5461,33 +5585,48 @@ function openPlace(index) {
   const title = $("footprintsTitle");
   const lede = $("footprintsLede");
   const back = $("footprintsBackBtn");
-  if (title) title.textContent = place.city;
-  if (lede) {
-    const years = place.years || [];
-    const span =
-      years.length > 1
-        ? ` · ${years[0]} – ${years[years.length - 1]}`
-        : years.length === 1
-          ? ` · ${years[0]}`
-          : "";
-    lede.textContent = `${place.count} 张回忆${span}`;
+
+  const renderPlaceView = () => {
+    if (title) title.textContent = place.city;
+    if (lede) {
+      const years = place.years || [];
+      const span =
+        years.length > 1
+          ? ` · ${years[0]} – ${years[years.length - 1]}`
+          : years.length === 1
+            ? ` · ${years[0]}`
+            : "";
+      lede.textContent = `${place.count} 张回忆${span}`;
+    }
+    if (back) back.classList.remove("hidden");
+    if (!body) return;
+    body.classList.remove("is-transitioning-out");
+    if (!photos.length) {
+      body.innerHTML = '<div class="footprints-empty"><p>这个地方的照片暂时打不开。</p></div>';
+      return;
+    }
+    state.footprintShown = 0;
+    body.innerHTML = '<div class="footprint-photos"></div>';
+    appendPlacePhotos();
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  };
+
+  if (footprintSubTimer) {
+    clearTimeout(footprintSubTimer);
+    footprintSubTimer = null;
   }
-  if (back) back.classList.remove("hidden");
-  if (!body) return;
-  if (!photos.length) {
-    body.innerHTML = '<div class="footprints-empty"><p>这个地方的照片暂时打不开。</p></div>';
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!body || reduced) {
+    renderPlaceView();
     return;
   }
-  // First batch only. A place can hold several hundred photos, and building them
-  // all in one innerHTML call made the sheet lay out every card at once - the
-  // first screen showed two thumbnails and a wall of empty boxes while the rest
-  // queued behind `loading="lazy"`.
-  state.footprintShown = 0;
-  body.innerHTML = '<div class="footprint-photos"></div>';
-  appendPlacePhotos();
-  body.scrollTop = 0;
-  body.classList.remove("is-fading");
-  void body.offsetWidth;
+  body.classList.add("is-transitioning-out");
+  footprintSubTimer = setTimeout(() => {
+    footprintSubTimer = null;
+    renderPlaceView();
+  }, 140);
 }
 
 //: How many of a place's photos to paint at a time.
@@ -5515,30 +5654,51 @@ function appendPlacePhotos() {
   }
 }
 
-/** Return from one place to the list of places. */
+/** Return from one place to the list of places, with a paired exit/enter transition. */
 function closePlace() {
   state.footprintPlace = null;
   state.footprintShown = 0;
   const title = $("footprintsTitle");
   const lede = $("footprintsLede");
   const back = $("footprintsBackBtn");
-  if (title) title.textContent = "足迹";
-  if (back) back.classList.add("hidden");
-  const total = (state.footprintPlaces || []).length;
-  if (lede) {
-    lede.textContent = total
-      ? `这些回忆散落在 ${total} 个地方，共 ${state.footprintPlaces.reduce(
-          (sum, place) => sum + place.count,
-          0
-        )} 张。`
-      : "还没有记录的足迹。";
-  }
   const body = $("footprintsBody");
-  if (!body) return;
-  body.innerHTML = `<div class="footprint-grid">${(state.footprintPlaces || [])
-    .map(footprintCardHtml)
-    .join("")}</div>`;
-  body.scrollTop = 0;
+
+  const renderListView = () => {
+    if (title) title.textContent = "足迹";
+    if (back) back.classList.add("hidden");
+    const total = (state.footprintPlaces || []).length;
+    if (lede) {
+      lede.textContent = total
+        ? `这些回忆散落在 ${total} 个地方，共 ${state.footprintPlaces.reduce(
+            (sum, place) => sum + place.count,
+            0
+          )} 张。`
+        : "还没有记录的足迹。";
+    }
+    if (!body) return;
+    body.classList.remove("is-transitioning-out");
+    body.innerHTML = `<div class="footprint-grid">${(state.footprintPlaces || [])
+      .map(footprintCardHtml)
+      .join("")}</div>`;
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  };
+
+  if (footprintSubTimer) {
+    clearTimeout(footprintSubTimer);
+    footprintSubTimer = null;
+  }
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!body || reduced) {
+    renderListView();
+    return;
+  }
+  body.classList.add("is-transitioning-out");
+  footprintSubTimer = setTimeout(() => {
+    footprintSubTimer = null;
+    renderListView();
+  }, 140);
 }
 
 async function openFootprints() {
@@ -5571,9 +5731,6 @@ async function openFootprints() {
 }
 
 function initFootprints() {
-  const btn = $("footprintsBtn");
-  if (btn) btn.addEventListener("click", openFootprints);
-
   const back = $("footprintsBackBtn");
   if (back) back.addEventListener("click", closePlace);
 
@@ -5635,18 +5792,24 @@ function yearsAgoText(years) {
 /**
  * One memory thumbnail.
  *
- * ``analysed`` puts a small mark on photos the model has already read. Without it
- * a memory that carries a written sentence looked the same as one that does not,
- * and the only way to find out was to open it.
+ * ``analysed`` puts a small mark on photos the model has already read, and shows
+ * its poetic caption/title on the Polaroid frame underneath.
  */
 function memoryCardHtml(photo) {
   const analysed = photo.status === "analyzed" && photo.score !== null;
+  const note = (photo.title || photo.reason || "").trim();
+  const captionHtml = note
+    ? `<span class="memory-caption">${escapeHtml(note)}</span>`
+    : `<span class="memory-caption is-muted">${escapeHtml(photo.filename || "")}</span>`;
   return `
     <button class="memory-card${analysed ? " is-analysed" : ""}" type="button"
             data-id="${photo.id}" title="${escapeHtml(photo.filename)}">
-      <img class="memory-img" src="${thumbnailUrl(photo)}"
-           alt="${escapeHtml(photo.filename)}" loading="lazy" decoding="async" />
-      ${analysed ? '<span class="memory-mark" data-icon="sparkles"></span>' : ""}
+      <span class="memory-shot">
+        <img class="memory-img" src="${thumbnailUrl(photo)}"
+             alt="${escapeHtml(photo.filename)}" loading="lazy" decoding="async" />
+        ${analysed ? '<span class="memory-mark" data-icon="sparkles"></span>' : ""}
+      </span>
+      ${captionHtml}
     </button>`;
 }
 
@@ -5839,9 +6002,6 @@ function memoryIdsNeedingAnalysis() {
 }
 
 function initMemories() {
-  const btn = $("memoriesBtn");
-  if (btn) btn.addEventListener("click", openMemories);
-
   const body = $("memoriesBody");
   if (body) {
     // A thumbnail opens that photo in the detail dialog, on top of this sheet -
@@ -6058,9 +6218,13 @@ function updateDupSelection() {
   const count = dupState.chosen.size;
   const button = $("dupTrashBtn");
   const summary = $("dupSelectionSummary");
+  const footer = $("duplicatesFooter");
   if (button) button.disabled = count === 0;
+  if (footer) footer.classList.toggle("has-selection", count > 0);
   if (summary) {
-    summary.textContent = count ? `已选中 ${count} 张` : "";
+    summary.textContent = count
+      ? `已选中 ${count} 张待收起的照片`
+      : "勾选要收起的相似照片，原图会移入回收站";
   }
 }
 
@@ -6220,9 +6384,6 @@ async function trashChosenDuplicates() {
 }
 
 function initDuplicates() {
-  const btn = $("duplicatesBtn");
-  if (btn) btn.addEventListener("click", openDuplicates);
-
   const body = $("duplicatesBody");
   if (body) {
     // Ticking a box is the only thing that selects. The whole card used to be a

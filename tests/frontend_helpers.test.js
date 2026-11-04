@@ -1355,6 +1355,89 @@ check(
   true
 );
 
+/* --------------------------------------------------- photobook & motion system
+   Emil Kowalski design engineering rules: full-bleed photobook spreads,
+   sticky album filter console under topbar, paired enter/exit animations,
+   and zero ease-in on UI exits. */
+section("photobook layout and motion system");
+
+{
+  const html = fs.readFileSync(
+    path.join(__dirname, "..", "static", "index.html"),
+    "utf8"
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, "..", "static", "style.css"),
+    "utf8"
+  );
+
+  check(
+    "album stats and filters are wrapped in the sticky console bar",
+    /id="albumStickyBar" class="album-sticky-bar"[\s\S]{0,600}id="statsBar"[\s\S]{0,1800}class="filters"/.test(
+      html
+    ),
+    true
+  );
+  check(
+    "the album sticky bar is position: sticky under the topbar",
+    /\.album-sticky-bar \{[\s\S]{0,160}position:\s*sticky;[\s\S]{0,160}top:\s*var\(--topbar-height/.test(
+      css
+    ),
+    true
+  );
+  check(
+    "page views spread full-bleed instead of a 1180px centered box",
+    /\.page-view \.view-inner \{[\s\S]{0,120}max-width:\s*none/.test(css) &&
+      !/max-width:\s*1180px/.test(css),
+    true
+  );
+  check(
+    "page views have both entrance (viewIn) and exit (viewOut) keyframes",
+    /@keyframes viewIn/.test(css) &&
+      /@keyframes viewOut/.test(css) &&
+      /\.page-view\.view-leaving/.test(css),
+    true
+  );
+  check(
+    "showView sequences view-leaving before activating the incoming view",
+    /previousPanel\.classList\.add\("view-leaving"\)/.test(src) &&
+      /viewTransitionTimer = setTimeout/.test(src),
+    true
+  );
+  check(
+    "Footprints drill-down and return use is-transitioning-out exit transition",
+    /body\.classList\.add\("is-transitioning-out"\)/.test(src) &&
+      /\.footprints-body\.is-transitioning-out/.test(css),
+    true
+  );
+  check(
+    "Memories uses a full-bleed responsive photobook grid instead of a 150px strip",
+    /\.memory-strip \{[\s\S]{0,160}display:\s*grid;[\s\S]{0,160}minmax\(230px,\s*1fr\)/.test(
+      css
+    ),
+    true
+  );
+  check(
+    "Duplicates dead modal-close button is gone and replaced by the floating dock",
+    !/data-close="duplicatesModal"/.test(html) &&
+      /id="duplicatesFooter" class="duplicates-actions"/.test(html),
+    true
+  );
+  check(
+    "selection bar, scan progress, and card banner have paired exit animations",
+    /\.selection-bar\.closing/.test(css) &&
+      /\.scan-progress\.closing/.test(css) &&
+      /\.card-banner\.closing/.test(css) &&
+      /function hideStrip\(el\)/.test(src),
+    true
+  );
+  check(
+    "no ease-in rule remains in style.css",
+    !/:\s*[^;]*\bease-in\b(?!-out)/.test(css),
+    true
+  );
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`
