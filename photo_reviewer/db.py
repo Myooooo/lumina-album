@@ -1641,7 +1641,7 @@ class Database:
             params.append(folder)
         sql = (
             "SELECT id, phash, width, height, size, status, folder, filename, "
-            "thumb_path, media_kind, score, favorite "
+            "thumb_path, media_kind, score, favorite, path, original_path, raw_path "
             f"FROM photos WHERE {' AND '.join(where)}"
         )
         with self._lock:

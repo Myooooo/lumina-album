@@ -1545,7 +1545,12 @@ section("cross-view stability");
   );
   check(
     "the folder input goes through it",
-    /state\.folder = val;[\s\S]{0,200}reloadCurrentView\(\)/.test(script),
+    // Every album switch takes the shared path, which clears the filters and the
+    // search box before it reloads - otherwise a query written for the previous
+    // album would be re-sent, and a folder change could cost a model request.
+    /applyFolderChange\(val\)/.test(script) &&
+      /function applyFolderChange\(folder\)/.test(script) &&
+      /clearFilterControls\(/.test(script),
     true
   );
 

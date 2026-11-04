@@ -6652,11 +6652,47 @@ class SearchModeApiTests(unittest.TestCase):
             self.assertEqual(resp.status_code, 200, mode)
 
     def test_visual_mode_reports_how_many_were_checked(self) -> None:
-        resp = self.client.post(
-            "/api/search", json={"query": "海", "mode": "visual"}
-        )
+        # Visual search now probes the model first, so a run against a stopped
+        # server is refused immediately instead of scanning with nothing to ask.
+        # The probe is stubbed here: what this test is about is the `checked`
+        # count on a successful scan, not whether a model happens to be running.
+        with patch(
+            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+        ), patch(
+            "photo_reviewer.server.visual_search", return_value=([], 3)
+        ):
+            resp = self.client.post(
+                "/api/search", json={"query": "海", "mode": "visual"}
+            )
         self.assertEqual(resp.status_code, 200)
         self.assertIn("checked", resp.get_json())
+
+    def test_visual_mode_fails_fast_when_the_model_is_down(self) -> None:
+        """One cheap probe, not the whole retry budget.
+
+        Without it the reader sat behind the loading dialog for the full timeout
+        before being told the model was unreachable.
+        """
+        with patch(
+            "photo_reviewer.server.probe_endpoint",
+            return_value=(False, "无法连接模型服务 http://x/v1"),
+        ):
+            resp = self.client.post(
+                "/api/search", json={"query": "海", "mode": "visual"}
+            )
+        self.assertEqual(resp.status_code, 503)
+        self.assertTrue(resp.get_json().get("unreachable"))
+
+    def test_smart_mode_degrades_to_keyword_when_the_model_is_down(self) -> None:
+        """`smart` has a local pass, so it answers instead of timing out."""
+        with patch(
+            "photo_reviewer.server.probe_endpoint",
+            return_value=(False, "无法连接模型服务 http://x/v1"),
+        ):
+            resp = self.client.post("/api/search", json={"query": "海", "mode": "smart"})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body.get("warning"), "the reader is told why it is degraded")
 
 
 class BytesReaderTests(unittest.TestCase):
@@ -6854,6 +6890,133 @@ class LauncherTests(unittest.TestCase):
         launcher = self._launcher()
         sequence = list(launcher._candidate_ports(5050))
         self.assertEqual(sequence[0], 5050)
+
+
+class DetailPayloadFieldTests(unittest.TestCase):
+    """The lightbox renders a path row and a RAW marker from the row it was given.
+
+    Two trimmed payloads - footprints' place rows and the duplicate review rows -
+    shipped neither, so a photo opened from 足迹 or 相似回忆 showed no physical path
+    and no RAW badge, while the same photo opened from the album showed both.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _add_pair(self, folder: str) -> tuple[str, str]:
+        image = os.path.join(folder, "DSC_0001.JPG")
+        raw = os.path.join(folder, "DSC_0001.ARW")
+        for p in (image, raw):
+            with open(p, "wb") as handle:
+                handle.write(b"x")
+        self.db.upsert_photo(
+            {
+                "path": image,
+                "raw_path": raw,
+                "folder": folder,
+                "filename": "DSC_0001.JPG",
+                "status": "analyzed",
+                "width": 1000,
+                "height": 800,
+                "size": 2048,
+                "location": "北京市海淀区A路",
+                "exif": {"datetime_original": "2024:05:05 10:00:00"},
+                "phash": "0f0f0f0f0f0f0f0f",
+            }
+        )
+        return image, raw
+
+    def test_duplicate_rows_carry_the_path_and_raw_fields(self) -> None:
+        folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(folder, exist_ok=True)
+        image, raw = self._add_pair(folder)
+        # A second copy so a group exists.
+        copy = os.path.join(folder, "DSC_0001-copy.JPG")
+        with open(copy, "wb") as handle:
+            handle.write(b"x")
+        self.db.upsert_photo(
+            {
+                "path": copy,
+                "folder": folder,
+                "filename": "DSC_0001-copy.JPG",
+                "status": "analyzed",
+                "width": 1000,
+                "height": 800,
+                "size": 2048,
+                "phash": "0f0f0f0f0f0f0f0f",
+            }
+        )
+        body = self.client.get("/api/duplicates").get_json()
+        photo = body["groups"][0]["photos"][0]
+        self.assertEqual(photo["path"], image)
+        self.assertTrue(photo["has_raw"])
+        self.assertEqual(photo["raw_path"], raw)
+        self.assertEqual(photo["raw_ext"], "ARW")
+
+    def test_place_rows_carry_the_path_and_raw_fields(self) -> None:
+        folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(folder, exist_ok=True)
+        image, raw = self._add_pair(folder)
+        body = self.client.get("/api/footprints").get_json()
+        photo = body["places"][0]["photos"][0]
+        self.assertEqual(photo["path"], image)
+        self.assertTrue(photo["has_raw"])
+        self.assertEqual(photo["raw_path"], raw)
+        self.assertEqual(photo["raw_ext"], "ARW")
+
+
+class ModelProbeTests(unittest.TestCase):
+    """Search probes the model rather than waiting out the retry budget."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_visual_search_refuses_at_once_without_a_model(self) -> None:
+        with patch(
+            "photo_reviewer.server.probe_endpoint",
+            return_value=(False, "无法连接模型服务"),
+        ):
+            resp = self.client.post("/api/search", json={"query": "海", "mode": "visual"})
+        self.assertEqual(resp.status_code, 503)
+        self.assertTrue(resp.get_json()["unreachable"])
+
+    def test_smart_search_still_answers_without_a_model(self) -> None:
+        with patch(
+            "photo_reviewer.server.probe_endpoint",
+            return_value=(False, "无法连接模型服务"),
+        ):
+            resp = self.client.post("/api/search", json={"query": "海", "mode": "smart"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["warning"])
+
+    def test_a_plain_keyword_browse_never_probes(self) -> None:
+        """No query means no model: browsing must not pay for a `GET /models`."""
+        with patch(
+            "photo_reviewer.server.probe_endpoint",
+            side_effect=AssertionError("must not probe"),
+        ):
+            resp = self.client.post("/api/search", json={"query": "", "mode": "smart"})
+        self.assertEqual(resp.status_code, 200)
 
 
 class FaviconAndTitleTests(unittest.TestCase):

@@ -890,6 +890,15 @@ async function loadPhotos(options = {}) {
       indexPhotos([]);
       renderGallery();
     }
+    // The model being down is a different story from a failed read: it is the
+    // likely reason a semantic search has nothing to show, and the message the
+    // server sends already names the endpoint. Saying "读取照片失败" would hide
+    // the one thing the reader can act on.
+    const unreachable = /模型|model|无法连接/i.test(e.message || "");
+    if (unreachable) {
+      showToast(`暂时无法连线大模型，已保留你的搜索词，稍后可以重试。${e.message}`, "warning");
+      return;
+    }
     showToast("读取照片失败：" + e.message, "error");
   }
 }
@@ -1934,18 +1943,23 @@ function initViews() {
  * The other three views kept their old album's photos until they were reopened.
  */
 async function reloadCurrentView() {
+  // The album is refreshed whatever page is on screen: switching the folder while
+  // reading 那年今日 used to leave the gallery holding the previous album's photos,
+  // so going back to 相册 showed the wrong book.
+  const albumRefresh = state.view === "album" ? loadPhotos() : loadPhotos({ quiet: true });
   switch (state.view) {
     case "footprints":
-      openFootprints();
+      await Promise.all([albumRefresh, openFootprints()]);
       break;
     case "memories":
-      openMemories();
+      await Promise.all([albumRefresh, openMemories()]);
       break;
     case "duplicates":
-      loadDuplicates(dupState.threshold);
+      await albumRefresh;
+      await loadDuplicates(dupState.threshold);
       break;
     default:
-      await loadPhotos();
+      await albumRefresh;
       break;
   }
 }
@@ -3021,11 +3035,12 @@ async function toggleFolderHistory() {
 function selectFolder(folder) {
   const clean = String(folder || "").trim();
   if (!clean) return;
-  state.folder = clean;
   rememberFolder(clean);
   saveUiState({ folder: clean });
   $("folderInput").value = clean;
-  reloadCurrentView();
+  // Goes through the shared path so the filters and the search box are cleared
+  // first: a query written for the previous album must not be re-sent.
+  applyFolderChange(clean);
 }
 
 async function openFolder() {
@@ -3981,8 +3996,16 @@ function updatePreview(options = {}) {
   `;
 }
 
-function resetFilters() {
-  setSelectValue($("statusFilter"), state.defaultStatusFilter || "analyzed");
+/**
+ * Clear every filter and the search box, without reloading.
+ *
+ * Kept separate from `resetFilters` so a folder change can clear the controls
+ * before it decides which view to refresh - and so it can pass the status filter
+ * it wants rather than the remembered default.
+ */
+function clearFilterControls({ status } = {}) {
+  const statusValue = status || state.defaultStatusFilter || "analyzed";
+  setSelectValue($("statusFilter"), statusValue);
   setSelectValue($("favoriteFilter"), "");
   setSelectValue($("minScoreFilter"), "");
   setSelectValue($("tagFilter"), "");
@@ -3990,9 +4013,35 @@ function resetFilters() {
   setSelectValue($("kindFilter"), "");
   setSelectValue($("searchMode"), "smart");
   setSelectValue($("sortFilter"), "score_desc");
-  $("searchInput").value = "";
+  const input = $("searchInput");
+  if (input) {
+    input.value = "";
+    input.placeholder = "例如：去年秋天的金黄落叶、西湖落日…";
+  }
+  updateFilterHighlights();
   updateActiveStat();
+}
+
+function resetFilters() {
+  clearFilterControls();
   loadPhotos();
+}
+
+/**
+ * Switch to another album: drop the filters, then refresh what is on screen.
+ *
+ * The order matters. `reloadCurrentView` reads the search box to decide whether to
+ * call the model, so clearing first is what stops a folder change from spending a
+ * semantic request on a query the reader has finished with.
+ */
+async function applyFolderChange(folder) {
+  state.folder = folder || "";
+  // A new album's default status filter is derived from what it actually holds,
+  // so the controls are cleared before that answer is known - then corrected.
+  clearFilterControls({ status: "all" });
+  await applyDefaultStatusFilter();
+  clearFilterControls({ status: state.defaultStatusFilter || "analyzed" });
+  await reloadCurrentView();
 }
 
 async function loadPromptPresets() {
@@ -5163,10 +5212,9 @@ function init() {
   $("folderInput").addEventListener("change", () => {
     const val = $("folderInput").value.trim();
     if (val) {
-      state.folder = val;
       rememberFolder(val);
       saveUiState({ folder: val });
-      reloadCurrentView();
+      applyFolderChange(val);
     }
   });
 
@@ -5341,12 +5389,12 @@ function init() {
       planImport({ silent: true });
       return;
     }
-    state.folder = state.currentDirPath;
-    rememberFolder(state.folder);
-    saveUiState({ folder: state.folder });
-    $("folderInput").value = state.folder;
+    const picked = state.currentDirPath;
+    rememberFolder(picked);
+    saveUiState({ folder: picked });
+    $("folderInput").value = picked;
     closeModal("dirModal");
-    reloadCurrentView();
+    applyFolderChange(picked);
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
@@ -5487,7 +5535,11 @@ function init() {
     el.addEventListener("click", () => applyStatFilter(el.dataset.filter));
   });
 
-  loadInitialFolder();
+  // Awaited, because the very first view request must already carry the album.
+  // It used to run un-awaited in parallel with `initViews()`, so a deep link to
+  // #memories asked the server for "folder = (empty)" - which means every album -
+  // and the reader saw a library they had not chosen.
+  const albumReady = loadInitialFolder();
   // Playback preferences are needed before the first dialog opens, not only
   // when someone visits the settings page.
   loadPlaybackConfig();
@@ -5503,7 +5555,11 @@ function init() {
     if (!document.hidden) refreshCardStatus();
   });
   initBackToTop();
-  initViews();
+  // The views are wired only once the album is known, so no view can ask for
+  // "all albums" by accident.
+  albumReady.finally(() => {
+    initViews();
+  });
   initFootprints();
   initMemories();
   initExport();

@@ -116,6 +116,11 @@ VISUAL_SEARCH_BATCH = 4
 #: because it answers a different question by different means.
 SEARCH_MODES = ("smart", "visual")
 
+#: How long to wait for the model's `/models` before deciding it is down. Short on
+#: purpose: this sits between a keypress and a spinner, and a refused connection is
+#: the common case.
+SEARCH_PROBE_TIMEOUT = 1.0
+
 #: Modes that are no longer offered but are still accepted, so a bookmarked request
 #: or an old cached page does not fail with "不支持的搜索方式". They are mapped onto
 #: the mode that supersedes them.
@@ -129,9 +134,11 @@ def _duplicate_payload(photo: dict[str, Any]) -> dict[str, Any]:
     that matter are the ones that tell you which copy to keep (resolution and file
     size), plus the thumbnail version so the browser can cache it.
     """
+    raw_path = photo.get("raw_path")
     return {
         "id": photo["id"],
         "filename": photo.get("filename") or "",
+        "path": photo.get("path") or "",
         "folder": photo.get("folder") or "",
         "width": int(photo.get("width") or 0),
         "height": int(photo.get("height") or 0),
@@ -140,6 +147,12 @@ def _duplicate_payload(photo: dict[str, Any]) -> dict[str, Any]:
         "status": photo.get("status") or "",
         "score": photo.get("score"),
         "favorite": bool(photo.get("favorite")),
+        # The dialog renders a RAW marker and a path row from these four; without
+        # them a photo opened from this view looked location-less and raw-less.
+        "raw_path": raw_path,
+        "has_raw": bool(raw_path),
+        "is_raw": _is_raw_file(photo.get("path") or photo.get("original_path")),
+        "raw_ext": Path(raw_path).suffix.lstrip(".").upper() if raw_path else "",
         # The same cache-busting token the gallery uses: the dHash changes when
         # the thumbnail is re-rendered, so the browser can keep this one forever.
         "thumb_version": photo.get("phash") or "",
@@ -1757,6 +1770,20 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                             {
                                 "id": photo["id"],
                                 "filename": photo.get("filename") or "",
+                                # The dialog draws a path row and a RAW marker from
+                                # these; the trimmed row used to omit them, so a
+                                # photo opened here showed neither.
+                                "path": photo.get("path") or "",
+                                "raw_path": photo.get("raw_path"),
+                                "has_raw": bool(photo.get("raw_path")),
+                                "is_raw": _is_raw_file(
+                                    photo.get("path") or photo.get("original_path")
+                                ),
+                                "raw_ext": (
+                                    Path(photo["raw_path"]).suffix.lstrip(".").upper()
+                                    if photo.get("raw_path")
+                                    else ""
+                                ),
                                 "size": photo.get("size") or 0,
                                 "width": photo.get("width") or 0,
                                 "height": photo.get("height") or 0,
@@ -2045,22 +2072,40 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
         semantic_warning = None
         if mode in ("semantic", "smart") and query:
-            try:
-                ids = semantic_search(query, all_candidates, cfg)
-                by_id = {p["id"]: p for p in all_candidates}
-                for pid in ids:
-                    if pid in by_id:
-                        result_map[pid] = by_id[pid]
-            except SemanticSearchError as exc:
-                semantic_warning = str(exc)
-                if mode == "semantic" and not result_map:
-                    return jsonify({"error": semantic_warning}), 502
+            # One cheap request before the expensive one. Without it a stopped
+            # model server costs the whole retry budget before anything is
+            # reported - the same reason `/api/analyze/batch` probes first.
+            #
+            # A short timeout: the reader is watching a spinner, and the common
+            # case is a closed port, which the OS refuses in microseconds. The
+            # default three seconds is right for a batch run, not for a keystroke.
+            reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)
+            if not reachable:
+                # `smart` still has its keyword recall; return that with an
+                # explanation rather than making the reader wait for a timeout.
+                semantic_warning = why
+            else:
+                try:
+                    ids = semantic_search(query, all_candidates, cfg)
+                    by_id = {p["id"]: p for p in all_candidates}
+                    for pid in ids:
+                        if pid in by_id:
+                            result_map[pid] = by_id[pid]
+                except SemanticSearchError as exc:
+                    semantic_warning = str(exc)
+                    if mode == "semantic" and not result_map:
+                        return jsonify({"error": semantic_warning}), 502
 
         # Visual search looks at the pictures instead of the captions, so it can
         # find things no caption happens to describe. It costs a real request per
         # few photos, which is why it is its own mode and why the candidate list is
         # narrowed first by whatever filters the caller already set.
         if mode == "visual" and query:
+            # This mode *is* the model looking at pictures; there is no local
+            # fallback, so an unreachable server is answered at once.
+            reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)
+            if not reachable:
+                return jsonify({"error": why, "unreachable": True}), 503
             try:
                 ids, checked = visual_search(
                     query,

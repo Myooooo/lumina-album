@@ -7,9 +7,11 @@ import json
 import re
 import time
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from .config import Config
 
@@ -139,6 +141,29 @@ def _normalize_base_url(url: str) -> str:
     return url
 
 
+#: Names that resolve to both a v4 and a v6 loopback address.
+_LOOPBACK_NAMES = {"localhost", "localhost.localdomain"}
+
+
+def _loopback_literal(url: str) -> str:
+    """Rewrite a loopback *name* to the v4 literal, leaving everything else alone.
+
+    A local model server listens on one family. On Windows ``localhost`` resolves to
+    `::1` first, so a v4-only listener makes the client spend a whole connect timeout
+    on the v6 address before trying the v4 one - measured at exactly one extra second
+    on every probe against a stopped server.
+
+    Only the host of a loopback *name* is rewritten. A real hostname or an existing
+    literal is left as written, because there the resolution order is the user's
+    configuration and guessing would be wrong.
+    """
+    parts = urlsplit(url)
+    if parts.hostname and parts.hostname.lower() in _LOOPBACK_NAMES:
+        netloc = parts.netloc.replace(parts.hostname, "127.0.0.1", 1)
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return url
+
+
 def probe_endpoint(config: Config, timeout: float = 3.0) -> tuple[bool, str]:
     """Check that the model endpoint answers before starting a long run.
 
@@ -160,10 +185,29 @@ def probe_endpoint(config: Config, timeout: float = 3.0) -> tuple[bool, str]:
     api_key = getattr(config, "api_key", "")
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    # One attempt, and no address-family fallback cost.
+    #
+    # Two things made this slower than its timeout, both measured rather than
+    # guessed: urllib3 retries a refused connection by default, and on Windows
+    # `localhost` resolves to `::1` first, so a v4-only server pays a full
+    # connect timeout on the v6 address before the v4 attempt is made. Together
+    # they turned a 1 s probe into 2 s.
+    #
+    # The retry policy is disabled below. For the family penalty the fix is to
+    # pick the literal the server actually listens on when the host is a
+    # loopback name - the endpoints this app talks to are all local.
+    probe_url = _loopback_literal(url)
+    retry = Retry(total=0, connect=0, read=0, redirect=0)
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
     try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
+        resp = session.get(probe_url, headers=headers, timeout=timeout)
     except (requests.exceptions.RequestException, OSError) as exc:
         return False, f"无法连接模型服务 {config.api_base_url}：{exc}"
+    finally:
+        session.close()
     if resp.status_code >= 500:
         return False, f"模型服务暂时不可用（HTTP {resp.status_code}）"
     return True, ""
