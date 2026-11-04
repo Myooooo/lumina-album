@@ -1185,10 +1185,22 @@ check(
   true
 );
 check(
-  "the three new sheets go through showSheet",
-  ['footprints', 'memories', 'duplicates'].every((name) =>
-    new RegExp(`showSheet\\(\\$\\("${name}Modal"\\)\\)`).test(src)
-  ),
+  "the three entries switch views instead of opening dialogs",
+  /showView\("footprints"\)/.test(src) &&
+    /showView\("memories"\)/.test(src) &&
+    /showView\("duplicates"\)/.test(src),
+  true
+);
+check(
+  "no code still reaches for the old modal ids",
+  !/\$\("footprintsModal"\)/.test(src) &&
+    !/\$\("memoriesModal"\)/.test(src) &&
+    !/\$\("duplicatesModal"\)/.test(src),
+  true
+);
+check(
+  "the four views are declared with a switcher button each",
+  /const VIEWS = \[/.test(src) && /albumViewBtn/.test(src),
   true
 );
 check(
@@ -1237,7 +1249,27 @@ section("toolbar layout");
     "utf8"
   );
   check("there are two toolbar rows", (html.match(/class="folder-row/g) || []).length, 2);
-  check("the browsing row is marked", /class="folder-row row-secondary"/.test(html), true);
+  check(
+    "the browsing row is marked",
+    /class="folder-row row-secondary view-switcher"/.test(html),
+    true
+  );
+  check(
+    "the switcher has four tabs plus settings",
+    (html.match(/class="[^"]*view-tab[^"]*"/g) || []).length,
+    4
+  );
+  check(
+    "相册 is the first tab, left of 足迹",
+    /albumViewBtn[\s\S]{0,400}footprintsBtn/.test(html),
+    true
+  );
+  check(
+    "the album is the default view",
+    /id="albumView" class="page-view"/.test(html) &&
+      !/id="footprintsView" class="page-view "/.test(html),
+    true
+  );
   check(
     "the browsing entries live on the second row",
     /row-secondary[\s\S]{0,400}footprintsBtn[\s\S]{0,300}memoriesBtn[\s\S]{0,300}duplicatesBtn/

@@ -6652,6 +6652,41 @@ class LauncherTests(unittest.TestCase):
         self.assertGreaterEqual(launcher.PORT_ATTEMPTS, 1)
         self.assertLessEqual(launcher.PORT_ATTEMPTS, 200)
 
+    def test_no_open_is_parsed(self) -> None:
+        launcher = self._launcher()
+        self.assertFalse(launcher._parse_args([]).no_open)
+        self.assertTrue(launcher._parse_args(["--no-open"]).no_open)
+
+    def test_no_open_switches_the_browser_off(self) -> None:
+        """The flag has to work on its own, without the environment variable.
+
+        It exists because `PHOTO_OPEN_BROWSER=0` is only discoverable by reading the
+        docs, and a script launching this app should not have to know about it.
+        """
+        launcher = self._launcher()
+        os.environ.pop("PHOTO_OPEN_BROWSER", None)
+        launcher._NO_OPEN_FLAG = True
+        try:
+            self.assertTrue(launcher._browser_disabled())
+        finally:
+            launcher._NO_OPEN_FLAG = False
+        self.assertFalse(launcher._browser_disabled())
+
+    def test_an_unknown_flag_does_not_crash_the_launcher(self) -> None:
+        """argparse would exit 2, which reads as a crash in a double-clicked window."""
+        launcher = self._launcher()
+        parsed = launcher._parse_args(["--no-open", "--something-else"])
+        self.assertTrue(parsed.no_open)
+
+    def test_the_environment_variable_still_works(self) -> None:
+        launcher = self._launcher()
+        launcher._NO_OPEN_FLAG = False
+        os.environ["PHOTO_OPEN_BROWSER"] = "0"
+        try:
+            self.assertTrue(launcher._browser_disabled())
+        finally:
+            os.environ.pop("PHOTO_OPEN_BROWSER", None)
+
     def test_candidates_are_unique_and_in_range(self) -> None:
         launcher = self._launcher()
         sequence = list(launcher._candidate_ports(5050))

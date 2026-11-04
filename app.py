@@ -18,9 +18,11 @@ the first one that binds is the one used, and the URL is printed so it is
 obvious where to point the browser.
 """
 
+import argparse
 import errno
 import os
 import socket
+import sys
 import threading
 import webbrowser
 from collections.abc import Iterator
@@ -48,8 +50,20 @@ OPEN_BROWSER_DELAY = 1.0
 app = create_app(CONFIG)
 
 
+#: Set by ``--no-open`` before anything else runs.
+_NO_OPEN_FLAG = False
+
+
 def _browser_disabled() -> bool:
-    """Whether the user asked for no browser window (headless, tests, servers)."""
+    """Whether the user asked for no browser window (headless, tests, servers).
+
+    Either flag counts: ``--no-open`` on the command line, or ``PHOTO_OPEN_BROWSER=0``
+    in the environment. The flag exists because the environment variable is only
+    discoverable by reading the docs, and a script that launches this app should not
+    have to know about it.
+    """
+    if _NO_OPEN_FLAG:
+        return True
     value = os.getenv("PHOTO_OPEN_BROWSER", "").strip().lower()
     return value in {"0", "false", "no", "off"}
 
@@ -134,7 +148,26 @@ def _candidate_ports(start: int) -> Iterator[int]:
         yield from emit(value)
 
 
-def main() -> int:
+def _parse_args(argv=None) -> argparse.Namespace:
+    """The command line, kept to the one flag this launcher needs."""
+    parser = argparse.ArgumentParser(
+        prog="app.py",
+        description="拾光相册：本地照片回忆整理。默认会用默认浏览器打开页面。",
+    )
+    parser.add_argument(
+        "--no-open",
+        action="store_true",
+        help="启动后不自动打开浏览器（等同 PHOTO_OPEN_BROWSER=0）",
+    )
+    # argparse would otherwise exit 2 on an unknown flag, which reads as a crash in
+    # a double-clicked window; the launcher only has one option and can be lenient.
+    known, _ignored = parser.parse_known_args(argv)
+    return known
+
+
+def main(argv=None) -> int:
+    global _NO_OPEN_FLAG
+    _NO_OPEN_FLAG = _parse_args(argv).no_open
     host = CONFIG.host
     chosen: int | None = None
     tried = 0
@@ -162,6 +195,12 @@ def main() -> int:
         print(f"改用端口 {chosen}（原端口 {CONFIG.port} 不可用）。", flush=True)
     url = f"http://{host}:{chosen}"
     print(f"拾光相册已启动： {url}", flush=True)
+    if _browser_disabled():
+        print("已跳过自动打开浏览器（--no-open / PHOTO_OPEN_BROWSER=0）。", flush=True)
+    else:
+        # Said out loud because the alternative was only in the README, and this is
+        # the one moment the reader is looking at the terminal.
+        print("正在默认浏览器中打开，如需禁用请使用 --no-open。", flush=True)
     open_browser_later(url)
     # ``use_reloader`` stays off: it re-runs this module in a child process,
     # which would probe and bind a second time - and would open a second
@@ -177,4 +216,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

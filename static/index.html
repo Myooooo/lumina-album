@@ -36,10 +36,19 @@
          line left two of them stranded on a second line at common widths, which
          reads as a layout accident rather than a group. Splitting them keeps the
          row above about "this album" and this row about "elsewhere in it". -->
-    <div class="folder-row row-secondary">
-      <button id="footprintsBtn" class="btn" title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
-      <button id="memoriesBtn" class="btn" title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
-      <button id="duplicatesBtn" class="btn" title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复回忆</button>
+    <!-- The four views. Exactly one is on screen; the selected one is marked with
+         a filled chip, which is visible at a glance without a tab strip - the row
+         already carries icon buttons and an underline would read as settings tabs. -->
+    <div class="folder-row row-secondary view-switcher" role="tablist"
+         aria-label="切换页面">
+      <button id="albumViewBtn" class="btn view-tab" role="tab" aria-selected="true"
+              title="按画廊浏览这个相册"><span class="btn-icon" data-icon="collection"></span>相册</button>
+      <button id="footprintsBtn" class="btn view-tab" role="tab" aria-selected="false"
+              title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
+      <button id="memoriesBtn" class="btn view-tab" role="tab" aria-selected="false"
+              title="看看往年今天的照片"><span class="btn-icon" data-icon="sun"></span>那年今日</button>
+      <button id="duplicatesBtn" class="btn view-tab" role="tab" aria-selected="false"
+              title="找出看起来重复的照片"><span class="btn-icon" data-icon="rawLayers"></span>重复回忆</button>
       <button id="settingsBtn" class="btn icon-only row-end" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
     </div>
     <div id="cardBanner" class="card-banner hidden">
@@ -58,129 +67,134 @@
     </div>
   </header>
 
-  <section class="stats" id="statsBar">
-    <div class="stat clickable-stat" data-filter="all">
-      <span class="stat-icon" data-icon="collection"></span>
-      <span class="stat-label">全部回忆</span>
-      <span class="stat-num" id="statTotal">0</span>
-    </div>
-    <div class="stat clickable-stat" data-filter="analyzed">
-      <span class="stat-icon" data-icon="sparkles"></span>
-      <span class="stat-label">已收录</span>
-      <span class="stat-num" id="statAnalyzed">0</span>
-    </div>
-    <div class="stat clickable-stat" data-filter="favorite">
-      <span class="stat-icon" data-icon="heart"></span>
-      <span class="stat-label">已珍藏</span>
-      <span class="stat-num" id="statFavorite">0</span>
-    </div>
-    <div class="stat clickable-stat" data-filter="pending">
-      <span class="stat-icon" data-icon="hourglass"></span>
-      <span class="stat-label">待整理</span>
-      <span class="stat-num" id="statPending">0</span>
-    </div>
-    <div class="stat clickable-stat" data-filter="deleted">
-      <span class="stat-icon" data-icon="archive"></span>
-      <span class="stat-label">已收起</span>
-      <span class="stat-num" id="statDeleted">0</span>
-    </div>
-    <div class="stats-actions hidden" id="trashActions">
-      <button id="emptyTrashBtn" class="btn danger"><span class="btn-icon" data-icon="trash"></span>清空回收站</button>
-    </div>
-  </section>
+  <!-- 相册: the grid the app opens on. Kept as one block so the other three
+       views replace it wholesale rather than layering over it. -->
+  <div id="albumView" class="page-view">
+    <section class="stats" id="statsBar">
+      <div class="stat clickable-stat" data-filter="all">
+        <span class="stat-icon" data-icon="collection"></span>
+        <span class="stat-label">全部回忆</span>
+        <span class="stat-num" id="statTotal">0</span>
+      </div>
+      <div class="stat clickable-stat" data-filter="analyzed">
+        <span class="stat-icon" data-icon="sparkles"></span>
+        <span class="stat-label">已收录</span>
+        <span class="stat-num" id="statAnalyzed">0</span>
+      </div>
+      <div class="stat clickable-stat" data-filter="favorite">
+        <span class="stat-icon" data-icon="heart"></span>
+        <span class="stat-label">已珍藏</span>
+        <span class="stat-num" id="statFavorite">0</span>
+      </div>
+      <div class="stat clickable-stat" data-filter="pending">
+        <span class="stat-icon" data-icon="hourglass"></span>
+        <span class="stat-label">待整理</span>
+        <span class="stat-num" id="statPending">0</span>
+      </div>
+      <div class="stat clickable-stat" data-filter="deleted">
+        <span class="stat-icon" data-icon="archive"></span>
+        <span class="stat-label">已收起</span>
+        <span class="stat-num" id="statDeleted">0</span>
+      </div>
+      <div class="stats-actions hidden" id="trashActions">
+        <button id="emptyTrashBtn" class="btn danger"><span class="btn-icon" data-icon="trash"></span>清空回收站</button>
+      </div>
+    </section>
 
-  <section class="filters">
-    <div class="filter-group sort-group" data-filter-key="sort">
-      <label><span class="label-icon" data-icon="dimensions"></span>排序方式</label>
-      <select id="sortFilter">
-        <option value="score_desc" selected>总分从高到低</option>
-        <option value="score_asc">总分从低到高</option>
-        <option value="time_desc">拍摄时间从晚到早</option>
-        <option value="time_asc">拍摄时间从早到晚</option>
-        <option value="filename">按文件名</option>
-        <option value="recent">按分析时间</option>
-        <option value="size">按文件大小</option>
+    <section class="filters">
+      <div class="filter-group sort-group" data-filter-key="sort">
+        <label><span class="label-icon" data-icon="dimensions"></span>排序方式</label>
+        <select id="sortFilter">
+          <option value="score_desc" selected>总分从高到低</option>
+          <option value="score_asc">总分从低到高</option>
+          <option value="time_desc">拍摄时间从晚到早</option>
+          <option value="time_asc">拍摄时间从早到晚</option>
+          <option value="filename">按文件名</option>
+          <option value="recent">按分析时间</option>
+          <option value="size">按文件大小</option>
+        </select>
+      </div>
+      <div class="filter-group" data-filter-key="kind">
+        <label><span class="label-icon" data-icon="video"></span>类型</label>
+        <select id="kindFilter">
+          <option value="">全部</option>
+          <option value="photo">照片</option>
+          <option value="video">视频</option>
+          <option value="live">实况</option>
+        </select>
+      </div>
+      <div class="filter-group" data-filter-key="min_score">
+        <label><span class="label-icon" data-icon="score"></span>总分</label>
+        <select id="minScoreFilter">
+          <option value="">不限</option>
+          <option value="2">2+</option>
+          <option value="4">4+</option>
+          <option value="6">6+</option>
+          <option value="8">8+</option>
+        </select>
+      </div>
+      <div class="filter-group tag-group" data-filter-key="tag">
+        <label><span class="label-icon" data-icon="tag"></span>回忆标签</label>
+        <select id="tagFilter">
+          <option value="">全部标签</option>
+        </select>
+      </div>
+      <div class="filter-group" data-filter-key="year">
+        <label><span class="label-icon" data-icon="calendar"></span>拍摄年份</label>
+        <select id="yearFilter">
+          <option value="">全部年份</option>
+        </select>
+      </div>
+      <div class="filter-group" data-filter-key="search_mode">
+        <label><span class="label-icon" data-icon="scan"></span>搜索方式</label>
+        <select id="searchMode">
+          <option value="smart">智能语义搜索</option>
+          <option value="keyword">关键词匹配</option>
+          <option value="semantic">大模型语义</option>
+          <option value="visual">看图搜索</option>
+        </select>
+      </div>
+      <div class="filter-group grow" data-filter-key="search">
+        <label><span class="label-icon" data-icon="search"></span>探索回忆</label>
+        <input id="searchInput" type="search" placeholder="例如：去年秋天的金黄落叶、西湖落日…" />
+      </div>
+      <button id="searchBtn" class="btn" title="搜索"><span class="btn-icon" data-icon="search"></span>搜索</button>
+      <button id="resetFiltersBtn" class="btn" title="重置筛选"><span class="btn-icon" data-icon="reset"></span>重置</button>
+    </section>
+
+    <div class="hidden">
+      <select id="statusFilter" data-no-custom>
+        <option value="all">全部回忆</option>
+        <option value="analyzed" selected>已收录</option>
+        <option value="favorite">已珍藏</option>
+        <option value="pending">待整理</option>
+        <option value="deleted">已收起</option>
       </select>
-    </div>
-    <div class="filter-group" data-filter-key="kind">
-      <label><span class="label-icon" data-icon="video"></span>类型</label>
-      <select id="kindFilter">
+      <select id="favoriteFilter" data-no-custom>
         <option value="">全部</option>
-        <option value="photo">照片</option>
-        <option value="video">视频</option>
-        <option value="live">实况</option>
+        <option value="1">已珍藏</option>
       </select>
     </div>
-    <div class="filter-group" data-filter-key="min_score">
-      <label><span class="label-icon" data-icon="score"></span>总分</label>
-      <select id="minScoreFilter">
-        <option value="">不限</option>
-        <option value="2">2+</option>
-        <option value="4">4+</option>
-        <option value="6">6+</option>
-        <option value="8">8+</option>
-      </select>
-    </div>
-    <div class="filter-group tag-group" data-filter-key="tag">
-      <label><span class="label-icon" data-icon="tag"></span>回忆标签</label>
-      <select id="tagFilter">
-        <option value="">全部标签</option>
-      </select>
-    </div>
-    <div class="filter-group" data-filter-key="year">
-      <label><span class="label-icon" data-icon="calendar"></span>拍摄年份</label>
-      <select id="yearFilter">
-        <option value="">全部年份</option>
-      </select>
-    </div>
-    <div class="filter-group" data-filter-key="search_mode">
-      <label><span class="label-icon" data-icon="scan"></span>搜索方式</label>
-      <select id="searchMode">
-        <option value="smart">智能语义搜索</option>
-        <option value="keyword">关键词匹配</option>
-        <option value="semantic">大模型语义</option>
-        <option value="visual">看图搜索</option>
-      </select>
-    </div>
-    <div class="filter-group grow" data-filter-key="search">
-      <label><span class="label-icon" data-icon="search"></span>探索回忆</label>
-      <input id="searchInput" type="search" placeholder="例如：去年秋天的金黄落叶、西湖落日…" />
-    </div>
-    <button id="searchBtn" class="btn" title="搜索"><span class="btn-icon" data-icon="search"></span>搜索</button>
-    <button id="resetFiltersBtn" class="btn" title="重置筛选"><span class="btn-icon" data-icon="reset"></span>重置</button>
-  </section>
 
-  <div class="hidden">
-    <select id="statusFilter" data-no-custom>
-      <option value="all">全部回忆</option>
-      <option value="analyzed" selected>已收录</option>
-      <option value="favorite">已珍藏</option>
-      <option value="pending">待整理</option>
-      <option value="deleted">已收起</option>
-    </select>
-    <select id="favoriteFilter" data-no-custom>
-      <option value="">全部</option>
-      <option value="1">已珍藏</option>
-    </select>
-  </div>
+    <main id="gallery" class="gallery"></main>
+    <div class="gallery-load-more-wrap">
+      <button id="loadMoreBtn" class="btn gallery-load-more hidden"><span class="btn-icon" data-icon="chevronDown"></span>展开更多回忆</button>
+    </div>
+    <div id="emptyState" class="empty-state hidden">
+      <span class="empty-icon" data-icon="sparkles"></span>
+      <p>还没有照片。<br>选择一份装满回忆的文件夹，开启温暖的时光旅程吧。</p>
+    </div>
 
-  <main id="gallery" class="gallery"></main>
-  <div class="gallery-load-more-wrap">
-    <button id="loadMoreBtn" class="btn gallery-load-more hidden"><span class="btn-icon" data-icon="chevronDown"></span>展开更多回忆</button>
-  </div>
-  <div id="emptyState" class="empty-state hidden">
-    <span class="empty-icon" data-icon="sparkles"></span>
-    <p>还没有照片。<br>选择一份装满回忆的文件夹，开启温暖的时光旅程吧。</p>
-  </div>
+    <div id="selectionBar" class="selection-bar hidden">
+      <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
+      <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
+      <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
+      <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
+      <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
+      <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
+      <button id="clearSelectionBtn" class="btn" title="取消选择"><span class="btn-icon" data-icon="close"></span>取消</button>
+    </div>
 
-  <div id="selectionBar" class="selection-bar hidden">
-    <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
-    <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
-    <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
-    <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
-    <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
-    <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
-    <button id="clearSelectionBtn" class="btn" title="取消选择"><span class="btn-icon" data-icon="close"></span>取消</button>
   </div>
 
   <!-- Immersive Lightbox Preview modal -->
@@ -249,9 +263,9 @@
 
   <!-- 足迹：the places the photos were taken, grouped by city rather than by the
        street address the geocoder returns. -->
-  <div id="footprintsModal" class="modal hidden">
-    <div class="modal-content footprints-content">
-      <button class="modal-close" data-close="footprintsModal"><span class="btn-icon" data-icon="close"></span></button>
+  <div id="footprintsView" class="page-view footprints-content hidden">
+    <div class="view-inner">
+
       <button id="footprintsBackBtn" class="footprints-back hidden" type="button">
         <span class="btn-icon" data-icon="chevronLeft"></span>所有地方
       </button>
@@ -293,9 +307,9 @@
   </div>
 
   <!-- 那年今日：photos taken on this day in earlier years, grouped by year. -->
-  <div id="memoriesModal" class="modal hidden">
-    <div class="modal-content memories-content">
-      <button class="modal-close" data-close="memoriesModal"><span class="btn-icon" data-icon="close"></span></button>
+  <div id="memoriesView" class="page-view memories-content hidden">
+    <div class="view-inner">
+
       <h2><span class="modal-title-icon" data-icon="sun"></span>那年今日</h2>
       <p class="memories-lede" id="memoriesLede">正在翻找旧时光…</p>
       <div class="memories-actions" id="memoriesActions" hidden>
@@ -316,9 +330,9 @@
 
   <!-- Duplicate review: a full-height sheet rather than a small dialog, because
        the whole point is seeing several versions of one picture side by side. -->
-  <div id="duplicatesModal" class="modal hidden">
-    <div class="modal-content duplicates-content">
-      <button class="modal-close" data-close="duplicatesModal"><span class="btn-icon" data-icon="close"></span></button>
+  <div id="duplicatesView" class="page-view duplicates-content hidden">
+    <div class="view-inner">
+
       <h2><span class="modal-title-icon" data-icon="rawLayers"></span>重复的回忆</h2>
       <p class="duplicates-lede" id="duplicatesLede">正在比对…</p>
 

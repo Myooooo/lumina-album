@@ -3414,7 +3414,10 @@ select {
   position: fixed;
   top: 20px;
   right: 24px;
-  z-index: 200;
+  /* Above every dialog, including the confirm box at 1000. A toast reports what
+     just happened, and it used to disappear behind the detail dialog (200 against
+     400) exactly when the reader had just done something worth reporting. */
+  z-index: 2000;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -3856,6 +3859,78 @@ select {
   color: var(--danger);
 }
 
+/* ---------- Pages ----------
+   The album, 足迹, 那年今日 and 重复回忆 are four pages, not a page and three dialogs.
+   Only one carries `hidden` at a time; `showView` owns that. */
+
+.page-view {
+  /* Same horizontal rhythm as the album's own content, so switching views does not
+     change where the left edge of anything sits. */
+  padding: 18px 32px 96px;
+  animation: viewIn var(--dur-panel) var(--ease-out) both;
+}
+
+@keyframes viewIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* The three former sheets declared a dialog's metrics: a max width, a max height
+   and their own scrolling region. On a page those fight the document's scroll. */
+.page-view .view-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.page-view h2 {
+  margin: 0 0 6px;
+}
+
+/* The switcher. Four peers plus the settings gear, all one height. */
+.view-switcher .view-tab {
+  position: relative;
+  transition: color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out);
+}
+
+/* The selected page. A filled chip rather than an underline: the row already reads
+   as buttons, and an underline would look like a settings tab strip. */
+.view-switcher .view-tab.is-active {
+  background: linear-gradient(150deg, #c08c63, var(--primary));
+  border-color: transparent;
+  color: #fff8ef;
+  box-shadow: 0 4px 14px rgba(179, 125, 86, 0.28);
+}
+
+.view-switcher .view-tab.is-active:hover {
+  background: linear-gradient(150deg, #c08c63, var(--primary));
+  border-color: transparent;
+  color: #fff8ef;
+}
+
+.view-switcher .view-tab.is-active svg {
+  color: #fff8ef;
+}
+
+.view-switcher .view-tab:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-view {
+    animation: none !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-view {
+    padding: 14px 18px 80px;
+  }
+}
+
 /* ---------- Duplicate review sheet ----------
    A taller, wider dialog than the rest: the decision is made by comparing
    pictures, so the cards have to be big enough to actually compare. It borrows
@@ -3863,11 +3938,6 @@ select {
    modal, and the groups stagger in the way the gallery's cards do. */
 
 .duplicates-content {
-  max-width: 1120px;
-  width: calc(100vw - 64px);
-  max-height: min(88vh, 940px);
-  display: flex;
-  flex-direction: column;
   padding-bottom: 18px;
 }
 
@@ -3926,10 +3996,7 @@ select {
 .duplicates-body {
   flex: 1 1 auto;
   min-height: 220px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 4px 4px 8px;
-  margin: 0 -4px;
   /* A soft edge instead of a hard cut: the sheet should look like it continues
      under the toolbar rather than stopping at a line. */
   mask-image: linear-gradient(to bottom, transparent 0, #000 10px, #000 calc(100% - 10px), transparent 100%);
@@ -4268,11 +4335,6 @@ select {
    in year order, which reads as turning back through time. */
 
 .memories-content {
-  max-width: 1040px;
-  width: calc(100vw - 64px);
-  max-height: min(86vh, 900px);
-  display: flex;
-  flex-direction: column;
   padding-bottom: 22px;
 }
 
@@ -4285,10 +4347,7 @@ select {
 
 .memories-body {
   flex: 1 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 4px 2px 4px 4px;
-  margin: 0 -4px;
 }
 
 .memories-empty {
@@ -4631,11 +4690,6 @@ select {
    rather than a table droped on top of it. */
 
 .footprints-content {
-  max-width: 1080px;
-  width: calc(100vw - 64px);
-  max-height: min(86vh, 900px);
-  display: flex;
-  flex-direction: column;
   padding-bottom: 22px;
 }
 
@@ -4648,10 +4702,7 @@ select {
 
 .footprints-body {
   flex: 1 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 4px 4px 6px;
-  margin: 0 -4px;
 }
 
 .footprints-empty {

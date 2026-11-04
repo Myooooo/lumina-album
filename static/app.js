@@ -17,6 +17,8 @@ const state = {
   //: ``{ids, title}``. Navigation then walks ``ids`` instead of the gallery, because
   //: those sheets show photos the album page may not have loaded at all.
   previewContext: null,
+  //: Which of the four views is on screen.
+  view: "album",
   //: The places 足迹 has loaded, and the one currently opened. The place view
   //: replaces the list inside the same sheet, so both live here rather than in the
   //: DOM alone - going back has to redraw the grid without a second request.
@@ -1633,6 +1635,69 @@ function initEndlessGallery() {
   }
 }
 
+/* ==========================================================================
+   Views
+   The album, the places, the past days and the duplicates are four pages of one
+   app, not a page and three dialogs. Exactly one is visible; the switcher marks it
+   with a filled chip and remembers the choice.
+   ========================================================================== */
+
+//: The views, in the order the switcher shows them.
+const VIEWS = [
+  { name: "album", button: "albumViewBtn", panel: "albumView" },
+  { name: "footprints", button: "footprintsBtn", panel: "footprintsView" },
+  { name: "memories", button: "memoriesBtn", panel: "memoriesView" },
+  { name: "duplicates", button: "duplicatesBtn", panel: "duplicatesView" },
+];
+
+/** Show one view and mark it in the switcher. */
+function showView(name) {
+  const target = VIEWS.find((view) => view.name === name) || VIEWS[0];
+  for (const view of VIEWS) {
+    const panel = $(view.panel);
+    const button = $(view.button);
+    const active = view.name === target.name;
+    if (panel) panel.classList.toggle("hidden", !active);
+    if (button) {
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    }
+  }
+  // A playing clip must not keep decoding behind a hidden panel, and the dialog
+  // belongs to the view it was opened from.
+  if (state.currentPreviewId) closeModal("previewModal");
+  state.view = target.name;
+  state.previewContext = null;
+  saveUiState({ view: target.name });
+  // Entering a view is a fresh visit: its scroll starts at the top so the reader
+  // does not land halfway down a list they have not seen yet.
+  window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+}
+
+/** The view named in the URL hash, or the album. */
+function viewFromHash() {
+  const hash = (window.location.hash || "").replace("#", "").trim();
+  return VIEWS.some((view) => view.name === hash) ? hash : "album";
+}
+
+function initViews() {
+  for (const view of VIEWS) {
+    const button = $(view.button);
+    if (!button) continue;
+    button.addEventListener("click", () => {
+      // The hash keeps the view shareable and survives a reload without a round
+      // trip to the server.
+      if (viewFromHash() === view.name) {
+        showView(view.name);
+      } else {
+        window.location.hash = view.name === "album" ? "" : view.name;
+      }
+    });
+  }
+  window.addEventListener("hashchange", () => showView(viewFromHash()));
+  showView(viewFromHash());
+}
+
 /** True when a dialog or the fullscreen viewer is on top of the gallery. */
 function isOverlayOpen() {
   const fullscreen = $("fullscreenModal");
@@ -2578,13 +2643,24 @@ async function navigatePreview(delta) {
  * counts as a neighbour on the way forward, because pressing the arrow fetches
  * it rather than stopping.
  */
+/**
+ * Whether there is a photo in that direction to move to.
+ *
+ * Reads the same order `navigatePreview` walks. It used to measure the gallery's
+ * order unconditionally, so a photo opened from 足迹 or 重复回忆 was either missing
+ * from that order or alone in it and both arrows vanished - the sheet's own list
+ * was never consulted.
+ */
 function previewHasNeighbour(delta) {
-  const order = visiblePhotoOrder();
+  const order = state.previewContext
+    ? state.previewContext.ids
+    : visiblePhotoOrder();
   if (!order.length) return false;
   const idx = order.indexOf(state.currentPreviewId);
   if (idx < 0) return false;
   if (delta < 0) return idx > 0;
-  return idx < order.length - 1 || !!state.hasMore;
+  // Only the gallery can grow past its end; a sheet's list is complete already.
+  return idx < order.length - 1 || (!state.previewContext && !!state.hasMore);
 }
 
 function folderHistoryOpen() {
@@ -5165,6 +5241,7 @@ function init() {
     if (!document.hidden) refreshCardStatus();
   });
   initBackToTop();
+  initViews();
   initFootprints();
   initMemories();
   initExport();
@@ -5465,7 +5542,7 @@ function closePlace() {
 }
 
 async function openFootprints() {
-  showSheet($("footprintsModal"));
+  showView("footprints");
   const body = $("footprintsBody");
   const lede = $("footprintsLede");
   const title = $("footprintsTitle");
@@ -5503,15 +5580,18 @@ function initFootprints() {
   const body = $("footprintsBody");
   if (!body) return;
 
-  // Growing the place as the reader reaches the bottom of the sheet's own scroll
-  // area. Debounced by the natural scroll cadence rather than a timer: the append
-  // is cheap and the guard below stops it running twice for one position.
-  body.addEventListener("scroll", () => {
+  // Growing the place as the reader nears the end of it. The views are pages now,
+  // so the scrolling element is the window - listening on the body would never
+  // fire, and a place with 832 photos would stay at its first batch.
+  window.addEventListener("scroll", () => {
     const place = state.footprintPlace;
     if (!place) return;
     const photos = place.photos || [];
     if ((state.footprintShown || 0) >= photos.length) return;
-    if (body.scrollTop + body.clientHeight < body.scrollHeight - 320) return;
+    if (state.view !== "footprints") return;
+    const rect = body.getBoundingClientRect();
+    // Within a screenful of the end of the place's grid.
+    if (rect.bottom > window.innerHeight + 600) return;
     appendPlacePhotos();
   }, { passive: true });
 
@@ -5705,7 +5785,7 @@ async function exportKeepsake(options) {
 }
 
 async function openMemories() {
-  showSheet($("memoriesModal"));
+  showView("memories");
   const body = $("memoriesBody");
   const lede = $("memoriesLede");
   const actions = $("memoriesActions");
@@ -6097,7 +6177,7 @@ function pushModal(el) {
 }
 
 function openDuplicates() {
-  showSheet($("duplicatesModal"));
+  showView("duplicates");
   const slider = $("dupThreshold");
   if (slider) {
     slider.value = String(dupState.threshold);
