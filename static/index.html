@@ -778,6 +778,15 @@
 
   <script src="/static/js/icons.js"></script>
   <script src="/static/js/ui-kit.js"></script>
+  <!-- The app is six ordered classic scripts, not a bundle: core owns the state
+       and the API client, the next four own one area each, and app.js runs the
+       boot code. Every slice is loaded before DOMContentLoaded, and the
+       functions are global by design. -->
+  <script src="/static/js/core.js"></script>
+  <script src="/static/js/gallery.js"></script>
+  <script src="/static/js/views.js"></script>
+  <script src="/static/js/viewer.js"></script>
+  <script src="/static/js/settings.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

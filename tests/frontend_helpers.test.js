@@ -2,21 +2,34 @@
    Frontend helper tests - run with:  node tests/frontend_helpers.test.js
 
    These cover the pure functions behind the progress bar, the job summary and
-   the detail dialog. They are extracted from static/app.js at run time, so the
-   assertions follow the shipped source instead of a copy that can drift.
+   the detail dialog. They are extracted from the shipped scripts at run time,
+   so the assertions follow the source instead of a copy that can drift.
+
+   The scripts are read in the order index.html loads them: the app is a handful
+   of ordered classic scripts rather than one file, and the harness should not
+   need editing when another slice is added.
    ========================================================================== */
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
 
-const APP = path.join(__dirname, "..", "static", "app.js");
-const src = fs.readFileSync(APP, "utf8");
+const STATIC = path.join(__dirname, "..", "static");
+const INDEX = path.join(STATIC, "index.html");
+const indexHtml = fs.readFileSync(INDEX, "utf8");
+const scriptFiles = [...indexHtml.matchAll(/<script src="\/static\/([^"]+)"><\/script>/g)].map(
+  (match) => match[1]
+);
+if (!scriptFiles.length) throw new Error("static/index.html loads no scripts");
+const src = scriptFiles
+  .map((relative) => fs.readFileSync(path.join(STATIC, relative), "utf8"))
+  .join("\n");
+const scriptList = scriptFiles.join(", ");
 
-/** Lift one top-level function out of app.js, braces balanced. */
+/** Lift one top-level function out of the concatenated scripts, braces balanced. */
 function extract(name) {
   const start = src.indexOf(`function ${name}(`);
-  if (start < 0) throw new Error(`static/app.js has no function ${name}`);
+  if (start < 0) throw new Error(`the frontend scripts have no function ${name}`);
   let depth = 0;
   const from = src.indexOf("{", start);
   for (let i = from; i < src.length; i += 1) {
@@ -32,7 +45,7 @@ function extract(name) {
 /** Lift a top-level `const NAME = ...;` declaration. */
 function extractConst(name) {
   const match = new RegExp(`^const ${name} = [^;]+;`, "m").exec(src);
-  if (!match) throw new Error(`static/app.js has no const ${name}`);
+  if (!match) throw new Error(`the frontend scripts have no const ${name}`);
   return match[0];
 }
 
@@ -893,7 +906,10 @@ check(
 check(
   "an unknown mode is a clear error, not a silent empty result",
   /不支持的搜索方式/.test(
-    fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "server.py"), "utf8")
+    fs.readFileSync(
+      path.join(__dirname, "..", "photo_reviewer", "web", "routes_photos.py"),
+      "utf8"
+    )
   ),
   true
 );
@@ -1504,10 +1520,7 @@ section("cross-view stability");
     path.join(__dirname, "..", "static", "style.css"),
     "utf8"
   );
-  const script = fs.readFileSync(
-    path.join(__dirname, "..", "static", "app.js"),
-    "utf8"
-  );
+  const script = src;
 
   check(
     "the scrollbar gutter is reserved",

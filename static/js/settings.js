@@ -1,0 +1,1215 @@
+/* ==========================================================================
+   Lumina Album - Settings: dialogs, editors, folder browser and SD-card sync
+   ========================================================================== */
+"use strict";
+
+/**
+ * Clear every filter and the search box, without reloading.
+ *
+ * Kept separate from `resetFilters` so a folder change can clear the controls
+ * before it decides which view to refresh - and so it can pass the status filter
+ * it wants rather than the remembered default.
+ */
+function clearFilterControls({ status } = {}) {
+  const statusValue = status || state.defaultStatusFilter || "analyzed";
+  setSelectValue($("statusFilter"), statusValue);
+  setSelectValue($("favoriteFilter"), "");
+  setSelectValue($("minScoreFilter"), "");
+  setSelectValue($("tagFilter"), "");
+  setSelectValue($("yearFilter"), "");
+  setSelectValue($("kindFilter"), "");
+  setSelectValue($("searchMode"), "smart");
+  setSelectValue($("sortFilter"), "score_desc");
+  const input = $("searchInput");
+  if (input) {
+    input.value = "";
+    input.placeholder = "例如：去年秋天的金黄落叶、西湖落日…";
+  }
+  updateFilterHighlights();
+  updateActiveStat();
+}
+
+function resetFilters() {
+  clearFilterControls();
+  loadPhotos();
+}
+
+/**
+ * Switch to another album: drop the filters, then refresh what is on screen.
+ *
+ * The order matters. `reloadCurrentView` reads the search box to decide whether to
+ * call the model, so clearing first is what stops a folder change from spending a
+ * semantic request on a query the reader has finished with.
+ */
+async function applyFolderChange(folder) {
+  state.folder = folder || "";
+  // A new album's default status filter is derived from what it actually holds,
+  // so the controls are cleared before that answer is known - then corrected.
+  clearFilterControls({ status: "all" });
+  await applyDefaultStatusFilter();
+  clearFilterControls({ status: state.defaultStatusFilter || "analyzed" });
+  await reloadCurrentView();
+}
+
+async function loadPromptPresets() {
+  try {
+    const data = await api("/api/prompt-presets");
+    promptPresets = data.presets || {};
+  } catch (e) {
+    console.warn("加载提示词预设失败", e);
+  }
+}
+
+function stripPromptFormat(text) {
+  if (!text) return "";
+  const idx = text.indexOf(PROMPT_FORMAT_MARKER);
+  return idx >= 0 ? text.slice(0, idx).trim() : text.trim();
+}
+
+function activePresetFor(text) {
+  const normalized = stripPromptFormat(text);
+  return (
+    Object.entries(promptPresets).find(
+      ([, template]) => stripPromptFormat(template) === normalized
+    )?.[0] || ""
+  );
+}
+
+function highlightPromptPreset(text) {
+  const active = activePresetFor(text);
+  document.querySelectorAll(".preset-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.preset === active);
+  });
+}
+
+function applyPromptPreset(name) {
+  const template = promptPresets[name];
+  if (!template) {
+    showToast("提示词预设不可用", "error");
+    return;
+  }
+  const promptText = stripPromptFormat(template);
+  $("setSystemPrompt").value = promptText;
+  highlightPromptPreset(promptText);
+}
+
+/* ==========================================================================
+   Settings dialog: tabs
+   ========================================================================== */
+
+const SETTINGS_TABS = ["model", "image", "video", "geo", "data"];
+
+/** Slide the "ink" behind the active tab and show its pane. */
+function showSettingsTab(name, options = {}) {
+  const target = SETTINGS_TABS.includes(name) ? name : SETTINGS_TABS[0];
+  const tabs = [...document.querySelectorAll("#settingsModal .settings-tab")];
+  const panes = [...document.querySelectorAll("#settingsModal .settings-pane")];
+  if (!tabs.length) return;
+
+  tabs.forEach((tab) => {
+    const active = tab.dataset.tab === target;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.tabIndex = active ? 0 : -1;
+  });
+  panes.forEach((pane) => {
+    const active = pane.dataset.pane === target;
+    // ``hidden`` is what actually takes the pane out of the layout; the CSS
+    // animation then replays from the start each time a tab is opened.
+    pane.hidden = !active;
+    pane.classList.toggle("active", active);
+  });
+
+  moveSettingsTabInk();
+  if (options.focus) {
+    const activeTab = tabs.find((tab) => tab.dataset.tab === target);
+    if (activeTab) activeTab.focus();
+  }
+}
+
+/** Position the sliding highlight under the active tab. */
+function moveSettingsTabInk() {
+  const ink = $("settingsTabInk");
+  const container = document.querySelector("#settingsModal .settings-tabs");
+  const active = container ? container.querySelector(".settings-tab.active") : null;
+  if (!ink || !container || !active) return;
+  const rect = active.getBoundingClientRect();
+  if (!rect.width) {
+    // The dialog is still hidden, so there is nothing to measure yet.
+    ink.style.opacity = "0";
+    return;
+  }
+  // ``left: 0`` on the ink is the padding edge, while getBoundingClientRect is
+  // the border edge; subtracting the border width lines the two up.
+  const base = container.getBoundingClientRect();
+  const border = container.clientLeft || 0;
+  ink.style.opacity = "1";
+  ink.style.width = `${rect.width}px`;
+  ink.style.transform = `translateX(${rect.left - base.left - border}px)`;
+}
+
+/** Arrow-key navigation between tabs, as expected of a real tablist. */
+function onSettingsTabKeydown(e) {
+  const keys = { ArrowRight: 1, ArrowLeft: -1, Home: "first", End: "last" };
+  if (!(e.key in keys)) return;
+  e.preventDefault();
+  const tabs = [...document.querySelectorAll("#settingsModal .settings-tab")];
+  const current = tabs.findIndex((tab) => tab.classList.contains("active"));
+  let next;
+  if (keys[e.key] === "first") next = 0;
+  else if (keys[e.key] === "last") next = tabs.length - 1;
+  else next = (current + keys[e.key] + tabs.length) % tabs.length;
+  showSettingsTab(tabs[next].dataset.tab, { focus: true });
+}
+
+/**
+ * Show whether ffmpeg was found.
+ *
+ * It cannot be configured from here (the path belongs to the machine, not the
+ * album), so the row is a status line: the user needs to know why their videos
+ * have no preview before they start hunting through the logs.
+ */
+async function paintFfmpegStatus() {
+  const el = $("setFfmpegStatus");
+  if (!el) return;
+  el.classList.remove("ok", "bad");
+  el.textContent = "正在检测 ffmpeg…";
+  try {
+    const data = await api("/api/video/status");
+    state.ffmpegAvailable = !!data.available;
+    if (data.available) {
+      el.classList.add("ok");
+      el.textContent = `已检测到 ffmpeg：${data.version || "版本未知"}`;
+    } else {
+      el.classList.add("bad");
+      el.textContent = "未检测到 ffmpeg。视频仍然会被索引，但无法生成预览或播放。请安装 ffmpeg 或设置 PHOTO_FFMPEG_PATH。";
+    }
+  } catch (e) {
+    el.textContent = "无法检测 ffmpeg： " + e.message;
+  }
+}
+
+async function openSettings() {
+  try {
+    await loadPromptPresets();
+    const cfg = await api("/api/config");
+    $("setApiBase").value = cfg.api_base_url || "";
+    $("setApiKey").value = cfg.api_key || "";
+    $("setModel").value = cfg.model || "";
+    const promptText = stripPromptFormat(cfg.system_prompt || promptPresets.playful || "");
+    $("setSystemPrompt").value = promptText;
+    highlightPromptPreset(promptText);
+    $("setMaxEdge").value = cfg.proxy_max_edge || 1280;
+    $("setProxyQuality").value = cfg.proxy_quality ?? 80;
+    $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 640;
+    $("setThumbQuality").value = cfg.thumb_quality ?? 50;
+    $("setModelConcurrency").value = cfg.scan_concurrency || 1;
+    $("setModelRetries").value = cfg.model_retries ?? 3;
+    $("setTimeout").value = cfg.request_timeout || 120;
+    $("setIndexThreads").value = cfg.index_concurrency || 4;
+    setSelectValue($("setGeocodingProvider"), cfg.geocoding_provider || "nominatim");
+    $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
+    $("setGeocodingFallback").checked = !!cfg.geocoding_fallback;
+    $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
+    $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
+    $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 3;
+    $("setVideoClipMaxEdge").value = cfg.video_clip_max_edge || 960;
+    $("setVideoClipCrf").value = cfg.video_clip_crf ?? 28;
+    $("setVideoPosterRatio").value = cfg.video_poster_ratio ?? 0.1;
+    $("setVideoClipAudio").checked = cfg.video_clip_audio !== false;
+    $("setVideoPregenerate").checked = !!cfg.video_pregenerate;
+    $("setMergeLivePhotos").checked = cfg.merge_live_photos !== false;
+    setSelectValue($("setMemoryWindow"), String(cfg.memory_window_days ?? 0));
+    setSelectValue($("setVideoPreviewMode"), cfg.video_preview_mode || "once");
+    setSelectValue($("setVideoProcessing"), cfg.video_processing || "ffmpeg");
+    setVolume("video", cfg.video_preview_volume ?? 50);
+    setVolume("live", cfg.live_volume ?? 0);
+    state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
+    state.videoPreviewMode = cfg.video_preview_mode || "once";
+    state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
+    state.liveVolume = Number(cfg.live_volume ?? 0);
+    paintFfmpegStatus();
+    // Always open on the model tab: that is what most visits are for.
+    showSettingsTab("model");
+    showModal($("settingsModal"));
+    pushModal($("settingsModal"));
+    // The tab widths are only measurable once the dialog is on screen.
+    requestAnimationFrame(moveSettingsTabInk);
+  } catch (e) {
+    showToast("读取设置失败：" + e.message, "error");
+  }
+}
+
+async function saveSettings() {
+  const payload = {
+    api_base_url: $("setApiBase").value.trim(),
+    api_key: $("setApiKey").value,
+    model: $("setModel").value.trim(),
+    system_prompt: stripPromptFormat($("setSystemPrompt").value),
+    proxy_max_edge: parseInt($("setMaxEdge").value, 10) || 1280,
+    proxy_quality: parseInt($("setProxyQuality").value, 10) || 80,
+    gallery_thumb_size: parseInt($("setGalleryThumbSize").value, 10) || 640,
+    thumb_quality: parseInt($("setThumbQuality").value, 10) || 50,
+    scan_concurrency: parseInt($("setModelConcurrency").value, 10) || 1,
+    model_retries: parseInt($("setModelRetries").value, 10) || 3,
+    request_timeout: parseInt($("setTimeout").value, 10) || 120,
+    index_concurrency: parseInt($("setIndexThreads").value, 10) || 4,
+    geocoding_provider: $("setGeocodingProvider").value,
+    geocoding_api_key: $("setGeocodingApiKey").value,
+    geocoding_fallback: $("setGeocodingFallback").checked,
+    geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
+    geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
+    video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 3,
+    video_clip_max_edge: parseInt($("setVideoClipMaxEdge").value, 10) || 960,
+    video_clip_crf: parseInt($("setVideoClipCrf").value, 10) || 28,
+    video_poster_ratio: parseFloat($("setVideoPosterRatio").value) || 0.1,
+    video_clip_audio: $("setVideoClipAudio").checked,
+    video_pregenerate: $("setVideoPregenerate").checked,
+    merge_live_photos: $("setMergeLivePhotos").checked,
+    memory_window_days: parseInt($("setMemoryWindow").value, 10) || 0,
+    video_preview_mode: $("setVideoPreviewMode").value,
+    video_processing: $("setVideoProcessing").value,
+    video_preview_volume: clampVolume($("setVideoPreviewVolume").value),
+    live_volume: clampVolume($("setLiveVolume").value),
+  };
+  try {
+    await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    closeModal("settingsModal");
+    showToast("设置已保存。", "success");
+  } catch (e) {
+    showToast("保存设置失败：" + e.message, "error");
+  }
+}
+
+async function cleanCache() {
+  if (!await confirmDialog("确定清理所有缓存吗？\n这会移除无引用的代理图片和旧缓存文件，不影响原始照片。", { title: "清理缓存", confirmText: "清理", danger: true })) return;
+  try {
+    const data = await api("/api/cache/clean", { method: "POST" });
+    showToast(`缓存清理完成：释放 ${data.freed} 个缓存文件，${(data.freed_size / 1024 / 1024).toFixed(2)} MB，涉及 ${data.photos_affected || 0} 张照片`, "success");
+  } catch (e) {
+    showToast("清理缓存失败：" + e.message, "error");
+  }
+}
+
+const SCORE_EDITORS = [
+  { key: "score", numberId: "editScore", rangeId: "editScoreRange" },
+  { key: "technical", numberId: "editTechnical", rangeId: "editTechnicalRange" },
+  { key: "memory", numberId: "editMemory", rangeId: "editMemoryRange" },
+  { key: "uniqueness", numberId: "editUniqueness", rangeId: "editUniquenessRange" },
+];
+
+/**
+ * Volume rows in the settings dialog.
+ *
+ * Same shape as the score editors: a label, a themed slider and a number box
+ * that stay in step, so a value can be dragged for feel or typed for precision.
+ */
+const VOLUME_EDITORS = [
+  { key: "video", rangeId: "setVideoPreviewVolume", numberId: "setVideoPreviewVolumeNumber" },
+  { key: "live", rangeId: "setLiveVolume", numberId: "setLiveVolumeNumber" },
+];
+
+function clampVolume(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(num)));
+}
+
+/** Paint the slider's filled portion. */
+function paintVolumeRange(rangeEl, value) {
+  if (!rangeEl) return;
+  rangeEl.style.setProperty("--volume-pct", `${clampVolume(value)}%`);
+}
+
+/** Write one volume to both inputs of its row. */
+function setVolumeValue(editor, value, source) {
+  const rounded = clampVolume(value);
+  const rangeEl = $(editor.rangeId);
+  const numberEl = $(editor.numberId);
+  if (rangeEl && source !== "range") rangeEl.value = String(rounded);
+  if (numberEl && source !== "number") numberEl.value = String(rounded);
+  paintVolumeRange(rangeEl, rounded);
+}
+
+function initVolumeEditors() {
+  for (const editor of VOLUME_EDITORS) {
+    const rangeEl = $(editor.rangeId);
+    const numberEl = $(editor.numberId);
+    if (!rangeEl || !numberEl) continue;
+    rangeEl.addEventListener("input", () => {
+      setVolumeValue(editor, rangeEl.value, "range");
+    });
+    numberEl.addEventListener("input", () => {
+      // Keep typing usable: only mirror once the value parses.
+      if (numberEl.value === "" || numberEl.value === "-") return;
+      const parsed = parseFloat(numberEl.value);
+      if (!Number.isFinite(parsed)) return;
+      paintVolumeRange(rangeEl, parsed);
+      if (clampVolume(parsed) === parsed) rangeEl.value = String(clampVolume(parsed));
+    });
+    numberEl.addEventListener("blur", () => {
+      // Typing "250" is clamped on the way out rather than under the cursor.
+      setVolumeValue(editor, numberEl.value);
+    });
+  }
+}
+
+function clampScore(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(10, Math.round(num * 10) / 10));
+}
+
+/** Paint the slider's filled portion so it reads like the detail-page bar. */
+function paintScoreRange(rangeEl, value) {
+  if (!rangeEl) return;
+  rangeEl.style.setProperty("--score-pct", `${clampScore(value) * 10}%`);
+}
+
+/** Write one score to both inputs of its row. */
+function setScoreValue(editor, value, source) {
+  const rounded = clampScore(value);
+  const rangeEl = $(editor.rangeId);
+  const numberEl = $(editor.numberId);
+  if (rangeEl && source !== "range") rangeEl.value = String(rounded);
+  if (numberEl && source !== "number") numberEl.value = rounded.toFixed(1);
+  paintScoreRange(rangeEl, rounded);
+}
+
+function initScoreEditors() {
+  for (const editor of SCORE_EDITORS) {
+    const rangeEl = $(editor.rangeId);
+    const numberEl = $(editor.numberId);
+    if (!rangeEl || !numberEl) continue;
+    rangeEl.addEventListener("input", () => {
+      setScoreValue(editor, rangeEl.value, "range");
+    });
+    numberEl.addEventListener("input", () => {
+      // Keep typing usable: only mirror once the value parses.
+      if (numberEl.value === "" || numberEl.value === "-") return;
+      const parsed = parseFloat(numberEl.value);
+      if (!Number.isFinite(parsed)) return;
+      const clamped = clampScore(parsed);
+      const rangeElNow = $(editor.rangeId);
+      if (rangeElNow) rangeElNow.value = String(clamped);
+      paintScoreRange(rangeElNow, clamped);
+    });
+    numberEl.addEventListener("blur", () => {
+      // Normalise on blur: clamp out-of-range input and re-format to one
+      // decimal, writing both the box and the slider.
+      setScoreValue(editor, numberEl.value);
+    });
+    setScoreValue(editor, numberEl.value || 0);
+  }
+}
+
+function openEditPreview() {
+  const photo = photoById(state.currentPreviewId);
+  if (!photo) return;
+  const dims = photo.dimensions || {};
+  $("editTitle").value = photo.title || "";
+  const values = {
+    score: photo.score ?? 0,
+    technical: dims.technical ?? 0,
+    memory: dims.memory ?? 0,
+    uniqueness: dims.uniqueness ?? 0,
+  };
+  for (const editor of SCORE_EDITORS) {
+    setScoreValue(editor, values[editor.key]);
+  }
+  $("editLocation").value = photo.location || "";
+  $("editTags").value = (photo.tags || []).join("，");
+  $("editReason").value = photo.reason || "";
+  showModal($("editModal"));
+  pushModal($("editModal"));
+}
+
+async function saveEditedPhoto() {
+  const id = state.currentPreviewId;
+  const photo = photoById(id);
+  if (!photo) return;
+  const score = parseFloat($("editScore").value);
+  if (Number.isNaN(score) || score < 0 || score > 10) {
+    showToast("总分需要在 0 到 10 之间", "error");
+    return;
+  }
+  const dimensions = {};
+  for (const key of ["technical", "memory", "uniqueness"]) {
+    const el = $("edit" + key[0].toUpperCase() + key.slice(1));
+    const value = parseFloat(el.value);
+    if (Number.isNaN(value) || value < 0 || value > 10) {
+      showToast("各项评分需要在 0 到 10 之间", "error");
+      return;
+    }
+    dimensions[key] = value;
+  }
+  const tags = $("editTags").value
+    .replace(/，/g, ",")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  try {
+    const updated = await api(`/api/photo/${id}/edit`, {
+      method: "POST",
+      body: JSON.stringify({
+        score,
+        dimensions,
+        tags,
+        title: $("editTitle").value.trim(),
+        reason: $("editReason").value.trim(),
+        location: $("editLocation").value.trim(),
+      }),
+    });
+    closeModal("editModal");
+    const idx = photoIndexById(id);
+    if (idx >= 0 && updated) {
+      // A hand-edit rewrites one row; repaint that card, not the whole grid.
+      Object.assign(state.photos[idx], updated);
+      invalidatePhotoDetail(id);
+      refreshCard(id);
+    }
+    if (state.currentPreviewId === id) updatePreview({ skipImage: true });
+    showToast("这段回忆已经更新。", "success");
+  } catch (e) {
+    showToast("保存失败：" + e.message, "error");
+  }
+}
+
+async function removeCurrentFolder() {
+  const folder = state.folder || $("folderInput").value.trim();
+  if (!folder) {
+    showToast("请先选择一个照片文件夹", "error");
+    return;
+  }
+  const ok = await confirmDialog(
+    "确定从拾光相册中移除当前目录吗？\n只会清除数据库记录和该目录的代理缓存，不会改动任何照片原图。",
+    { title: "移除当前目录", confirmText: "移除目录", danger: true }
+  );
+  if (!ok) return;
+  try {
+    const data = await api("/api/folder/remove", {
+      method: "POST",
+      body: JSON.stringify({ folder }),
+    });
+    closeModal("settingsModal");
+    if (!$("previewModal").classList.contains("hidden")) closeModal("previewModal");
+    state.folder = "";
+    indexPhotos([]);
+    state.selected.clear();
+    state.details.clear();
+    state.detailRequested.clear();
+    state.folder = await selectBestFolder();
+    saveUiState({ folder: state.folder });
+    $("folderInput").value = state.folder;
+    await reloadCurrentView();
+    updateTrashActions();
+    const fallback = state.folder
+      ? `已自动回到上一个有效目录：${state.folder}`
+      : "当前没有其他已索引目录，已留空。";
+    showToast(`已移除 ${data.removed || 0} 条照片记录和缓存，原图未做任何改动。${fallback}`, "success");
+  } catch (e) {
+    showToast("移除当前目录失败：" + e.message, "error");
+  }
+}
+
+async function emptyTrash() {
+  const scope = state.folder ? "当前目录" : "全部目录";
+  const answer = await confirmDialog(
+    `确定清空${scope}的回收站吗？\n回收站中的照片原文件将被彻底删除，此操作无法恢复。`,
+    {
+      title: "清空回收站",
+      confirmText: "彻底清空",
+      danger: true,
+      checkbox: { label: "同时删除 RAW", checked: true },
+    }
+  );
+  const confirmed = typeof answer === "object" ? answer.confirmed : answer;
+  if (!confirmed) return;
+  const deleteRaw = typeof answer === "object" ? answer.checked : true;
+  try {
+    // The sweep runs as a tracked job so it gets the same progress bar as a
+    // scan; a full bin can hold thousands of files and used to freeze the UI.
+    const data = await api("/api/trash/empty", {
+      method: "POST",
+      body: JSON.stringify({
+        folder: state.folder || undefined,
+        delete_raw: deleteRaw,
+        background: true,
+      }),
+    });
+    state.selected.clear();
+    state.currentJobId = data.job_id;
+    showProgress("正在清空回收站…");
+    pollScan();
+  } catch (e) {
+    showToast("清空回收站失败：" + e.message, "error");
+  }
+}
+
+function handlePromptPresetClick(name) {
+  applyPromptPreset(name);
+}
+
+async function openDirBrowser() {
+  const path = state.folder || "";
+  showModal($("dirModal"));
+  pushModal($("dirModal"));
+  await loadDirList(path || "");
+}
+
+async function loadDirList(path) {
+  if (!path) path = "";
+  state.currentDirPath = path;
+  $("dirPathInput").value = path;
+  try {
+    const q = path ? `?path=${encodeURIComponent(path)}` : "";
+    const data = await api(`/api/dirs${q}`);
+    state.currentDirPath = data.path;
+    $("dirPathInput").value = data.path;
+    const list = $("dirList");
+    list.innerHTML = "";
+    if (data.parent) {
+      const up = document.createElement("li");
+      up.innerHTML = `${ICONS.arrowUp || ""} <span>返回上一级</span>`;
+      up.addEventListener("click", () => loadDirList(data.parent));
+      list.appendChild(up);
+    }
+    if (!data.directories.length) {
+      const li = document.createElement("li");
+      li.textContent = "（没有子目录）";
+      li.style.color = "var(--muted)";
+      list.appendChild(li);
+    }
+    for (const dir of data.directories) {
+      const li = document.createElement("li");
+      li.innerHTML = `${ICONS.folder || ""} <span>${escapeHtml(dir.name)}</span>`;
+      li.dataset.path = dir.path;
+      li.addEventListener("click", () => {
+        $("dirPathInput").value = dir.path;
+        state.currentDirPath = dir.path;
+        $("dirChooseBtn").disabled = false;
+        document.querySelectorAll("#dirList li").forEach((x) => x.classList.remove("active"));
+        li.classList.add("active");
+      });
+      li.addEventListener("dblclick", () => loadDirList(dir.path));
+      list.appendChild(li);
+    }
+    $("dirChooseBtn").disabled = !state.currentDirPath;
+  } catch (e) {
+    showToast("读取目录失败：" + e.message, "error");
+  }
+}
+
+async function toggleCurrentPreviewFavorite() {
+  const photo = photoById(state.currentPreviewId);
+  if (!photo) return;
+  const newVal = !photo.favorite;
+  try {
+    await api("/api/favorite", {
+      method: "POST",
+      body: JSON.stringify({ id: photo.id, favorite: newVal }),
+    });
+    photo.favorite = newVal;
+    updatePreview({ skipImage: true });
+    updateCardFavorite(photo.id);
+    loadStats();
+    if ($("favoriteFilter").value === "1" && !newVal) {
+      await loadPhotos();
+      if (state.currentPreviewId && !state.photos.some((p) => p.id === state.currentPreviewId)) {
+        closeModal("previewModal");
+      }
+    }
+  } catch (e) {
+    showToast("珍藏操作失败：" + e.message, "error");
+  }
+}
+
+/* ==========================================================================
+   SD card import
+   ========================================================================== */
+
+function importOptions() {
+  return {
+    source: $("importSource").value.trim(),
+    target: state.folder || "",
+    mode: $("importMode").value,
+    raw_policy: $("importRawPolicy").value,
+    after: $("importAfter").value,
+    reset_analysis: $("importResetAnalysis").checked,
+  };
+}
+
+function setImportPreview(html) {
+  const box = $("importPreview");
+  if (!html) {
+    box.classList.add("hidden");
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = html;
+  box.classList.remove("hidden");
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function renderImportPlan(plan) {
+  const warnings = (plan.warnings || [])
+    .map((text) => `<p class="import-warning">${escapeHtml(text)}</p>`)
+    .join("");
+  const items = (plan.items || [])
+    .map((item) => {
+      const tags = [
+        `<span class="import-tag ${item.action}">${item.action === "add" ? "新增" : "覆盖"}</span>`,
+      ];
+      if (item.is_raw) tags.push(`<span class="import-tag raw">RAW</span>`);
+      return `<li>${tags.join("")}<span class="import-path" title="${escapeHtml(item.relative_path)}">${escapeHtml(item.relative_path)}</span><span>${formatBytes(item.size)}</span></li>`;
+    })
+    .join("");
+  const truncated = plan.items_truncated
+    ? `<li><span class="import-path">…… 另有 ${plan.items_truncated} 个文件未列出</span></li>`
+    : "";
+  const list = items ? `<ul class="import-list">${items}${truncated}</ul>` : "";
+  return `
+    <div class="import-summary">
+      <span>新增 <strong>${plan.new_count}</strong></span>
+      <span>覆盖 <strong>${plan.overwrite_count}</strong></span>
+      <span>已存在跳过 <strong>${plan.skip_count}</strong></span>
+      <span>本地独有（不动） <strong>${plan.local_only_count}</strong></span>
+      <span>待拷贝 <strong>${formatBytes(plan.total_bytes)}</strong></span>
+    </div>
+    ${warnings}
+    ${list}
+    ${plan.new_count + plan.overwrite_count === 0 ? `<p class="import-note">本地已经是最新的，没有需要拷贝的文件。</p>` : ""}
+  `;
+}
+
+async function planImport(options = {}) {
+  const payload = importOptions();
+  if (!payload.source) {
+    showToast("请先选择 SD 卡或来源文件夹", "error");
+    return null;
+  }
+  if (!payload.target) {
+    showToast("请先在上方选择一个本地回忆文件夹", "error");
+    return null;
+  }
+  if (!options.silent) showLoading("正在比对 SD 卡与本地文件夹…");
+  try {
+    const data = await api("/api/import/plan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    setImportPreview(renderImportPlan(data.plan));
+    return data.plan;
+  } catch (e) {
+    setImportPreview("");
+    showToast("预演失败：" + e.message, "error");
+    return null;
+  } finally {
+    if (!options.silent) hideLoading();
+  }
+}
+
+async function runImport() {
+  const payload = importOptions();
+  if (!payload.source) {
+    showToast("请先选择 SD 卡或来源文件夹", "error");
+    return;
+  }
+  if (!payload.target) {
+    showToast("请先在上方选择一个本地回忆文件夹", "error");
+    return;
+  }
+  const plan = await planImport({ silent: true });
+  if (!plan) return;
+  const changes = plan.new_count + plan.overwrite_count;
+  if (!changes) {
+    showToast("没有需要拷贝的文件。", "info");
+    return;
+  }
+  const modeText = payload.mode === "full" ? "全量导入" : "增量导入";
+  const confirmed = await confirmDialog(
+    `${modeText}：将新增 ${plan.new_count} 个、覆盖 ${plan.overwrite_count} 个文件，共 ${formatBytes(plan.total_bytes)}。\n本地独有、SD 卡上没有的 ${plan.local_only_count} 个文件不会被改动。`,
+    { title: "开始导入", confirmText: "开始导入" }
+  );
+  if (!confirmed) return;
+
+  try {
+    const data = await api("/api/import/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    closeModal("importModal");
+    state.currentJobId = data.job_id;
+    showProgress("正在从 SD 卡导入…");
+    pollScan();
+  } catch (e) {
+    showToast("导入失败：" + e.message, "error");
+  }
+}
+
+async function openImportDialog() {
+  if (!state.folder) {
+    showToast("请先在上方选择一个本地回忆文件夹", "error");
+    return;
+  }
+  $("importTarget").value = state.folder;
+  await prefillImportSource();
+  setImportPreview("");
+  showModal($("importModal"));
+  pushModal($("importModal"));
+  // Opening the dialog is the moment the card is expected to be in the reader,
+  // so any deletion queued while it was away is offered right here.
+  const source = $("importSource").value.trim();
+  if (source) await offerCardSync(source);
+}
+
+/**
+ * Fill the source field with the folder this album was last imported from.
+ *
+ * The remembered card path is the fallback, but a camera album's own pairing is
+ * the better answer: it is stored per album, survives a browser change, and is
+ * exactly what the user means by "the SD card I use for these photos". The
+ * field is only filled when it is empty, so a path typed in this session is
+ * never overwritten.
+ */
+async function prefillImportSource() {
+  const field = $("importSource");
+  if (field.value.trim()) return;
+  let source = state.importSource || "";
+  if (state.folder) {
+    try {
+      const query = `?folder=${encodeURIComponent(state.folder)}`;
+      const data = await api(`/api/card/status${query}`);
+      const current = data.current;
+      if (current && current.source) source = current.source;
+    } catch (e) {
+      console.warn("读取相机相册配对失败", e);
+    }
+  }
+  if (source) field.value = source;
+}
+
+async function pickImportSource() {
+  // Reuse the folder browser. The pending flag makes the browser hand its
+  // selection back to the import dialog instead of switching the album folder.
+  state.importPickPending = true;
+  hideModal($("importModal"));
+  await openDirBrowser();
+}
+
+function rememberImportSource(path) {
+  state.importSource = String(path || "").trim();
+  saveUiState({ import_source: state.importSource });
+}
+
+/** Hand an arbitrary folder to the OS file manager. */
+async function openFolderByPath(path) {
+  if (!path) {
+    showToast("没有可打开的路径", "error");
+    return;
+  }
+  try {
+    await api("/api/open-folder", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+  } catch (e) {
+    showToast("无法打开文件夹：" + e.message, "error");
+  }
+}
+
+/**
+ * Toolbar badge click: sync when there is queued work, explain when there is
+ * not. The two cases are one click apart on purpose, so the badge never opens
+ * an empty dialog.
+ */
+async function onCardStatusClick() {
+  const card = await refreshCardStatus();
+  if (!card) return;
+  if (!card.pending.total) {
+    const why = card.usable
+      ? "卡片已连接，删除照片时可以选择同时从卡片移除。"
+      : (card.warnings && card.warnings[0]) || "卡片当前不可用。";
+    showToast(`${card.source}\n${why}`, "info");
+    return;
+  }
+  await openCardSyncDialog({ source: card.source });
+}
+
+const CARD_POLL_MS = 15000;
+
+function startCardPolling() {
+  if (state.cardTimer) clearInterval(state.cardTimer);
+  state.cardTimer = setInterval(() => {
+    // Hidden tabs do not need to stat an SD card every 15 seconds.
+    if (document.hidden) return;
+    refreshCardStatus();
+  }, CARD_POLL_MS);
+}
+
+/**
+ * Offer the queued card work when a card that has some shows up.
+ *
+ * Called after an import finishes and when the import dialog is opened with a
+ * remembered source, which is exactly the moment the user just plugged the card
+ * in and expects to be told about last time's deletions.
+ */
+async function offerCardSync(source) {
+  const card = await refreshCardStatus();
+  if (source) {
+    const match = (state.cardAll || []).find(
+      (c) => folderPathKey(c.source) === folderPathKey(source)
+    );
+    if (match) state.card = match;
+  }
+  const target = state.card;
+  if (!target || !target.pending.total || !target.usable) return false;
+  await openCardSyncDialog({ source: target.source });
+  return true;
+}
+
+/* ==========================================================================
+   Camera album / SD card
+   ========================================================================== */
+
+/** Turn one API card report into a toast the user can act on. */
+function reportCardResult(card, action) {
+  if (!card) return;
+  const parts = [];
+  if (card.synced) parts.push(`已从 SD 卡${action} ${card.synced} 个文件`);
+  if (card.restored) parts.push(`已把 ${card.restored} 个文件放回 SD 卡`);
+  if (card.queued) parts.push(`已记录 ${card.queued} 项待同步`);
+  if (card.errors && card.errors.length) {
+    showToast(`SD 卡${action}部分失败：` + card.errors.map((e) => e.error).join("; "), "error");
+  }
+  if (parts.length) showToast(parts.join("，") + "。", "success");
+}
+
+/** Poll the card state of the current album and repaint the toolbar badge. */
+async function refreshCardStatus() {
+  let data;
+  try {
+    const query = state.folder ? `?folder=${encodeURIComponent(state.folder)}` : "";
+    data = await api(`/api/card/status${query}`);
+  } catch (e) {
+    state.card = null;
+    paintCardStatus();
+    return null;
+  }
+  state.card = data.current || null;
+  state.cardAll = data.cards || [];
+  paintCardStatus();
+  return state.card;
+}
+
+const CARD_STATE_TEXT = {
+  connected: "SD 卡已连接",
+  disconnected: "SD 卡未连接",
+  read_only: "SD 卡只读",
+  volume_mismatch: "路径已被其他磁盘占用",
+};
+
+const CARD_STATE_ICON = {
+  connected: "sdCard",
+  disconnected: "sdCardOff",
+  read_only: "sdCardWarning",
+  volume_mismatch: "sdCardWarning",
+};
+
+function paintCardStatus() {
+  const btn = $("cardStatusBtn");
+  if (!btn) return;
+  const card = state.card;
+  if (!card) {
+    btn.classList.add("hidden");
+    hideStrip($("cardBanner"));
+    return;
+  }
+  // Same box metrics as the toolbar buttons next to it; only the state class
+  // differs, so the badge reads as one of them rather than as a pasted-on chip.
+  btn.className = `btn card-status state-${card.state}`;
+  btn.classList.remove("hidden");
+  btn.title = card.source + (card.warnings && card.warnings.length ? `\n${card.warnings.join("\n")}` : "");
+  $("cardStatusText").textContent = CARD_STATE_TEXT[card.state] || "相机相册";
+  $("cardStatusIcon").innerHTML = ICONS[CARD_STATE_ICON[card.state]] || ICONS.sdCard || "";
+
+  const pending = card.pending || {};
+  const dot = $("cardPendingDot");
+  if (pending.total) {
+    dot.textContent = String(pending.total);
+    dot.classList.remove("hidden");
+  } else {
+    dot.classList.add("hidden");
+  }
+
+  // Dismissing the strip lasts until more work piles up: a dismissal is "I know
+  // about these", not "never tell me again".
+  if (pending.total > (state.cardPendingSeen || 0)) state.cardBannerDismissed = false;
+  if (!pending.total) state.cardBannerDismissed = false;
+  state.cardPendingSeen = pending.total;
+
+  // The strip only appears once there is something waiting and the card can
+  // actually take it: queueing silently is fine, nagging is not.
+  const banner = $("cardBanner");
+  if (pending.total && card.usable && !state.cardBannerDismissed) {
+    const bits = [];
+    if (pending.delete_count) bits.push(`${pending.delete_count} 项删除`);
+    if (pending.restore_count) bits.push(`${pending.restore_count} 项恢复`);
+    if (pending.erase_count) bits.push(`${pending.erase_count} 项彻底清理`);
+    $("cardBannerText").textContent = `${card.source} 上有 ${bits.join("、")}待同步。`;
+    showStrip(banner);
+  } else {
+    hideStrip(banner);
+  }
+}
+
+function renderCardPreview(preview) {
+  const summary = preview.summary || {};
+  const rows = (preview.items || [])
+    .map((item) => {
+      const kindLabel = { delete: "删除", restore: "恢复", erase: "彻底清理" }[item.kind] || item.kind;
+      const tags = [`<span class="import-tag ${item.kind}">${kindLabel}</span>`];
+      if (item.is_raw) tags.push('<span class="import-tag raw">RAW</span>');
+      const missing = item.on_card === false
+        ? '<span class="import-missing-note">卡上已找不到</span>'
+        : "";
+      const cls = item.on_card === false ? "import-path missing" : "import-path";
+      return `<li>${tags.join("")}<span class="${cls}" title="${escapeHtml(item.relative_path)}">${escapeHtml(item.relative_path)}</span>${missing}<span>${formatBytes(item.size)}</span></li>`;
+    })
+    .join("");
+  const truncated = preview.items_truncated
+    ? `<li><span class="import-path">…… 另有 ${preview.items_truncated} 个文件未列出</span></li>`
+    : "";
+  const list = rows ? `<ul class="import-list">${rows}${truncated}</ul>` : "";
+  const target = preview.target || {};
+  const targetNote = target.usable
+    ? ""
+    : `<p class="import-warning">${escapeHtml(
+        (target.warnings && target.warnings[0]) || "SD 卡当前不可用，暂时无法同步。"
+      )}</p>`;
+  return `
+    <div class="import-summary">
+      <span>待删除 <strong>${summary.delete_count || 0}</strong></span>
+      <span>待恢复 <strong>${summary.restore_count || 0}</strong></span>
+      <span>彻底清理 <strong>${summary.erase_count || 0}</strong></span>
+      <span>含 RAW <strong>${summary.raw_count || 0}</strong></span>
+      <span>合计 <strong>${formatBytes(summary.total_bytes || 0)}</strong></span>
+    </div>
+    ${targetNote}
+    ${
+      summary.missing_count
+        ? `<p class="import-warning">有 ${summary.missing_count} 个文件在卡上已经找不到了，同步时会跳过。</p>`
+        : ""
+    }
+    ${list}
+    ${
+      summary.total
+        ? ""
+        : `<p class="import-note">没有需要同步的内容，卡片和本地已经一致。</p>`
+    }
+  `;
+}
+
+async function openCardSyncDialog(options = {}) {
+  let preview;
+  try {
+    preview = (await api("/api/card/pending", {
+      method: "POST",
+      body: JSON.stringify({ source: options.source || (state.card ? state.card.source : "") }),
+    })).preview;
+  } catch (e) {
+    showToast("读取待同步内容失败：" + e.message, "error");
+    return;
+  }
+  state.cardPreview = preview;
+  $("cardSyncSource").textContent = preview.source || "—";
+  $("cardSyncPreview").innerHTML = renderCardPreview(preview);
+  $("cardSyncPreview").classList.remove("hidden");
+  const hasRaw = (preview.summary && preview.summary.raw_count) > 0;
+  $("cardSyncRawRow").classList.toggle("hidden", !hasRaw);
+  $("cardSyncRunBtn").disabled = !preview.ready || !preview.summary.total;
+  $("cardSyncRunBtn").title = preview.ready ? "" : "SD 卡当前不可用";
+  showModal($("cardSyncModal"));
+  pushModal($("cardSyncModal"));
+}
+
+async function reloadCardPreview() {
+  await refreshCardStatus();
+  const source = state.cardPreview ? state.cardPreview.source : "";
+  await openCardSyncDialog({ source });
+}
+
+async function runCardSync() {
+  const preview = state.cardPreview;
+  if (!preview) return;
+  const summary = preview.summary || {};
+  if (summary.missing_count) {
+    const ok = await confirmDialog(
+      `有 ${summary.missing_count} 个文件在卡上已经找不到，它们会被跳过。\n其余 ${summary.total - summary.missing_count} 项将立即执行。`,
+      { title: "部分文件缺失", confirmText: "继续同步", danger: true }
+    );
+    if (!ok) return;
+  }
+  const includeRaw = $("cardSyncIncludeRaw").checked;
+  showLoading("正在同步到 SD 卡…");
+  try {
+    const result = await api("/api/card/sync", {
+      method: "POST",
+      body: JSON.stringify({ source: preview.source, include_raw: includeRaw }),
+    });
+    hideLoading();
+    const parts = [];
+    if (result.applied) parts.push(`删除 ${result.applied}`);
+    if (result.restored) parts.push(`恢复 ${result.restored}`);
+    if (result.erased) parts.push(`彻底清理 ${result.erased}`);
+    if (result.missing) parts.push(`跳过缺失 ${result.missing}`);
+    if (result.skipped) parts.push(`保留 RAW ${result.skipped}`);
+    const tail = result.remaining ? `，仍有 ${result.remaining} 项待处理` : "";
+    showToast(`SD 卡同步完成：${parts.join("，") || "无变化"}${tail}。`, "success");
+    if (result.failed && result.failed.length) {
+      showToast("部分项目未能同步：" + result.failed.map((f) => f.error).join("; "), "error");
+    }
+    await refreshCardStatus();
+    if (result.remaining && preview.ready) {
+      await openCardSyncDialog({ source: preview.source });
+    } else {
+      closeModal("cardSyncModal");
+    }
+  } catch (e) {
+    hideLoading();
+    showToast("同步到 SD 卡失败：" + e.message, "error");
+  }
+}
+
+/** Forget the pairing for the current folder (never touches card files). */
+async function forgetCurrentCard() {
+  const card = state.card || state.cardPreview;
+  if (!card) return;
+  const album = card.album || state.folder;
+  if (!album) return;
+  const total = (card.pending && card.pending.total) || 0;
+  const ok = await confirmDialog(
+    `确定不再把“${album}”与 ${card.source} 关联吗？\n会清掉尚未同步的 ${total} 项记录，但不会删除本地或 SD 卡上的任何文件。`,
+    { title: "解除关联", confirmText: "解除关联", danger: true }
+  );
+  if (!ok) return;
+  try {
+    await api("/api/card/forget", {
+      method: "POST",
+      body: JSON.stringify({ folder: album, source: card.source }),
+    });
+    closeModal("cardSyncModal");
+    showToast("已解除相机相册关联，照片与卡片文件都未改动。", "success");
+    await refreshCardStatus();
+  } catch (e) {
+    showToast("解除关联失败：" + e.message, "error");
+  }
+}
+
+/** Copy text, preferring the async clipboard API with a legacy fallback. */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext !== false) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) {
+    // fall through to the textarea fallback
+  }
+  try {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Handle clicks inside the detail panel's metadata block.
+ *
+ * A path copies itself; the button beside it asks the server to open the file
+ * with the OS default application (which is how a RAW can be handed to the
+ * camera vendor's editor).
+ */
+async function handlePreviewInfoClick(event) {
+  const openBtn = event.target.closest(".path-open-btn");
+  if (openBtn) {
+    event.stopPropagation();
+    const path = openBtn.dataset.openPath || "";
+    const photoId = Number(openBtn.dataset.photoId);
+    if (!path) return;
+    openBtn.classList.add("busy");
+    try {
+      await api("/api/open-file", {
+        method: "POST",
+        body: JSON.stringify({ path, photo_id: Number.isFinite(photoId) ? photoId : undefined }),
+      });
+      showToast("已交给系统默认程序打开。", "success");
+    } catch (e) {
+      showToast("无法打开文件：" + e.message, "error");
+    } finally {
+      openBtn.classList.remove("busy");
+    }
+    return;
+  }
+
+  const link = event.target.closest(".path-link");
+  if (!link) return;
+  event.stopPropagation();
+  const path = link.dataset.path || "";
+  if (!path) return;
+  const copied = await copyText(path);
+  link.classList.toggle("copied", copied);
+  setTimeout(() => link.classList.remove("copied"), 1200);
+  if (copied) showToast("路径已复制到剪贴板。", "success");
+  else showToast("复制失败，请手动选择路径文本。", "error");
+}
+
+/**
+ * Fetch the handful of settings the playback path needs.
+ *
+ * The settings dialog loads the whole config, but that only happens when it is
+ * opened - a preview must already know its mode and volume on the first click,
+ * so this runs once at startup and stays quiet if it fails.
+ */
+async function loadPlaybackConfig() {
+  try {
+    const cfg = await api("/api/config");
+    state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
+    state.videoPreviewMode = cfg.video_preview_mode || "once";
+    state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
+    state.liveVolume = Number(cfg.live_volume ?? 0);
+  } catch (e) {
+    // Defaults are sensible, so a failure here changes nothing visible.
+    console.warn("读取播放设置失败", e);
+  }
+  try {
+    // A full redo has to warn before it starts, which means the answer has to be
+    // known before the settings dialog is ever opened.
+    const status = await api("/api/video/status");
+    state.ffmpegAvailable = !!status.available;
+  } catch (e) {
+    // Unknown is treated as available: refusing to scan because a status call
+    // failed would be worse than the warning appearing late.
+    state.ffmpegAvailable = true;
+  }
+}
+

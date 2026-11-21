@@ -86,7 +86,8 @@ from photo_reviewer.scanner import (
     start_rebuild_index,
     start_scan,
 )
-from photo_reviewer.server import _remove_file, create_app
+from photo_reviewer.server import create_app
+from photo_reviewer.web.helpers import _remove_file
 from photo_reviewer.thumbnailer import (
     cleanup_cache,
     hamming_distance,
@@ -1049,7 +1050,7 @@ class ServerApiTests(unittest.TestCase):
 
     def test_smart_search_falls_back_with_warning(self) -> None:
         with patch(
-            "photo_reviewer.server.semantic_search",
+            "photo_reviewer.web.routes_photos.semantic_search",
             side_effect=SemanticSearchError("模型离线"),
         ):
             resp = self.client.post(
@@ -1355,7 +1356,7 @@ class ServerApiTests(unittest.TestCase):
 
     def test_a_stored_five_second_preview_is_migrated(self) -> None:
         """The old value can only be the old default: the control never worked."""
-        from photo_reviewer.server import _load_settings_from_db
+        from photo_reviewer.web.helpers import _load_settings_from_db
 
         self.db.save_settings({"video_clip_seconds": 5})
         cfg = Config(data_dir=self.tmp.name)
@@ -1366,7 +1367,7 @@ class ServerApiTests(unittest.TestCase):
         )
 
     def test_a_deliberate_preview_length_is_left_alone(self) -> None:
-        from photo_reviewer.server import _load_settings_from_db
+        from photo_reviewer.web.helpers import _load_settings_from_db
 
         self.db.save_settings({"video_clip_seconds": 8})
         cfg = Config(data_dir=self.tmp.name)
@@ -3442,8 +3443,8 @@ class RemoveFileRetryTests(unittest.TestCase):
             return real_remove(path)
 
         with (
-            patch("photo_reviewer.server.os.remove", side_effect=flaky),
-            patch("photo_reviewer.server.time.sleep") as sleep,
+            patch("photo_reviewer.web.helpers.os.remove", side_effect=flaky),
+            patch("photo_reviewer.web.helpers.time.sleep") as sleep,
         ):
             _remove_file(self.path)
         self.assertEqual(calls["n"], 3)
@@ -3453,10 +3454,10 @@ class RemoveFileRetryTests(unittest.TestCase):
     def test_a_permanent_lock_still_raises(self) -> None:
         with (
             patch(
-                "photo_reviewer.server.os.remove",
+                "photo_reviewer.web.helpers.os.remove",
                 side_effect=PermissionError(32, "locked"),
             ),
-            patch("photo_reviewer.server.time.sleep"),
+            patch("photo_reviewer.web.helpers.time.sleep"),
             self.assertRaises(PermissionError),
         ):
             _remove_file(self.path)
@@ -3465,7 +3466,7 @@ class RemoveFileRetryTests(unittest.TestCase):
     def test_a_different_error_is_not_retried(self) -> None:
         with (
             patch(
-                "photo_reviewer.server.os.remove",
+                "photo_reviewer.web.helpers.os.remove",
                 side_effect=IsADirectoryError(21, "is a directory"),
             ) as remove,
             self.assertRaises(IsADirectoryError),
@@ -5089,7 +5090,7 @@ class GeocodingDisabledTests(unittest.TestCase):
 
     def test_no_request_is_made_when_disabled(self) -> None:
         photo_id, _path = self._gps_photo()
-        with patch("photo_reviewer.server.reverse_geocode") as geocode:
+        with patch("photo_reviewer.web.helpers.reverse_geocode") as geocode:
             self.client.get(f"/api/photo/{photo_id}")
         geocode.assert_not_called()
 
@@ -5189,7 +5190,7 @@ class GalleryPayloadTests(unittest.TestCase):
 
     def test_the_grid_never_touches_the_filesystem(self) -> None:
         """One ``os.path.getsize`` per raw-carrying photo was the old cost."""
-        with patch("photo_reviewer.server.os.path.getsize") as getsize:
+        with patch("photo_reviewer.web.helpers.os.path.getsize") as getsize:
             self.client.get("/api/photos")
         getsize.assert_not_called()
 
@@ -5794,7 +5795,7 @@ class BatchAnalysisApiTests(unittest.TestCase):
     def test_a_dead_endpoint_is_refused_before_any_work(self) -> None:
         """The probe turns a 15-second-per-photo stall into one clear error."""
         with patch(
-            "photo_reviewer.server.probe_endpoint",
+            "photo_reviewer.web.routes_deletion.probe_endpoint",
             return_value=(False, "无法连接模型服务"),
         ):
             resp = self.client.post("/api/analyze/batch", json={"ids": self.ids})
@@ -5803,7 +5804,7 @@ class BatchAnalysisApiTests(unittest.TestCase):
 
     def test_a_reachable_endpoint_starts_a_job(self) -> None:
         with patch(
-            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+            "photo_reviewer.web.routes_deletion.probe_endpoint", return_value=(True, "")
         ), patch("photo_reviewer.scanner.reanalyze_photo", return_value={}):
             resp = self.client.post("/api/analyze/batch", json={"ids": self.ids})
             self.assertEqual(resp.status_code, 200)
@@ -5824,7 +5825,7 @@ class BatchAnalysisApiTests(unittest.TestCase):
     def test_deleted_photos_are_not_queued(self) -> None:
         self.db.mark_deleted([self.ids[0]], {})
         with patch(
-            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+            "photo_reviewer.web.routes_deletion.probe_endpoint", return_value=(True, "")
         ), patch("photo_reviewer.scanner.reanalyze_photo", return_value={}):
             resp = self.client.post("/api/analyze/batch", json={"ids": self.ids})
             self.assertEqual(resp.status_code, 200)
@@ -5844,7 +5845,7 @@ class BatchAnalysisApiTests(unittest.TestCase):
         # The worker logs a warning per failure on purpose; that is the signal
         # this test is about, so keep it out of the suite's output.
         with patch(
-            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+            "photo_reviewer.web.routes_deletion.probe_endpoint", return_value=(True, "")
         ), patch(
             "photo_reviewer.scanner.reanalyze_photo",
             side_effect=RuntimeError("endpoint down"),
@@ -6389,7 +6390,7 @@ class ExportApiTests(unittest.TestCase):
         """
         from unittest.mock import patch
 
-        with patch("photo_reviewer.server.MAX_EXPORT_PHOTOS", 1):
+        with patch("photo_reviewer.web.routes_sheets.MAX_EXPORT_PHOTOS", 1):
             resp = self.client.post(
                 "/api/export", json={"ids": self.ids, "format": "html"}
             )
@@ -6403,7 +6404,7 @@ class ExportApiTests(unittest.TestCase):
     def test_a_capped_day_export_is_reported_too(self) -> None:
         from unittest.mock import patch
 
-        with patch("photo_reviewer.server.MAX_EXPORT_PHOTOS", 1):
+        with patch("photo_reviewer.web.routes_sheets.MAX_EXPORT_PHOTOS", 1):
             resp = self.client.post(
                 "/api/export",
                 json={"month": 10, "day": 2, "window": 0, "format": "html"},
@@ -6636,7 +6637,7 @@ class SearchModeTests(unittest.TestCase):
     """
 
     def _modes(self) -> tuple[str, ...]:
-        from photo_reviewer.server import SEARCH_MODES
+        from photo_reviewer.web.constants import SEARCH_MODES
 
         return SEARCH_MODES
 
@@ -6655,7 +6656,7 @@ class SearchModeTests(unittest.TestCase):
 
     def test_retired_modes_are_redirected_not_rejected(self) -> None:
         """A long-lived tab can still be holding an old option value."""
-        from photo_reviewer.server import _LEGACY_SEARCH_MODES
+        from photo_reviewer.web.constants import _LEGACY_SEARCH_MODES
 
         self.assertEqual(_LEGACY_SEARCH_MODES.get("keyword"), "smart")
         self.assertEqual(_LEGACY_SEARCH_MODES.get("semantic"), "smart")
@@ -6909,9 +6910,9 @@ class SearchModeApiTests(unittest.TestCase):
         # The probe is stubbed here: what this test is about is the `checked`
         # count on a successful scan, not whether a model happens to be running.
         with patch(
-            "photo_reviewer.server.probe_endpoint", return_value=(True, "")
+            "photo_reviewer.web.routes_photos.probe_endpoint", return_value=(True, "")
         ), patch(
-            "photo_reviewer.server.visual_search", return_value=([], 3)
+            "photo_reviewer.web.routes_photos.visual_search", return_value=([], 3)
         ):
             resp = self.client.post(
                 "/api/search", json={"query": "海", "mode": "visual"}
@@ -6926,7 +6927,7 @@ class SearchModeApiTests(unittest.TestCase):
         before being told the model was unreachable.
         """
         with patch(
-            "photo_reviewer.server.probe_endpoint",
+            "photo_reviewer.web.routes_photos.probe_endpoint",
             return_value=(False, "无法连接模型服务 http://x/v1"),
         ):
             resp = self.client.post(
@@ -6938,7 +6939,7 @@ class SearchModeApiTests(unittest.TestCase):
     def test_smart_mode_degrades_to_keyword_when_the_model_is_down(self) -> None:
         """`smart` has a local pass, so it answers instead of timing out."""
         with patch(
-            "photo_reviewer.server.probe_endpoint",
+            "photo_reviewer.web.routes_photos.probe_endpoint",
             return_value=(False, "无法连接模型服务 http://x/v1"),
         ):
             resp = self.client.post("/api/search", json={"query": "海", "mode": "smart"})
@@ -7245,7 +7246,7 @@ class ModelProbeTests(unittest.TestCase):
 
     def test_visual_search_refuses_at_once_without_a_model(self) -> None:
         with patch(
-            "photo_reviewer.server.probe_endpoint",
+            "photo_reviewer.web.routes_photos.probe_endpoint",
             return_value=(False, "无法连接模型服务"),
         ):
             resp = self.client.post("/api/search", json={"query": "海", "mode": "visual"})
@@ -7254,7 +7255,7 @@ class ModelProbeTests(unittest.TestCase):
 
     def test_smart_search_still_answers_without_a_model(self) -> None:
         with patch(
-            "photo_reviewer.server.probe_endpoint",
+            "photo_reviewer.web.routes_photos.probe_endpoint",
             return_value=(False, "无法连接模型服务"),
         ):
             resp = self.client.post("/api/search", json={"query": "海", "mode": "smart"})
@@ -7264,7 +7265,7 @@ class ModelProbeTests(unittest.TestCase):
     def test_a_plain_keyword_browse_never_probes(self) -> None:
         """No query means no model: browsing must not pay for a `GET /models`."""
         with patch(
-            "photo_reviewer.server.probe_endpoint",
+            "photo_reviewer.web.routes_photos.probe_endpoint",
             side_effect=AssertionError("must not probe"),
         ):
             resp = self.client.post("/api/search", json={"query": "", "mode": "smart"})
