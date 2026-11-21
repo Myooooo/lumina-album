@@ -559,7 +559,7 @@ class GeocodeTests(unittest.TestCase):
         expected_lat, expected_lon = wgs84_to_gcj02(30.25, 120.17)
         self.assertEqual(captured["location"], f"{expected_lon:.6f},{expected_lat:.6f}")
 
-    def test_amap_failure_falls_back_to_nominatim(self) -> None:
+    def test_amap_failure_falls_back_to_nominatim_when_allowed(self) -> None:
         from unittest.mock import patch
 
         from photo_reviewer.geocode import reverse_geocode
@@ -575,10 +575,30 @@ class GeocodeTests(unittest.TestCase):
                 api_key="bad-key",
                 interval=0.1,
                 retries=2,
+                allow_fallback=True,
             )
         self.assertEqual(result, "杭州市西湖区")
         self.assertEqual(get_json.call_count, 2)
         self.assertIn("nominatim", get_json.call_args_list[1].args[0])
+
+    def test_amap_failure_does_not_reach_osm_by_default(self) -> None:
+        """The configured provider is the only one the coordinates go to.
+
+        Falling back to OSM silently sent the same location to a second company.
+        Off by default, and the coordinates are simply left unresolved.
+        """
+        from unittest.mock import patch
+
+        from photo_reviewer.geocode import reverse_geocode
+
+        with patch("photo_reviewer.geocode._get_json", return_value=None) as get_json:
+            result = reverse_geocode(
+                30.25, 120.17, provider="amap", api_key="bad-key", interval=0.1
+            )
+        self.assertIsNone(result)
+        self.assertEqual(get_json.call_count, 1)
+        self.assertIn("amap", get_json.call_args_list[0].args[0])
+        self.assertNotIn("nominatim", get_json.call_args_list[0].args[0])
 
     def test_geocoding_retries_non_200(self) -> None:
         from unittest.mock import Mock, patch
@@ -897,7 +917,9 @@ class ScannerTests(unittest.TestCase):
         def fake_extract(path):
             return ("30.25000, 120.17000", {"latitude": 30.25, "longitude": 120.17})
 
-        def fake_geocode(lat, lon, provider, api_key, interval=1.0, retries=3):
+        def fake_geocode(
+            lat, lon, provider, api_key, interval=1.0, retries=3, allow_fallback=False
+        ):
             calls.append((lat, lon, interval, retries))
             return "杭州"
 
@@ -929,7 +951,9 @@ class ScannerTests(unittest.TestCase):
         img.save(image_path, exif=exif)
         calls = []
 
-        def fake_geocode(lat, lon, provider, api_key, interval=1.0, retries=3):
+        def fake_geocode(
+            lat, lon, provider, api_key, interval=1.0, retries=3, allow_fallback=False
+        ):
             calls.append((lat, lon))
             return "杭州西湖"
 
@@ -3019,6 +3043,116 @@ class CardSyncTests(unittest.TestCase):
         self.assertEqual(len(self._card_files("DCIM", "100D3500")), 2)
 
 
+class PairingRepairTests(unittest.TestCase):
+    """Backfill of volume identities for pairings written before they existed.
+
+    Those rows have no ``volume_key`` and often record ``volume = 0``, which the
+    card check treats as "unknown" and therefore lets through - the one case the
+    identity check exists to prevent. Filling the key when the card is next seen
+    is what restores the guarantee.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.album = os.path.join(self.tmp.name, "album")
+        self.card = os.path.join(self.tmp.name, "card")
+        os.makedirs(self.album, exist_ok=True)
+        os.makedirs(self.card, exist_ok=True)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _pair(self, source: str, volume: int = 0, key: str | None = None) -> None:
+        self.db.upsert_card_album(self.album, source, volume, key)
+
+    def test_a_legacy_zero_volume_pairing_gets_an_identity(self) -> None:
+        from photo_reviewer.pairing_repair import (
+            needs_pairing_repair,
+            repair_pairing_identities,
+        )
+
+        self._pair(self.card, volume=0, key=None)
+        self.assertTrue(needs_pairing_repair(self.db))
+
+        report = repair_pairing_identities(self.db)
+        self.assertEqual(report["checked"], 1)
+        self.assertEqual(report["filled"], 1)
+
+        row = self.db.card_album_for(self.album)
+        self.assertTrue(row["volume_key"])
+        # The identity now matches the card sitting at that path, so the
+        # pairing that used to be unverifiable is a normal usable one.
+        target = resolve_card(
+            row["folder"], row["source"], row["volume"], row["volume_key"]
+        )
+        self.assertTrue(target.volume_key)
+        self.assertEqual(target.state, "connected")
+        self.assertTrue(target.usable)
+
+    def test_a_card_that_cannot_be_identified_is_left_alone(self) -> None:
+        from photo_reviewer.pairing_repair import repair_pairing_identities
+
+        self._pair(self.card, volume=0, key=None)
+        with patch("photo_reviewer.pairing_repair.volume_identity", return_value=None):
+            report = repair_pairing_identities(self.db)
+        self.assertEqual(report["filled"], 0)
+        self.assertIsNone(self.db.card_album_for(self.album)["volume_key"])
+
+    def test_an_existing_identity_is_not_rewritten(self) -> None:
+        from photo_reviewer.pairing_repair import repair_pairing_identities
+
+        self._pair(self.card, volume=1243676672, key="\\\\?\\volume{abc}\\:volume_guid")
+        with patch("photo_reviewer.pairing_repair.volume_identity") as identity:
+            report = repair_pairing_identities(self.db)
+        identity.assert_not_called()
+        self.assertEqual(report["filled"], 0)
+        self.assertEqual(
+            self.db.card_album_for(self.album)["volume_key"],
+            "\\\\?\\volume{abc}\\:volume_guid",
+        )
+
+    def test_duplicate_pairings_collapse_to_the_newest(self) -> None:
+        """Old builds appended a row per drive letter for the same album."""
+        from photo_reviewer.db import utc_now
+        from photo_reviewer.pairing_repair import repair_pairing_identities
+
+        old_card = os.path.join(self.tmp.name, "old-card")
+        os.makedirs(old_card, exist_ok=True)
+        # Written straight to the table: ``upsert_card_album`` replaces the
+        # album's previous source now, which is exactly the fix that makes this
+        # repair unnecessary for new rows - and hides it from tests that go
+        # through the modern API.
+        stamp = utc_now()
+        raw = sqlite3.connect(self.db.path)
+        try:
+            raw.execute(
+                "INSERT INTO card_albums (folder, source, volume, volume_key, "
+                "created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)",
+                (self.album, old_card, 0, stamp, stamp),
+            )
+            raw.execute(
+                "INSERT INTO card_albums (folder, source, volume, volume_key, "
+                "created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)",
+                (self.album, self.card, 0, stamp, stamp),
+            )
+            raw.commit()
+        finally:
+            raw.close()
+
+        report = repair_pairing_identities(self.db)
+        self.assertEqual(report["duplicates_merged"], 1)
+
+        rows = self.db.list_card_albums(self.album)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source"], canonical_path(self.card))
+        self.assertTrue(rows[0]["volume_key"])
+
+
 class CardApiTests(unittest.TestCase):
     """The HTTP surface of the camera-album feature."""
 
@@ -4620,6 +4754,85 @@ class OrientationTests(unittest.TestCase):
         self.assertEqual(report["checked"], 0)
 
 
+class StartupRepairScheduleTests(unittest.TestCase):
+    """Startup work must not be gated on one particular repair being pending.
+
+    The server used to wake the repair thread only while the orientation pass
+    was still pending. Once that had run, the dimension merge, the card-pairing
+    backfill and the periodic backup silently stopped happening for ever.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.tmp.name, "library.db")
+        self.cfg = Config(data_dir=self.tmp.name, db_path=self.db_path)
+        self.db = Database(self.db_path)
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _mark_all_repairs_done(self) -> None:
+        from photo_reviewer.pairing_repair import (
+            PAIRING_REPAIR_KEY,
+            PAIRING_REPAIR_VERSION,
+        )
+        from photo_reviewer.repair import (
+            DIMENSIONS_REPAIR_KEY,
+            DIMENSIONS_REPAIR_VERSION,
+            ORIENTATION_REPAIR_KEY,
+            ORIENTATION_REPAIR_VERSION,
+        )
+
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, ORIENTATION_REPAIR_VERSION)
+        self.db.set_meta(DIMENSIONS_REPAIR_KEY, DIMENSIONS_REPAIR_VERSION)
+        self.db.set_meta(PAIRING_REPAIR_KEY, PAIRING_REPAIR_VERSION)
+
+    def test_a_pending_dimension_merge_wakes_the_repair_thread(self) -> None:
+        from photo_reviewer.pairing_repair import (
+            PAIRING_REPAIR_KEY,
+            PAIRING_REPAIR_VERSION,
+        )
+        from photo_reviewer.repair import (
+            ORIENTATION_REPAIR_KEY,
+            ORIENTATION_REPAIR_VERSION,
+            repairs_pending,
+        )
+
+        # The orientation pass is done - exactly where the old gate stopped.
+        self.db.set_meta(ORIENTATION_REPAIR_KEY, ORIENTATION_REPAIR_VERSION)
+        self.db.set_meta(PAIRING_REPAIR_KEY, PAIRING_REPAIR_VERSION)
+        self.assertTrue(repairs_pending(self.db))
+
+        self._mark_all_repairs_done()
+        self.assertFalse(repairs_pending(self.db))
+
+    def test_backup_due_follows_the_recorded_stamp(self) -> None:
+        from photo_reviewer.backup import BACKUP_STAMP_KEY, backup_due
+
+        self.db.set_meta(BACKUP_STAMP_KEY, str(int(time.time())))
+        self.assertFalse(backup_due(self.db))
+        self.db.set_meta(BACKUP_STAMP_KEY, str(int(time.time() - 7 * 3600)))
+        self.assertTrue(backup_due(self.db))
+
+    def test_startup_backs_up_even_when_every_repair_is_done(self) -> None:
+        from unittest.mock import patch
+
+        from photo_reviewer.repair import wait_for_repairs
+        from photo_reviewer.server import create_app
+
+        self._mark_all_repairs_done()
+        with patch("photo_reviewer.backup.BACKUP_MIN_BYTES", 0):
+            app = create_app(self.cfg, self.db)
+            self.assertIsNotNone(app)
+            wait_for_repairs(timeout=30)
+
+        backups = list((Path(self.tmp.name) / "backups").glob("library-*.db"))
+        self.assertTrue(backups, "启动后应至少生成一份数据库备份")
+        # The stamp is what keeps the next start from backing up again.
+        self.assertIsNotNone(self.db.get_meta("last_auto_backup"))
+
+
 class DimensionMergeTests(unittest.TestCase):
     """「构图」 was merged into 「技术」; old rows have to follow.
 
@@ -6160,6 +6373,45 @@ class ExportApiTests(unittest.TestCase):
             ).status_code,
             400,
         )
+
+    def test_the_download_reports_a_complete_export(self) -> None:
+        resp = self.client.post("/api/export", json={"ids": self.ids, "format": "html"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers.get("X-Export-Requested"), "2")
+        self.assertEqual(resp.headers.get("X-Export-Included"), "2")
+        self.assertEqual(resp.headers.get("X-Export-Truncated"), "0")
+
+    def test_a_capped_selection_is_reported_not_silent(self) -> None:
+        """A keepsake holds one document's worth of pictures.
+
+        Dropping the rest without saying anything reads as a broken download,
+        so the numbers travel with the file and the client warns.
+        """
+        from unittest.mock import patch
+
+        with patch("photo_reviewer.server.MAX_EXPORT_PHOTOS", 1):
+            resp = self.client.post(
+                "/api/export", json={"ids": self.ids, "format": "html"}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers.get("X-Export-Requested"), "2")
+        self.assertEqual(resp.headers.get("X-Export-Included"), "1")
+        self.assertEqual(resp.headers.get("X-Export-Truncated"), "1")
+        self.assertEqual(resp.headers.get("X-Export-Limit"), "1")
+        self.assertEqual(resp.data.decode("utf-8").count("data:image/jpeg"), 1)
+
+    def test_a_capped_day_export_is_reported_too(self) -> None:
+        from unittest.mock import patch
+
+        with patch("photo_reviewer.server.MAX_EXPORT_PHOTOS", 1):
+            resp = self.client.post(
+                "/api/export",
+                json={"month": 10, "day": 2, "window": 0, "format": "html"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.headers.get("X-Export-Requested"), "2")
+        self.assertEqual(resp.headers.get("X-Export-Included"), "1")
+        self.assertEqual(resp.headers.get("X-Export-Truncated"), "1")
 
 
 class FootprintTests(unittest.TestCase):

@@ -1745,9 +1745,12 @@ const VIEWS = [
 function syncTopbarHeight() {
   const topbar = document.querySelector(".topbar");
   if (!topbar) return;
-  const h = Math.round(topbar.getBoundingClientRect().height);
+  // Fractional, not rounded: the filter bar sticks to this number, and rounding
+  // it up or down left a sub-pixel slit between the two frosted layers that
+  // showed the page through what should be one header.
+  const h = topbar.getBoundingClientRect().height;
   if (h > 0) {
-    document.documentElement.style.setProperty("--topbar-height", `${h}px`);
+    document.documentElement.style.setProperty("--topbar-height", `${h.toFixed(2)}px`);
   }
 }
 
@@ -4202,6 +4205,7 @@ async function openSettings() {
     $("setIndexThreads").value = cfg.index_concurrency || 4;
     setSelectValue($("setGeocodingProvider"), cfg.geocoding_provider || "nominatim");
     $("setGeocodingApiKey").value = cfg.geocoding_api_key || "";
+    $("setGeocodingFallback").checked = !!cfg.geocoding_fallback;
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
     $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 3;
@@ -4248,6 +4252,7 @@ async function saveSettings() {
     index_concurrency: parseInt($("setIndexThreads").value, 10) || 4,
     geocoding_provider: $("setGeocodingProvider").value,
     geocoding_api_key: $("setGeocodingApiKey").value,
+    geocoding_fallback: $("setGeocodingFallback").checked,
     geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
     geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
     video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 3,
@@ -6127,6 +6132,19 @@ async function exportKeepsake(options) {
     // enough for the click to have been handled.
     setTimeout(() => URL.revokeObjectURL(url), 1500);
     showToast(`${label}已保存：${filename}`, "success");
+    // A keepsake is capped at one document's worth of pictures. When the server
+    // had to leave some out it says so in the response headers, and staying
+    // quiet about it would read as "these were all my photos" when they were
+    // not - so the limit is named, with the number actually included.
+    const requested = Number(resp.headers.get("X-Export-Requested") || 0);
+    const included = Number(resp.headers.get("X-Export-Included") || requested);
+    const limit = Number(resp.headers.get("X-Export-Limit") || included);
+    if (requested > included) {
+      showToast(
+        `这次选了 ${requested} 张，单份回忆最多收 ${limit} 张，已收录前 ${included} 张。`,
+        "warning"
+      );
+    }
   } catch (e) {
     showToast(`导出失败：${e.message}`, "error");
   } finally {

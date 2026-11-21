@@ -115,15 +115,27 @@ def _prune_backups(directory: Path, keep: int) -> None:
             logger.debug("could not remove old backup %s", stale)
 
 
-def maybe_auto_backup(db: Database, db_path: str) -> Path | None:
-    """Back up at most once per ``BACKUP_MIN_INTERVAL``, tracked in app_meta."""
-    now = time.time()
+def backup_due(db: Database) -> bool:
+    """True when the last automatic backup is older than the interval.
+
+    Separate from :func:`maybe_auto_backup` because startup has to decide
+    *whether* to wake the repair thread at all. The check used to live inside
+    ``run_startup_repairs``, which the server only called while the orientation
+    repair was pending - so once that repair had run, no backup was ever taken
+    again. Asking here keeps the schedule independent of the repairs.
+    """
     try:
         last = float(db.get_meta(BACKUP_STAMP_KEY) or 0)
     except (TypeError, ValueError):
         last = 0.0
-    if now - last < BACKUP_MIN_INTERVAL:
+    return time.time() - last >= BACKUP_MIN_INTERVAL
+
+
+def maybe_auto_backup(db: Database, db_path: str) -> Path | None:
+    """Back up at most once per ``BACKUP_MIN_INTERVAL``, tracked in app_meta."""
+    if not backup_due(db):
         return None
+    now = time.time()
     target = backup_database(db_path)
     if target is not None:
         db.set_meta(BACKUP_STAMP_KEY, str(int(now)))

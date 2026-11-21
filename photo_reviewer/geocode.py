@@ -149,6 +149,7 @@ def reverse_geocode(
     api_key: str = "",
     interval: float = 1.0,
     retries: int = 3,
+    allow_fallback: bool = False,
 ) -> str | None:
     """Convert coordinates to a human-readable Chinese place name.
 
@@ -156,6 +157,12 @@ def reverse_geocode(
     an API key is provided, uses AMap (高德) reverse geocoding instead.
     All requests pass through a serialized queue with ``interval`` seconds
     between two requests.
+
+    ``allow_fallback`` decides what happens when 高德 answers without an
+    address. Off by default, because falling back to OSM sends the coordinates
+    to a *different* company than the one the user configured - a network
+    destination they never chose. With it off the coordinates simply stay
+    unresolved and the caller keeps them as they are.
 
     Returns ``None`` straight away when the provider is ``none``: the caller
     then keeps the raw coordinates, which is what "不使用" means to the user.
@@ -180,7 +187,12 @@ def reverse_geocode(
             if formatted:
                 return str(formatted).strip()
 
-        # AMap returned nothing useful; fall back to the free provider.
+        if not allow_fallback:
+            # 高德 was the chosen provider and it had no answer. Sending the
+            # same coordinates to OSM anyway would be a second, unchosen
+            # recipient for the user's location.
+            return None
+        # The user explicitly allowed the free provider as a backup.
         _wait_for_queue_slot(interval)
 
     data = _get_json(

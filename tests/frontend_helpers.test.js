@@ -1388,6 +1388,12 @@ section("photobook layout and motion system");
     path.join(__dirname, "..", "static", "style.css"),
     "utf8"
   );
+  /** The declaration block of one top-level selector, comments included. */
+  const cssBlock = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = new RegExp(`(^|\\n)${escaped} \\{[\\s\\S]*?\\n\\}`).exec(css);
+    return match ? match[0] : "";
+  };
 
   check(
     "album stats and filters are wrapped in the sticky console bar",
@@ -1398,9 +1404,28 @@ section("photobook layout and motion system");
   );
   check(
     "the album sticky bar is position: sticky under the topbar",
-    /\.album-sticky-bar \{[\s\S]{0,160}position:\s*sticky;[\s\S]{0,160}top:\s*var\(--topbar-height/.test(
-      css
-    ),
+    /position:\s*sticky;/.test(cssBlock(".album-sticky-bar")) &&
+      /top:\s*calc\(var\(--topbar-height/.test(cssBlock(".album-sticky-bar")),
+    true
+  );
+  check(
+    "the topbar and the filter bar share one frosted material",
+    /--frost-bg:\s*rgba\(249, 246, 240, 0\.88\)/.test(css) &&
+      /--frost-blur:\s*blur\(20px\) saturate\(1\.15\)/.test(css) &&
+      /background:\s*var\(--frost-bg\)/.test(cssBlock(".topbar")) &&
+      /backdrop-filter:\s*var\(--frost-blur\)/.test(cssBlock(".topbar")) &&
+      /background:\s*var\(--frost-bg\)/.test(cssBlock(".album-sticky-bar")) &&
+      /backdrop-filter:\s*var\(--frost-blur\)/.test(
+        cssBlock(".album-sticky-bar")
+      ),
+    true
+  );
+  check(
+    "the join between them is an overlap, not a hairline gap",
+    /top:\s*calc\(var\(--topbar-height, 138px\) - 1px\)/.test(
+      cssBlock(".album-sticky-bar")
+    ) &&
+      !/body\[data-view="album"\] \.album-sticky-bar::before/.test(css),
     true
   );
   check(

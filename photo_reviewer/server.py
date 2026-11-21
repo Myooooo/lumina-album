@@ -36,6 +36,7 @@ from .cache import (
     cleanup_folder_cache,
     ensure_cache_dirs,
 )
+from .backup import backup_due
 from .cards import (
     CardError,
     apply_pending,
@@ -65,8 +66,8 @@ from .geocode import geocoding_enabled, reverse_geocode
 from .importer import ImportError_
 from .paths import canonical_folder, canonical_path, is_in_named_dir, same_path
 from .repair import (
-    needs_orientation_repair,
     register_repair_thread,
+    repairs_pending,
     run_startup_repairs,
 )
 from .scanner import (
@@ -1007,6 +1008,7 @@ def _ensure_exif(
             cfg.geocoding_api_key,
             interval=cfg.geocoding_interval,
             retries=cfg.geocoding_retries,
+            allow_fallback=cfg.geocoding_fallback,
         )
         if place:
             database.update_exif(photo["id"], place, exif)
@@ -1135,14 +1137,16 @@ def _prune_legacy_settings(database: Database) -> int:
 
 
 def _start_background_repairs(database: Database, cfg: Config) -> None:
-    """Run one-off data repairs without delaying startup.
+    """Run pending one-off repairs and the scheduled backup without delaying startup.
 
     The orientation repair walks every file header in the library, which takes
-    a second or two on a large album. It runs in a daemon thread so the UI is
-    usable immediately; the gallery picks the corrected sizes up on the next
-    refresh. It is a no-op once the database records the repair as done.
+    a second or two on a large album, so it runs in a daemon thread and the UI is
+    usable immediately. The thread is started when *any* repair is still pending
+    **or** the backup interval has elapsed; gating it on the orientation repair
+    alone meant a database that had already been through that pass never got the
+    pairing backfill, the dimension merge, or another backup.
     """
-    if not needs_orientation_repair(database):
+    if not repairs_pending(database) and not backup_due(database):
         return
 
     def worker() -> None:
@@ -1344,6 +1348,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             as_bool("video_clip_audio"),
             as_bool("video_pregenerate"),
             as_bool("merge_live_photos"),
+            as_bool("geocoding_fallback"),
         )
         for error in checks:
             if error:
@@ -1654,9 +1659,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
 
         ids = data.get("ids")
         rows: list[dict[str, Any]] = []
+        requested = 0
         if ids is not None:
             if not isinstance(ids, list) or not ids:
                 return jsonify({"error": "请至少选择一张照片"}), 400
+            requested = len(ids)
             for raw in ids[:MAX_EXPORT_PHOTOS]:
                 try:
                     pid = int(raw)
@@ -1685,6 +1692,11 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             rows = database.memories_on(
                 month, day, window=max(0, min(window, 30)), folder=folder
             )
+            # The day's memories have to be held to the same ceiling as a manual
+            # selection: both are embedded inline, so an unusually rich date
+            # would otherwise build a document nobody can open.
+            requested = len(rows)
+            rows = rows[:MAX_EXPORT_PHOTOS]
 
         if not rows:
             return jsonify({"error": "没有可以导出的照片"}), 400
@@ -1692,6 +1704,17 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         title = (data.get("title") or "拾光回忆").strip()[:80]
         subtitle = (data.get("subtitle") or "").strip()[:80]
         photos = rows_to_export(rows)
+        # Say out loud how much of the selection made it into the file. A
+        # keepsake that quietly dropped the last hundred photos reads as a bug
+        # in the download, not as a limit, so the headers travel back with it
+        # and the client warns when the two numbers disagree.
+        included = len(photos)
+        export_headers = {
+            "X-Export-Requested": str(requested),
+            "X-Export-Included": str(included),
+            "X-Export-Limit": str(MAX_EXPORT_PHOTOS),
+            "X-Export-Truncated": "1" if included < requested else "0",
+        }
 
         stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M")
         if fmt == "html":
@@ -1711,6 +1734,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
                     "Content-Disposition":
                         f'attachment; filename="lumina-{stamp}.html"',
                     "Content-Length": str(len(payload)),
+                    **export_headers,
                 },
             )
 
@@ -1727,6 +1751,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             headers={
                 "Content-Disposition": f'attachment; filename="lumina-{stamp}.png"',
                 "Content-Length": str(len(payload)),
+                **export_headers,
             },
         )
 

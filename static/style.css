@@ -46,6 +46,14 @@
   --shadow-card: 0 10px 30px rgba(50, 34, 18, 0.08), 0 2px 8px rgba(50, 34, 18, 0.04);
   --shadow-hover: 0 20px 45px rgba(50, 34, 18, 0.15), 0 6px 16px rgba(50, 34, 18, 0.06);
   --shadow-modal: 0 28px 70px rgba(38, 25, 12, 0.28), 0 8px 24px rgba(38, 25, 12, 0.1);
+
+  /* ---------- Frosted glass ----------
+     One material for every surface that floats over the page. The masthead and
+     the album's filter bar are two halves of one header, so they share the tint
+     and the blur *exactly*: a 0.04 alpha step between them read as a seam
+     running across the header. Change one here and both move together. */
+  --frost-bg: rgba(249, 246, 240, 0.88);
+  --frost-blur: blur(20px) saturate(1.15);
   
   /* Typography Stacks (100% Offline, Domestic friendly) */
   --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", "Baskerville", "Georgia", serif;
@@ -146,9 +154,9 @@ svg {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: rgba(255, 253, 249, 0.88);
-  backdrop-filter: blur(20px) saturate(1.15);
-  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  background: var(--frost-bg);
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
   border-bottom: 1px solid var(--border);
   padding: 12px var(--page-pad-x) 14px;
   box-shadow: 0 4px 24px rgba(50, 34, 18, 0.035);
@@ -579,13 +587,17 @@ svg {
 /* ---------- Sticky Album Console (Stats + Filters) ---------- */
 .album-sticky-bar {
   position: sticky;
-  top: var(--topbar-height, 138px);
+  /* One pixel under the masthead: the two frosted layers meet with a hairline
+     overlap instead of a hairline gap, so a fractional masthead height (or a
+     rounded `--topbar-height`) can never expose a bright sliver of page between
+     them. They share the same tint, so the overlap is invisible. */
+  top: calc(var(--topbar-height, 138px) - 1px);
   z-index: 28;
-  margin: -18px calc(-1 * var(--page-pad-x)) 14px;
+  margin: calc(-18px - 1px) calc(-1 * var(--page-pad-x)) 14px;
   padding: 12px var(--page-pad-x) 14px;
-  background: rgba(249, 246, 240, 0.88);
-  backdrop-filter: blur(20px) saturate(1.15);
-  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  background: var(--frost-bg);
+  backdrop-filter: var(--frost-blur);
+  -webkit-backdrop-filter: var(--frost-blur);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 8px 24px rgba(50, 34, 18, 0.04);
   transition: box-shadow var(--dur-ui) var(--ease-out),
@@ -4284,8 +4296,6 @@ select {
 body[data-view="album"] .topbar {
   border-bottom-color: transparent;
   box-shadow: none;
-  /* The same paper the filter bar uses, so no tint step shows at the join. */
-  background: rgba(249, 246, 240, 0.92);
 }
 
 body[data-view="album"] .album-sticky-bar {
@@ -4294,24 +4304,6 @@ body[data-view="album"] .album-sticky-bar {
   border-bottom-color: var(--border);
   box-shadow: 0 10px 26px rgba(50, 34, 18, 0.05);
   transition: box-shadow var(--dur-ui) var(--ease-out);
-}
-
-/* A hairline where the actions end and the filters begin, inside the one surface -
-   an inner division rather than an outer edge. */
-body[data-view="album"] .album-sticky-bar::before {
-  content: "";
-  position: absolute;
-  left: var(--page-pad-x);
-  right: var(--page-pad-x);
-  top: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--border) 12%,
-    var(--border) 88%,
-    transparent
-  );
 }
 
 /* Away from the album the toolbar keeps its shadow, and it deepens once the page

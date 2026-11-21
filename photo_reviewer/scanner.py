@@ -508,6 +508,7 @@ def _resolve_location(
             config.geocoding_api_key,
             interval=config.geocoding_interval,
             retries=config.geocoding_retries,
+            allow_fallback=config.geocoding_fallback,
         )
         if place:
             return place

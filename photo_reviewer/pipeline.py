@@ -307,6 +307,7 @@ def enrich_metadata(
             config.geocoding_api_key,
             interval=config.geocoding_interval,
             retries=config.geocoding_retries,
+            allow_fallback=config.geocoding_fallback,
         )
         if place:
             location = place

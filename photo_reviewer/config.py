@@ -50,6 +50,7 @@ PERSISTED_FIELDS = (
     "cache_dir_name",
     "geocoding_provider",
     "geocoding_api_key",
+    "geocoding_fallback",
     "geocoding_interval",
     "geocoding_retries",
     "video_clip_seconds",
@@ -145,6 +146,14 @@ class Config:
     )
     geocoding_api_key: str = field(
         default_factory=lambda: os.getenv("PHOTO_GEOCODING_API_KEY", "")
+    )
+    #: Fall back to the free Nominatim service when the configured provider
+    #: (高德) fails. Off by default: the coordinates would otherwise travel to a
+    #: second company without the user ever being told, which is exactly what
+    #: "local first, the only network call is reverse geocoding" promises not to
+    #: do. Turning it on is an explicit choice in the settings dialog.
+    geocoding_fallback: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_GEOCODING_FALLBACK", False)
     )
     geocoding_interval: float = field(
         default_factory=lambda: float(os.getenv("PHOTO_GEOCODING_INTERVAL", "1.0"))
@@ -339,6 +348,7 @@ class Config:
             "cache_dir_name": self.cache_dir_name,
             "geocoding_provider": self.geocoding_provider,
             "geocoding_api_key": self.geocoding_api_key,
+            "geocoding_fallback": self.geocoding_fallback,
             "geocoding_interval": self.geocoding_interval,
             "geocoding_retries": self.geocoding_retries,
             "image_extensions": list(self.image_extensions),

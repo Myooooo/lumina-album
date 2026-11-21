@@ -177,6 +177,24 @@ def needs_dimensions_repair(db: Database) -> bool:
     return db.get_meta(DIMENSIONS_REPAIR_KEY) != DIMENSIONS_REPAIR_VERSION
 
 
+def repairs_pending(db: Database) -> bool:
+    """True when at least one one-off repair has not run on this database.
+
+    The server uses this to decide whether to wake the repair thread. Checking
+    every repair and not just the orientation pass matters: the orientation
+    repair is the only one whose *absence* used to be the trigger, so a database
+    that had been through it silently skipped the pairing backfill and the
+    dimension merge for ever.
+    """
+    from .pairing_repair import needs_pairing_repair
+
+    return (
+        needs_orientation_repair(db)
+        or needs_dimensions_repair(db)
+        or needs_pairing_repair(db)
+    )
+
+
 def run_startup_repairs(db: Database, config: Config) -> dict[str, object]:
     """Run every pending one-off repair, once per database."""
     result: dict[str, object] = {}

@@ -43,7 +43,8 @@
 - 存成**网页**：单个 HTML，图片全部内嵌，十年后还能直接打开、也能打印
 - 存成**长图**：一张竖版 PNG，适合直接发到社交平台
 - 两种格式都和网页同一套设计：拍立得式相框、衬线正文、手写体评语，入场有轻微的下落动画
-- 图片取自预览用的代理图（长边约 2000px），不是缩略图，放大看也清晰
+- 图片取自预览用的代理图（长边由设置里的「代理图片最大边长」决定，默认 1280px），不是缩略图，放大看也清晰
+- 一份回忆最多收 300 张：选中更多时会只收录前 300 张，并在下载后明确提示，不会悄悄少图
 
 **视频与实况照片**
 - 视频、照片混排；放不了的容器自动换可播放副本（能流复制就不重编码）
@@ -59,7 +60,7 @@
 **其他**
 - 进度条与预计剩余时间，刷新页面不打断任务
 - 多选可后台批量「重新解读」，可取消；模型连不上会立刻拦下
-- 启动时自动备份数据库，保留最近 5 份（`data/backups/`）
+- 启动时自动备份数据库，最多每 6 小时一次，保留最近 5 份（`data/backups/`）
 - 设置与界面状态存在数据库里
 
 ## 安装
@@ -132,6 +133,7 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_TRASH_DIR_NAME` | `.photo-trash` | 收起区目录名 |
 | `PHOTO_GEOCODING_PROVIDER` | `nominatim` | `nominatim` / `amap` / `none` |
 | `PHOTO_GEOCODING_API_KEY` | 空 | 高德 Key |
+| `PHOTO_GEOCODING_FALLBACK` | `false` | 高德查不到时是否改用 Nominatim（会把坐标发给 OpenStreetMap） |
 | `PHOTO_GEOCODING_INTERVAL` | `1.0` | 地理编码最小间隔（秒） |
 | `PHOTO_GEOCODING_RETRIES` | `3` | 地理编码重试次数 |
 | `PHOTO_FFMPEG_PATH` | 空 | ffmpeg/ffprobe 所在目录 |
@@ -158,7 +160,7 @@ sudo apt install ffmpeg        # Linux
 - **大模型**：API 地址、Key、模型名、系统提示词、并发数、重试次数、超时
 - **图片处理**：代理图与缩略图、索引线程数、实况照片、那年今日的时间范围（最多前后 3 天）
 - **视频处理**：处理方式、预览参数、ffmpeg 检测状态
-- **地理编码**：服务、Key、请求间隔、重试次数
+- **地理编码**：服务、Key、失败时的回退、请求间隔、重试次数
 - **数据管理**：移除当前目录、清理缓存
 
 `PHOTO_HOST` / `PHOTO_PORT` / `PHOTO_DEBUG` / `PHOTO_FFMPEG_PATH` / `PHOTO_OPEN_BROWSER` 只从环境变量读取。
