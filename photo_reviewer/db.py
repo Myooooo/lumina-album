@@ -269,7 +269,6 @@ class Database:
                         exif TEXT,
                         phash TEXT,
                         score REAL,
-                        recommendation TEXT,
                         tags TEXT,
                         reason TEXT,
                         title TEXT,
@@ -284,7 +283,6 @@ class Database:
                     );
                     CREATE INDEX IF NOT EXISTS idx_photos_folder ON photos(folder);
                     CREATE INDEX IF NOT EXISTS idx_photos_status ON photos(status);
-                    CREATE INDEX IF NOT EXISTS idx_photos_recommendation ON photos(recommendation);
                     CREATE INDEX IF NOT EXISTS idx_photos_score ON photos(score);
                     CREATE INDEX IF NOT EXISTS idx_photos_path ON photos(path);
                     CREATE TABLE IF NOT EXISTS settings (
@@ -406,12 +404,12 @@ class Database:
                     """
                     INSERT INTO photos
                         (path, original_path, folder, filename, size, width, height, thumb_path,
-                         proxy_path, dimensions, location, exif, phash, score, recommendation, tags, reason, title, raw_path, model,
+                         proxy_path, dimensions, location, exif, phash, score, tags, reason, title, raw_path, model,
                          analyzed_at, status, favorite, geocoded, error, created_at,
                          media_kind, duration_ms, video_info, clip_path, play_path, play_state, live_path)
                     VALUES
                         (:path, :original_path, :folder, :filename, :size, :width, :height, :thumb_path,
-                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :recommendation, :tags, :reason, :title, :raw_path, :model,
+                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :tags, :reason, :title, :raw_path, :model,
                          :analyzed_at, :status, :favorite, :geocoded, :error, :created_at,
                          :media_kind, :duration_ms, :video_info, :clip_path, :play_path, :play_state, :live_path)
                     ON CONFLICT(path) DO UPDATE SET
@@ -428,7 +426,6 @@ class Database:
                         exif=excluded.exif,
                         phash=excluded.phash,
                         score=excluded.score,
-                        recommendation=excluded.recommendation,
                         tags=excluded.tags,
                         reason=excluded.reason,
                         title=excluded.title,
@@ -468,7 +465,6 @@ class Database:
                         else record.get("exif"),
                         "phash": record.get("phash"),
                         "score": record.get("score"),
-                        "recommendation": record.get("recommendation"),
                         "tags": json.dumps(record.get("tags") or [], ensure_ascii=False)
                         if isinstance(record.get("tags"), (list, tuple, dict))
                         else record.get("tags"),
@@ -529,7 +525,6 @@ class Database:
         self,
         folder: str | None = None,
         status: str | None = None,
-        recommendation: str | None = None,
         min_score: float | None = None,
         max_score: float | None = None,
         search: str | None = None,
@@ -566,9 +561,6 @@ class Database:
                 "(media_kind IS NULL OR media_kind != 'video') "
                 "AND live_path IS NOT NULL AND live_path != ''"
             )
-        if recommendation:
-            clauses.append("recommendation = ?")
-            params.append(recommendation)
         if min_score is not None:
             clauses.append("score >= ?")
             params.append(min_score)
@@ -672,7 +664,6 @@ class Database:
         self,
         photo_id: int,
         score: float,
-        recommendation: str,
         tags: list[str],
         reason: str,
         model: str,
@@ -694,7 +685,7 @@ class Database:
                 conn.execute(
                     """
                     UPDATE photos SET
-                        score=?, recommendation=?, tags=?, reason=?, model=?,
+                        score=?, tags=?, reason=?, model=?,
                         title=COALESCE(NULLIF(?, ''), title),
                         phash=COALESCE(?, phash), width=COALESCE(?, width),
                         height=COALESCE(?, height), thumb_path=COALESCE(?, thumb_path),
@@ -707,7 +698,6 @@ class Database:
                     """,
                     (
                         score,
-                        recommendation,
                         json.dumps(tags, ensure_ascii=False),
                         reason,
                         model,
@@ -832,7 +822,7 @@ class Database:
                         """
                         UPDATE photos SET
                             status='pending', score=NULL, dimensions=NULL, tags=NULL,
-                            reason=NULL, title=NULL, recommendation=NULL,
+                            reason=NULL, title=NULL,
                             analyzed_at=NULL, error=NULL
                         WHERE path=? AND status != 'deleted'
                         """,
@@ -862,7 +852,6 @@ class Database:
                         tags=(SELECT tags FROM photos WHERE id=?),
                         reason=(SELECT reason FROM photos WHERE id=?),
                         title=COALESCE(NULLIF((SELECT title FROM photos WHERE id=?), ''), title),
-                        recommendation=(SELECT recommendation FROM photos WHERE id=?),
                         model=(SELECT model FROM photos WHERE id=?),
                         analyzed_at=(SELECT analyzed_at FROM photos WHERE id=?),
                         status=CASE
@@ -870,7 +859,7 @@ class Database:
                             THEN 'analyzed' ELSE status END
                     WHERE id=?
                     """,
-                    (source_id,) * 9 + (target_id,),
+                    (source_id,) * 8 + (target_id,),
                 )
                 conn.commit()
             finally:
@@ -1613,7 +1602,7 @@ class Database:
         sql = (
             "SELECT id, path, raw_path, original_path, location, filename, size, "
             "width, height, thumb_path, proxy_path, phash, exif, tags, reason, "
-            "title, dimensions, recommendation, score, status, media_kind, "
+            "title, dimensions, score, status, media_kind, "
             "favorite, analyzed_at, error, model, geocoded, duration_ms, "
             "video_info, live_path "
             f"FROM photos WHERE {' AND '.join(where)}"

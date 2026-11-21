@@ -24,9 +24,11 @@ window.LuminaUI = (() => {
   //: except the toast (2000), which must stay above all dialogs.
   const MODAL_LAYER_BASE = 1100;
 
-  //: Monotonic, so a dialog opened later always wins. Bounded by releasing the
-  //: value when a dialog closes, which keeps it from growing without limit over a
-  //: long session.
+  //: Layers currently assigned, lowest first. The next dialog goes one above the
+  //: highest open one, so opening and closing the same dialog all afternoon
+  //: cannot march the z-index past the toast layer (2000) - the old counter only
+  //: ever climbed, and resetting it per element let two open dialogs collide.
+  const openLayers = [];
   let modalLayerCounter = 0;
 
   /**
@@ -45,11 +47,18 @@ window.LuminaUI = (() => {
     }
     // Re-opening the same dialog (a second confirm on top of the first) must also
     // move it to the front.
-    modalLayerCounter += 1;
+    if (el._luminaLayer) releaseLayer(el._luminaLayer);
+    modalLayerCounter = openLayers.length ? Math.max(...openLayers) + 1 : 1;
+    openLayers.push(modalLayerCounter);
     el.style.zIndex = String(MODAL_LAYER_BASE + modalLayerCounter);
     el._luminaLayer = MODAL_LAYER_BASE + modalLayerCounter;
     el.classList.remove("closing");
     el.classList.remove("hidden");
+  }
+
+  function releaseLayer(layer) {
+    const index = openLayers.indexOf(layer - MODAL_LAYER_BASE);
+    if (index !== -1) openLayers.splice(index, 1);
   }
 
   /**
@@ -68,9 +77,10 @@ window.LuminaUI = (() => {
       el._luminaExitTimer = null;
       el.classList.remove("closing");
       el.classList.add("hidden");
-      // Hand the layer back: the dialog is gone, and a counter that only ever
-      // climbs would eventually outgrow what the stylesheet expects.
+      // Hand the layer back so the next dialog can reuse it: a counter that only
+      // ever climbs would eventually outgrow the toast layer in the stylesheet.
       if (el._luminaLayer) {
+        releaseLayer(el._luminaLayer);
         el._luminaLayer = 0;
         el.style.zIndex = "";
       }
@@ -234,7 +244,12 @@ window.LuminaUI = (() => {
     else if (type === "error") iconSvg = ICONS.error || "";
     else if (type === "warning") iconSvg = ICONS.hourglass || "";
 
-    el.innerHTML = `${iconSvg}<span>${message}</span>`;
+    el.innerHTML = iconSvg;
+    // The message is text, never markup: it routinely carries a server error or
+    // a file name, and this was the one render path that skipped escapeHtml.
+    const text = document.createElement("span");
+    text.textContent = String(message ?? "");
+    el.appendChild(text);
     container.appendChild(el);
 
     setTimeout(() => {

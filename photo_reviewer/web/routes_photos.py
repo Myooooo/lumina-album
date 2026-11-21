@@ -42,7 +42,6 @@ def register(app, cfg, database):
     def api_photos():
         folder = request.args.get("folder", "").strip() or None
         status_raw = request.args.get("status", "").strip()
-        recommendation = request.args.get("recommendation", "").strip() or None
         search = request.args.get("search", "").strip() or None
         tag = request.args.get("tag", "").strip() or None
         favorite = request.args.get("favorite", "").strip()
@@ -97,7 +96,6 @@ def register(app, cfg, database):
         photos = database.list_photos(
             folder=folder,
             status=status,
-            recommendation=recommendation,
             min_score=min_score,
             max_score=max_score,
             search=search,
@@ -136,7 +134,6 @@ def register(app, cfg, database):
             # "that is not a search mode".
             return jsonify({"error": "不支持的搜索方式"}), 400
         status_raw = data.get("status", "").strip()
-        recommendation = data.get("recommendation", "").strip() or None
         tag = data.get("tag", "").strip() or None
         favorite = data.get("favorite", "")
         year_raw = data.get("year")
@@ -178,7 +175,6 @@ def register(app, cfg, database):
         all_candidates = database.list_photos(
             folder=folder,
             status=status,
-            recommendation=recommendation,
             min_score=min_score,
             tag=tag,
             favorite=favorite,
@@ -190,11 +186,10 @@ def register(app, cfg, database):
         result_map = {}
         visual_checked = 0
 
-        if mode in ("keyword", "smart"):
+        if mode == "smart":
             keyword_photos = database.list_photos(
                 folder=folder,
                 status=status,
-                recommendation=recommendation,
                 min_score=min_score,
                 search=query,
                 tag=tag,
@@ -208,7 +203,7 @@ def register(app, cfg, database):
                 result_map[p["id"]] = p
 
         semantic_warning = None
-        if mode in ("semantic", "smart") and query:
+        if mode == "smart" and query:
             # One cheap request before the expensive one. Without it a stopped
             # model server costs the whole retry budget before anything is
             # reported - the same reason `/api/analyze/batch` probes first.
@@ -230,8 +225,6 @@ def register(app, cfg, database):
                             result_map[pid] = by_id[pid]
                 except SemanticSearchError as exc:
                     semantic_warning = str(exc)
-                    if mode == "semantic" and not result_map:
-                        return jsonify({"error": semantic_warning}), 502
 
         # Visual search looks at the pictures instead of the captions, so it can
         # find things no caption happens to describe. It costs a real request per

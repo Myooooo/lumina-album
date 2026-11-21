@@ -1232,10 +1232,6 @@ function updateDupSelection() {
   }
 }
 
-function dupGroupCount() {
-  return dupState.groups.length;
-}
-
 /** Load (or reload) the groups for the current threshold. */
 async function loadDuplicates(threshold) {
   if (dupState.loading) return;
@@ -1287,17 +1283,6 @@ function applyKeepOneRule(groupIndex) {
       if (photo.id !== group.keep_id) dupState.chosen.add(photo.id);
     }
   }
-}
-
-/** Clear every tick, by group or everywhere. */
-function clearChosen(groupIndex) {
-  if (groupIndex === undefined) {
-    dupState.chosen.clear();
-    return;
-  }
-  const group = dupState.groups[groupIndex];
-  if (!group) return;
-  for (const photo of group.photos) dupState.chosen.delete(photo.id);
 }
 
 /**

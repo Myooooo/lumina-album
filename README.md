@@ -165,6 +165,24 @@ sudo apt install ffmpeg        # Linux
 
 `PHOTO_HOST` / `PHOTO_PORT` / `PHOTO_DEBUG` / `PHOTO_FFMPEG_PATH` / `PHOTO_OPEN_BROWSER` 只从环境变量读取。
 
+## 开发与测试
+
+应用本身没有构建步骤：`static/index.html` 按顺序加载六个普通脚本（`core` / `gallery` / `views` / `viewer` / `settings` / `app`），后端由 `photo_reviewer/web/` 里的路由模块自行注册。
+
+```bash
+# 后端：unittest 全量（不需要额外依赖；装了 ffmpeg 时视频集成测试会真正执行）
+python -m unittest discover -s tests -t .
+
+# 前端：辅助函数与源码契约（纯 Node，无依赖）
+node tests/frontend_helpers.test.js
+
+# 前端：DOM 烟雾测试（需要一次 npm install；jsdom 是唯一的开发依赖）
+npm install
+node tests/frontend_dom.test.js
+```
+
+`tests/frontend_dom.test.js` 会加载真实的 `index.html` 与这六个脚本，用桩接住 `/api/*`，再检查画廊是否渲染、toast 是否把文本当文本、弹窗是否按打开顺序分层、Escape 是否只关最上面那个。
+
 ## 已知限制
 
 - HDR 视频的封面帧可能偏灰（未做色调映射）

@@ -52,7 +52,6 @@ ANALYSIS_GATE = AnalysisGate()
 # itself does not recompute them.
 PRESERVED_FIELDS = (
     "score",
-    "recommendation",
     "tags",
     "reason",
     "title",
@@ -414,7 +413,6 @@ def analysis_record(
             "location": prepared.location,
             "exif": prepared.exif,
             "score": result["score"],
-            "recommendation": result.get("recommendation"),
             "tags": result["tags"],
             "reason": result.get("reason") or result.get("comment"),
             "title": result.get("title") or "",
@@ -444,7 +442,6 @@ def persist_analysis(db, prepared: PreparedPhoto, result: dict, config: Config) 
     db.update_analysis(
         photo_id,
         score=result["score"],
-        recommendation=result.get("recommendation"),
         tags=result["tags"],
         reason=result.get("reason") or result.get("comment"),
         model=config.model,

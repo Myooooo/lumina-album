@@ -22,15 +22,14 @@ MAX_EXPORT_PHOTOS = 300
 VISUAL_SEARCH_MAX = 24
 VISUAL_SEARCH_BATCH = 4
 
-#: The search modes ``/api/search`` understands. ``visible`` looks at the pixels,
-#: the other three read the index.
-#: The search strategies offered to the user.
+#: The search strategies offered to the user: ``visual`` looks at the pixels, the
+#: other one reads the index.
 #:
-#: Two, not four. See the module note above the search endpoint: `keyword` only
-#: matched a word that happened to be in a caption (0 results for 4 of 5 ordinary
-#: queries), and `semantic` was strictly dominated by `smart` - same model call, no
-#: local recall, and a hard 502 instead of a graceful fallback. `visual` stays
-#: because it answers a different question by different means.
+#: Two, not four. `keyword` only matched a word that happened to be in a caption
+#: (0 results for 4 of 5 ordinary queries), and `semantic` was strictly dominated
+#: by `smart` - same model call, no local recall, and a hard 502 instead of a
+#: graceful fallback. `visual` stays because it answers a different question by
+#: different means.
 SEARCH_MODES = ("smart", "visual")
 
 #: How long to wait for the model's `/models` before deciding it is down. Short on

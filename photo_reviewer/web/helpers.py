@@ -149,7 +149,6 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
                 "thumb_path": photo.get("thumb_path"),
                 "proxy_path": photo.get("proxy_path"),
                 "phash": photo.get("phash"),
-                "recommendation": photo.get("recommendation"),
                 "model": photo.get("model"),
                 "geocoded": bool(photo.get("geocoded")),
                 "exif": photo.get("exif") or {},

@@ -1,0 +1,14 @@
+{
+  "name": "lumina-album-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test tooling for Lumina Album. The application itself is a plain Flask app with no build step; this file exists only because the DOM smoke test needs jsdom.",
+  "scripts": {
+    "test": "node tests/frontend_helpers.test.js && node tests/frontend_dom.test.js",
+    "test:helpers": "node tests/frontend_helpers.test.js",
+    "test:dom": "node tests/frontend_dom.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.3"
+  }
+}

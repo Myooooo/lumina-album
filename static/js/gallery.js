@@ -717,18 +717,6 @@ function refreshCard(id) {
 }
 
 /**
- * Rebuild every rendered card without losing the scroll position.
- *
- * Kept for the operations that change many rows at once (a batch delete, a
- * batch re-analysis); single-row changes go through `refreshCard`.
- */
-function rerenderLoadedGallery() {
-  const scrollY = window.scrollY;
-  renderGallery({ animate: false });
-  window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
-}
-
-/**
  * Drop rows from the loaded list and their cards from the grid.
  *
  * Deleting or trashing photos used to filter `state.photos` and rebuild every

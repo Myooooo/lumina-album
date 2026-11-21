@@ -211,22 +211,6 @@ svg {
   flex-shrink: 0;
 }
 
-/* The browsing entries, on their own line under the album controls. The row above
-   is about the folder you are in; this one is about what else the library can
-   show you. Tighter top margin than the row gap, because the two read as one
-   block of controls rather than two separate bars. */
-.folder-row.row-secondary {
-  margin-top: 8px;
-}
-
-/* The settings gear is the odd one out on this row - it is not a way to look at
-   the album - so it is pushed to the far end where an app's own settings usually
-   live. `margin-left: auto` rather than ordering tricks so the row still wraps
-   sensibly on a narrow window. */
-.folder-row .row-end {
-  margin-left: auto;
-}
-
 .folder-input-wrapper {
   position: relative;
   flex: 1 1 320px;
@@ -4910,31 +4894,6 @@ body:not([data-view="album"]) .topbar {
   gap: 28px 30px;
   align-items: start;
   padding: 0;
-}
-
-/* Photos the model has already read carry a small mark, so a memory with a written
-   sentence is distinguishable before it is opened. It sits inside the frame, where
-   the gallery puts its own badges. */
-.memory-mark {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(174, 118, 78, 0.94);
-  color: #fff8ef;
-  pointer-events: none;
-  box-shadow: 0 2px 6px rgba(50, 34, 18, 0.28);
-}
-
-.memory-mark svg {
-  width: 13px;
-  height: 13px;
 }
 
 @media (prefers-reduced-motion: reduce) {

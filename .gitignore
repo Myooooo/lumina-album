@@ -32,3 +32,6 @@ Desktop.ini
 ~$*
 .idea/
 .vscode/
+
+# 前端测试依赖（npm install 生成，不需要提交）
+node_modules/

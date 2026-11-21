@@ -1024,7 +1024,6 @@ section("duplicate review");
 
 const DUP_LABEL = extract("dupThresholdLabel");
 const DUP_KEEP_ONE = extract("applyKeepOneRule");
-const DUP_CLEAR = extract("clearChosen");
 const dupLabel = new Function(
   `${extractConst("DUP_THRESHOLD_LABELS")} ${DUP_LABEL} return dupThresholdLabel;`
 )();
@@ -1128,24 +1127,6 @@ check(
   check("every duplicate is ticked", [1, 3, 4].every((id) => chosen.has(id)), true);
   check("the keepers are not ticked", chosen.has(2) || chosen.has(5), false);
   check("a hand-made tick survives", chosen.has(99), true);
-}
-
-{
-  // Clearing one group leaves the others alone.
-  const groups = [
-    { keep_id: 2, photos: [{ id: 1 }, { id: 2 }] },
-    { keep_id: 5, photos: [{ id: 4 }, { id: 5 }] },
-  ];
-  const chosen = new Set([1, 4]);
-  const run = new Function(
-    "dupState",
-    `${DUP_CLEAR}; return clearChosen;`
-  )({ groups, chosen });
-  run(0);
-  check("clearing a group drops its ticks", chosen.has(1), false);
-  check("clearing a group leaves others alone", chosen.has(4), true);
-  run();
-  check("clearing everything empties the set", chosen.size, 0);
 }
 
 /* ------------------------------------------------------------ modal behaviour
@@ -1328,12 +1309,6 @@ section("toolbar layout");
   const css = fs.readFileSync(
     path.join(__dirname, "..", "static", "style.css"),
     "utf8"
-  );
-  check("the secondary row has its own spacing", /\.folder-row\.row-secondary/.test(css), true);
-  check(
-    "the end-of-row item is pushed right",
-    /\.folder-row \.row-end[\s\S]{0,60}margin-left:\s*auto/.test(css),
-    true
   );
   check(
     "every button shares one height",

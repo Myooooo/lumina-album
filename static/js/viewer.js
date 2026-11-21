@@ -260,16 +260,6 @@ function invalidatePhotoDetail(id) {
   }
 }
 
-/**
- * Drop every cached payload for the photos in ``ids``.
- *
- * Called after an edit or a re-analysis: the server may have changed what the
- * detail endpoint would answer, and the list row only carries the visible part.
- */
-function invalidatePhotoDetails(ids) {
-  for (const id of ids) invalidatePhotoDetail(id);
-}
-
 /* ==========================================================================
    Video playback in the detail dialog
 

@@ -543,7 +543,6 @@ def _validate_result(result: dict[str, Any]) -> None:
     score = max(0.0, min(10.0, score))
     result["score"] = score
     result["title"] = title[:40]
-    result["recommendation"] = None
     result["tags"] = [str(t).strip() for t in tags][:20]
     result["reason"] = comment or "这一瞬，值得被好好收藏。"
     result["dimensions"] = _normalize_dimensions(result.get("dimensions"))
