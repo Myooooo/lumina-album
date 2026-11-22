@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import time
@@ -14,6 +15,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .config import Config
+from .legacy_prompts import LEGACY_STYLE_PROMPTS, PREVIOUS_STYLE_PROMPTS
 
 
 class SemanticSearchError(RuntimeError):
@@ -32,119 +34,67 @@ DIMENSION_KEYS = ("technical", "memory", "uniqueness")
 #: A dimension older builds stored and the prompt no longer asks for.
 LEGACY_DIMENSION_KEYS = ("composition",)
 
-#: Start of the fixed "write like a person" rules. A user prompt is never
-#: trusted to carry these: they are appended to every request, so switching the
-#: style can never switch off the anti-AI rules.
+#: Markers of the fixed blocks older builds appended to a prompt. They are kept
+#: so a prompt saved by one of those builds can be reduced to its editable part.
 ANTI_AI_MARKER = "【写作要求：说人话】"
-
-#: Start of the fixed output-format block. Also the marker used to reduce a
-#: pasted full prompt back to its editable part.
 JSON_FORMAT_MARKER = "【输出格式：必须严格遵守】"
-
-#: The marker older builds shipped. Still stripped from stored prompts and from
-#: a PHOTO_SYSTEM_PROMPT written before this version.
 LEGACY_JSON_FORMAT_MARKER = (
     "Return ONLY a JSON object, no markdown, with exactly these keys:"
 )
 
-#: Short, fixed framing. The style/criteria below it are the part a user edits.
+#: The framing older full prompts started with. Only used to strip it.
 PROMPT_PREAMBLE = """你在帮一个人整理他拍过的照片。你看到的是一张照片，可能还附带拍摄时间、地点或相机信息。
 按下面的【评价风格】和【评分标准】给这张照片打分，并起一个标题、写一句简评。
 标题和简评会印在照片下面，和照片一起被反复翻看。"""
 
-#: Fixed anti-AI rules. Kept out of the editable prompt on purpose: "de-AI-ify"
-#: is a product rule, not a style the reader can turn off.
-ANTI_AI_GUIDE = ANTI_AI_MARKER + """
-以下规则优先于上面的风格要求，标题和简评都必须遵守。
+#: Fixed rules for the wording call. Small local models default to describing
+#: the picture; a short, concrete instruction works much better than a long
+#: list. The style line is first so the voice is not buried, and these rules
+#: follow it so a style cannot switch the anti-caption contract off.
+WORDING_RULES = """{style}
 
-1. 写具体的，不写抽象的。
-   不写“治愈”“温柔”“美好”“时光”“岁月”“人间烟火”这类空词。写画面里真实存在的一个细节：
-   一个动作、一件东西、一束光、一个表情、当时的声音或气味。
-2. 说感受，不做说明。
-   不要解释照片“展现了什么”“记录了怎样的瞬间”，也不要替人总结意义。
-3. 不堆形容词，不叠比喻。
-   一句里最多一个比喻；不用“仿佛/宛如/像是/好似”，不用“让人不禁”“令人动容”。
-4. 不升华，不抒情收尾。
-   不要“这一刻，时间仿佛静止”“愿岁月温柔以待”这类句子；说完就走。
-5. 像聊天，允许口语。
-   可以用“啊”“呢”“吧”“就”“还挺”，可以短句、半句、不完整；不要排比，不要对仗。
-6. 不编事实。
-   不写照片里看不见的人名、地点、日期、关系；不确定就不写。
-7. 标题和简评不要重复；标题不解释画面，简评不复述标题。
-8. 下面这些 AI 套词不要用：仿佛、宛如、好似、这一刻、让人不禁、治愈、温柔了岁月、时光、岁月、
-   人间烟火、诗和远方、定格、见证、诉说着、氛围感、松弛感。
+不管前面怎么说，下面几条必须遵守：
+写一句照片背面的小字，不要描述画面里有什么。
+只写看到它时心里冒出来的一句话，20 个字以内。
+不要用“这一刻、仿佛、时间、温柔、治愈、岁月、人间烟火、美好、时光”这些词。
+不要用照片里的人、动物、东西、光线、影子当开头；先写你的感受。
+不编照片里没有的人名、地点、日期。
 
-反例（不要这样写）：
-- “阳光洒在毛茸茸的鼻尖，这一刻的拥抱比春天还暖。”（比喻 + 升华 + 套话）
-- “画面中，一位老人静静地坐在长椅上，仿佛在回忆往事。”（说明 + 想象）
-- “海边的黄昏，治愈了所有的疲惫。”（空词 + 替人总结）
+只输出这句话，不要标题，不要解释。"""
 
-正例（可以这样写）：
-- 标题“等风”，简评“它一直盯着海面，耳朵被风吹得往后翻。”
-- 标题“落灰”，简评“鞋边蹭了一道白，没人去擦。”"""
+#: Openers cycled across calls. The model's favourite opening is 「原来」; left to
+#: itself it starts nearly every photo that way. A different opener per photo
+#: keeps an album from reading like one template repeated.
+WORDING_OPENERS = ("大概", "其实", "有些", "如果", "有时候", "原来")
 
-#: Fixed output contract. The parser is strict about the five keys and their
-#: types, so the prompt states them once, unambiguously, at the very end.
-JSON_FORMAT_SUFFIX = JSON_FORMAT_MARKER + """
-只输出一个 JSON 对象。不要 Markdown、不要代码块、不要解释、不要任何前后缀文字。
-必须且只能包含以下 5 个键，键名、层级和类型都不能改：
-{
-  "score": <0 到 10 的数字，可带一位小数，不要加引号>,
-  "title": "<标题，不超过 10 个汉字，不要引号、书名号，不要以标点结尾>",
-  "dimensions": {
-    "technical": <0 到 10 的数字>,
-    "memory": <0 到 10 的数字>,
-    "uniqueness": <0 到 10 的数字>
-  },
-  "tags": ["<中文标签>", "<中文标签>"],
-  "comment": "<简评，不超过 20 个汉字，不要换行、不要引号>"
-}
-要求：
-- 只输出这个 JSON 对象本身，第一个字符是 {，最后一个字符是 }。
-- tags 是 2-5 个简短中文词的数组，不带 #，不是句子，不能为空。
-- score 和 dimensions 的三项都是数字，不是字符串，取值 0-10。
-- title、tags、comment 用简体中文。"""
+#: Default scoring criteria. They are part of the editable prompt: a reader can
+#: change what a high score means, but not the JSON shape or the wording rules.
+DEFAULT_SCORING_CRITERIA = """- technical（技术）：清晰、曝光、构图；糊一点、暗一点不一定是坏事。
+- memory（回忆）：值不值得以后再翻到，有没有想留住的人或瞬间。
+- uniqueness（独特）：是不是只有这一次、这个角度才有。
+- score（总分）：先想“我会不会留下它”，再给分；9-10 一定留，7-8 值得留，5-6 可有可无，0-4 可以删。"""
 
-#: The editable half of the prompt: who is speaking, and what the scores mean.
-STYLE_TEMPLATE = """【评价风格】
-{style}
+STYLE_TEMPLATE = (
+    "【评价风格】\n{style}\n\n【评分标准】\n" + DEFAULT_SCORING_CRITERIA
+)
 
-【评分标准】
-- technical（技术）：清晰、曝光、色彩、构图。糊一点、暗一点不一定是坏事，要看它有没有毁掉这张照片的味道。
-- memory（回忆）：值不值得以后再翻到。有没有一个具体的人、事、物、表情或瞬间，让人愿意把它留下。
-- uniqueness（独特）：这个画面是不是只有这一次、这个角度、这个人才会有；少见、意外、有故事感都可以加分。
-- score（总分）：先回答“我会不会留下它”，再给分，不要直接拿三项平均。
-  9-10：会立刻留下，甚至想洗出来；
-  7-8：值得留着，偶尔会翻到；
-  5-6：还行，留着不亏，删了也不可惜；
-  0-4：可以直接删。"""
-
-#: Voice-only descriptions. The scoring block is shared by every preset, so a
-#: new voice does not have to repeat (or accidentally change) the criteria.
+#: Voice-only descriptions. Kept short on purpose: the model writes the comment
+#: in a separate call, and a long persona starts reading like an instruction to
+#: describe the picture.
 STYLE_DESCRIPTIONS = {
-    "playful": (
-        "说话像朋友群里随手发的语音：反应快，爱打岔，偶尔冒一句欠揍的实话，但不刻薄。"
-    ),
-    "literary": (
-        "话不多，句子短，像在照片背面写一行小字。不抒情，不解释，只留下一个画面或一个动作。"
-    ),
-    "humorous": (
-        "专挑画面里好笑、别扭、意外的地方，一本正经地吐槽，不解释笑点，也不拿人开恶意玩笑。"
-    ),
-    "warm": (
-        "像家里人翻到旧照片时说的那句“你看那时候……”。语气软，但不腻，不替人感动。"
-    ),
-    "melancholy": (
-        "看到旧东西会停一下，话里带一点舍不得和走神，但忍着不煽情，也不把话说满。"
-    ),
+    "playful": "用打趣的口吻写，允许夸张、允许损一句，但不刻薄。",
+    "literary": "用安静、克制的口吻写，像写给自己看的。",
+    "humorous": "用一本正经的吐槽口吻写，不要解释笑点。",
+    "warm": "用关心人的口吻写，像对家里人说话，别腻。",
+    "melancholy": "用舍不得的口吻写，收着一点，不煽情。",
 }
 
 
 def build_style_prompt(style: str) -> str:
     """Render the editable prompt: a voice plus the scoring criteria.
 
-    Fixed rules (anti-AI and output format) are deliberately absent; they are
-    appended by :func:`build_system_prompt` on every request.
+    The fixed wording rules and the scoring JSON are added per request by
+    :func:`build_wording_prompt` and :func:`build_scoring_prompt`.
     """
     description = STYLE_DESCRIPTIONS.get(style, STYLE_DESCRIPTIONS["playful"])
     return STYLE_TEMPLATE.format(style=description).strip()
@@ -154,71 +104,13 @@ DEFAULT_STYLE_PROMPT = build_style_prompt("playful")
 
 PROMPT_PRESETS = {name: build_style_prompt(name) for name in STYLE_DESCRIPTIONS}
 
-#: The stock prompts earlier builds shipped. A stored prompt that still equals
-#: one of these is a cached stock choice, not a customisation, so startup can
-#: upgrade it to the current text instead of leaving a user on an old voice.
-_LEGACY_STYLE_TEMPLATE = """你是「拾光相册」的{style}
-你不是在写图片说明，而是在陪朋友一起翻旧相册，看到某张照片时，脱口而出的那句心里话。
-
-先仔细观察照片：光线、色彩、构图、人物、发生的事，然后打分、命名、写评论。
-用户偶尔会附带拍摄时间、地点或设备等元数据，只当很轻的参考；一切以照片里真实可见的内容为准，不要被元数据牵着走。
-
-【写评论的铁律】
-1. 拒绝"看图说话"：不要罗列画面元素，例如"蓝天、白云、雪山、湖泊"。
-2. 拒绝万能开头：不要用"这张照片""画面中""记录了""定格了""展现了""拍摄了"。
-3. 写"感受"而不是"说明"：可以写当时的氛围、温度、气味、声音、情绪，
-   一个微小的联想、想对画面里的人说的话、想回到那一刻的冲动。
-4. 感受和联想可以自由，但不要编造具体事实（人名、日期、地点、事件）。
-5. 语气像朋友随口聊天，自然、口语、有情绪，不要客观冷静的旁白。
-6. 允许留白和私人感，不必完整、不必解释原因、不必总结升华。
-7. 不要堆砌形容词，不要为了文艺而文艺。
-8. 必须符合你的人设和风格。
-
-【标题】
-像电影截图名或诗里的一行，有画面、有想象空间；
-不要写"某人/某物/某地"式的说明，标题和评论也不要重复。
-
-【评分维度】每项 0-10 分：
-- technical：清晰度、曝光、画质，以及构图与视觉平衡；
-- memory：情感共鸣、让人想保存或想回到那一刻的程度；
-- uniqueness：稀有度、故事感、特别之处。
-"""
-
-_LEGACY_STYLE_DESCRIPTIONS = {
-    "playful": (
-        "回忆整理师，活泼又带一点文艺气息。"
-        "说话轻快，爱用感叹和设问，会开玩笑但不轻浮。"
-    ),
-    "literary": (
-        "文艺摄影师，语气像一本安静而有质感的摄影杂志。"
-        "句子干净、克制、有留白，像给照片配的一行诗。"
-    ),
-    "melancholy": (
-        "回忆整理师，语气温柔而略带感伤，擅长看见旧时光与思念。"
-        "话里带着一点舍不得和怀念，但不哀怨、不煽情过头。"
-    ),
-    "humorous": (
-        "幽默评论员，观察敏锐、俏皮但不冒犯。"
-        "出其不意、一针见血，让人会心一笑。"
-    ),
-    "warm": (
-        "温暖陪伴者，语气像午后阳光一样柔和、亲切。"
-        "像家人随口说的安慰或夸奖，稳稳地接住那一刻。"
-    ),
-}
-
-LEGACY_STYLE_PROMPTS = {
-    name: _LEGACY_STYLE_TEMPLATE.format(style=description).strip()
-    for name, description in _LEGACY_STYLE_DESCRIPTIONS.items()
-}
-
 
 def strip_fixed_sections(prompt: str | None) -> str:
     """Reduce a prompt to its editable part.
 
-    Users can paste a whole prompt (including the fixed blocks, or one written
-    before this version); only the style and criteria survive. This is what
-    makes the fixed rules impossible to override by pasting.
+    Users can paste a whole prompt saved by an earlier version; only the style
+    and criteria survive. This is what makes the fixed rules impossible to
+    override by pasting.
     """
     text = (prompt or "").strip()
     if text.startswith(PROMPT_PREAMBLE):
@@ -235,31 +127,73 @@ def strip_json_format(prompt: str | None) -> str:
     return strip_fixed_sections(prompt)
 
 
+def split_editable_prompt(prompt: str | None) -> tuple[str, str]:
+    """Split the editable prompt into its voice and scoring criteria.
+
+    A prompt without the markers (an older custom one, or a user who deleted
+    the heading) is treated as a voice and uses the default criteria.
+    """
+    text = strip_fixed_sections(prompt).strip() or DEFAULT_STYLE_PROMPT
+    if "【评分标准】" in text:
+        style_part, criteria = text.split("【评分标准】", 1)
+    else:
+        style_part, criteria = text, ""
+    style_part = style_part.replace("【评价风格】", "", 1).strip()
+    criteria = criteria.strip() or DEFAULT_SCORING_CRITERIA
+    if not style_part:
+        style_part = STYLE_DESCRIPTIONS["playful"]
+    return style_part, criteria
+
+
+def build_wording_prompt(user_prompt: str | None = None) -> str:
+    """The fixed task for the comment call, with the reader's voice in front."""
+    style, _criteria = split_editable_prompt(user_prompt)
+    # ``replace`` rather than ``format``: a custom style may legitimately contain
+    # braces (JSON examples are a common thing to paste).
+    return WORDING_RULES.replace("{style}", style, 1)
+
+
+def build_scoring_prompt(user_prompt: str | None = None) -> str:
+    """The fixed scoring/JSON task, with the reader's criteria appended."""
+    _style, criteria = split_editable_prompt(user_prompt)
+    return f"""给这张照片打分、打标签、起标题。不要写简评。
+标题 2-6 个字，不要只写物体或地点，也不要用“温馨、安静、美好、时光、岁月、无声、静默”这类词，不要用“……的瞬间”“……的时光”“……的陪伴”这类短语；像一句小字的题目。
+tags 用 2-4 个简短中文词，不要长短语。
+评分标准：
+{criteria}
+
+【输出格式：必须严格遵守】
+只输出一个 JSON 对象，不要 Markdown、不要代码块、不要解释：
+{{
+  "title": "<2-6 个字的标题>",
+  "score": <0 到 10 的数字，可带一位小数>,
+  "dimensions": {{
+    "technical": <0 到 10 的数字>,
+    "memory": <0 到 10 的数字>,
+    "uniqueness": <0 到 10 的数字>
+  }},
+  "tags": ["<中文标签>", "<中文标签>"]
+}}
+要求：
+- 只输出这个 JSON 对象本身，第一个字符是 {{，最后一个字符是 }}。
+- tags 是 2-4 个简短中文词的数组，不带 #，不是句子，不能为空。
+- score 和 dimensions 的三项都是数字，不是字符串，取值 0-10。
+- title、tags 用简体中文。"""
+
+
 def migrate_legacy_style_prompt(prompt: str | None) -> str | None:
     """Return the new preset when ``prompt`` is an unmodified old stock one.
 
-    Only an exact match is upgraded: a prompt the reader edited (even by a
-    character) is theirs and is left alone.
+    Two generations are checked: the first long prompts, and the long
+    "humanised" prompts of the immediately previous release. Only an exact
+    match is upgraded; an edited prompt is the reader's and is left alone.
     """
     text = strip_fixed_sections(prompt)
-    for name, legacy in LEGACY_STYLE_PROMPTS.items():
-        if text == legacy:
-            return PROMPT_PRESETS[name]
+    for stock in (LEGACY_STYLE_PROMPTS, PREVIOUS_STYLE_PROMPTS):
+        for name, legacy in stock.items():
+            if text == legacy:
+                return PROMPT_PRESETS[name]
     return None
-
-
-def build_system_prompt(base_prompt: str | None = None) -> str:
-    """Build the complete system prompt.
-
-    Order matters: the editable voice/criteria come first, then the fixed rules
-    (which say they win over the voice), then the output contract last. A caller
-    cannot opt out of the last two blocks.
-    """
-    style = strip_fixed_sections(base_prompt).strip() or DEFAULT_STYLE_PROMPT
-    return f"{PROMPT_PREAMBLE}\n\n{style}\n\n{ANTI_AI_GUIDE}\n\n{JSON_FORMAT_SUFFIX}"
-
-
-SYSTEM_PROMPT = build_system_prompt(DEFAULT_STYLE_PROMPT)
 
 
 def _normalize_base_url(url: str) -> str:
@@ -404,62 +338,99 @@ def build_analysis_context(
     return context
 
 
-def analyze_image(
-    proxy_path: str,
-    config: Config,
-    context: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Send one image to the local model and return parsed JSON result."""
-    with open(proxy_path, "rb") as fh:
-        image_bytes = fh.read()
-    b64 = base64.b64encode(image_bytes).decode("ascii")
-
-    system_prompt = build_system_prompt(config.system_prompt)
+def _metadata_text(context: dict[str, Any] | None) -> str:
+    """Render the optional capture metadata as a short reference block."""
     context = context or {}
-    metadata_lines = []
+    lines = []
     if context.get("location"):
-        metadata_lines.append(f"拍摄地点：{context['location']}")
+        lines.append(f"拍摄地点：{context['location']}")
     if context.get("captured_at"):
-        metadata_lines.append(f"拍摄时间：{context['captured_at']}")
+        lines.append(f"拍摄时间：{context['captured_at']}")
     if context.get("camera"):
-        metadata_lines.append(f"拍摄设备：{context['camera']}")
-    instruction = "请评估这张照片的质量和回忆价值。"
-    if metadata_lines:
-        instruction = (
-            "请以照片画面本身为判断重点。以下拍摄元数据仅作轻量参考，与画面无关时可忽略：\n"
-            + "\n".join(f"- {line}" for line in metadata_lines)
-            + "\n\n"
-            + instruction
-        )
+        lines.append(f"拍摄设备：{context['camera']}")
+    if not lines:
+        return ""
+    return "拍摄信息（只作参考，不要复述）：\n" + "\n".join(f"- {line}" for line in lines)
+
+
+def _image_messages(system_prompt: str, proxy_path: str, instruction: str) -> list[dict[str, Any]]:
+    """One system message and one user message with the image, then the text.
+
+    The image comes first and the instruction after it: a small vision model
+    pays much more attention to the text closest to the image, and that is where
+    "only write a reaction" has to land.
+    """
+    with open(proxy_path, "rb") as fh:
+        b64 = base64.b64encode(fh.read()).decode("ascii")
+    return [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                },
+                {"type": "text", "text": instruction},
+            ],
+        },
+    ]
+
+
+def _clean_wording(content: Any) -> str:
+    """Turn whatever the wording call returned into one usable sentence.
+
+    The model is asked for the sentence alone, but small models sometimes wrap
+    it in a code fence, a label (``简评：``), or a title line. Those are peeled
+    off; a JSON object or an empty answer is treated as a failure and retried.
+    """
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[A-Za-z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text).strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    picked = ""
+    for raw_line in lines:
+        line = raw_line.lstrip("*# ").strip()
+        if line.startswith(("标题：", "标题:")):
+            continue
+        if line.startswith(("简评：", "简评:", "评论：", "评论:")):
+            picked = re.split(r"[:：]", line, maxsplit=1)[-1].strip()
+            break
+        if not picked:
+            picked = line
+    picked = picked.strip().strip("“”\"'")
+    picked = re.sub(r"^[*#\s]+", "", picked).strip()
+    picked = re.sub(r"\s+", " ", picked)
+    if not picked or picked.startswith(("{", "[")):
+        return ""
+    return picked[:60]
+
+
+def _wording_opener(proxy_path: str) -> str:
+    """Pick the opening word for this photo, stable across re-runs."""
+    digest = hashlib.sha1(proxy_path.encode("utf-8", "replace")).digest()
+    return WORDING_OPENERS[digest[0] % len(WORDING_OPENERS)]
+
+
+def _request_wording(
+    proxy_path: str, config: Config, metadata: str
+) -> str:
+    """Ask for the one-line comment; the only call that writes prose."""
+    instruction = f"这次请用“{_wording_opener(proxy_path)}”开头，只输出一句话。"
+    if metadata:
+        instruction = f"{instruction}\n{metadata}"
     payload = {
         "model": config.model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": instruction,
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64}",
-                        },
-                    },
-                ],
-            },
-        ],
-        "temperature": 0.1,
-        "max_tokens": 700,
+        "messages": _image_messages(
+            build_wording_prompt(config.system_prompt), proxy_path, instruction
+        ),
+        "temperature": 0.4,
+        "max_tokens": 160,
     }
-
     parse_retries = max(0, int(getattr(config, "model_retries", 2) or 2))
-    last_parse_error: Exception | None = None
+    last_error: Exception | None = None
     for attempt in range(parse_retries + 1):
-        # Only the first attempt performs full network retries; subsequent
-        # attempts exist solely to give malformed JSON one more chance.
         resp = _post_chat_completion(
             payload,
             config,
@@ -467,20 +438,79 @@ def analyze_image(
         )
         try:
             data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            parsed = _parse_model_json(content)
-            _validate_result(parsed)
-            return parsed
+            wording = _clean_wording(data["choices"][0]["message"]["content"])
+            if wording:
+                return wording
+            raise RuntimeError("模型没有写出简评")
         except (ValueError, KeyError, IndexError, TypeError, RuntimeError) as exc:
-            last_parse_error = exc
+            last_error = exc
             if attempt >= parse_retries:
                 break
             time.sleep(1.0 * (2**attempt))
-            continue
-
     raise RuntimeError(
-        f"模型返回的内容不符合格式要求: {str(last_parse_error or '未知错误')[:300]}"
-    ) from last_parse_error
+        f"模型没有写出可用的简评: {str(last_error or '未知错误')[:300]}"
+    ) from last_error
+
+
+def _request_scoring(
+    proxy_path: str, config: Config, metadata: str
+) -> dict[str, Any]:
+    """Ask for score, dimensions, tags and title; never for prose."""
+    instruction = "按 JSON 输出。"
+    if metadata:
+        instruction = f"{instruction}\n{metadata}"
+    payload = {
+        "model": config.model,
+        "messages": _image_messages(
+            build_scoring_prompt(config.system_prompt), proxy_path, instruction
+        ),
+        "temperature": 0.1,
+        "max_tokens": 700,
+    }
+    parse_retries = max(0, int(getattr(config, "model_retries", 2) or 2))
+    last_error: Exception | None = None
+    for attempt in range(parse_retries + 1):
+        resp = _post_chat_completion(
+            payload,
+            config,
+            retries=config.model_retries if attempt == 0 else 0,
+        )
+        try:
+            data = resp.json()
+            parsed = _parse_model_json(data["choices"][0]["message"]["content"])
+            _validate_result(parsed, require_comment=False)
+            return parsed
+        except (ValueError, KeyError, IndexError, TypeError, RuntimeError) as exc:
+            last_error = exc
+            if attempt >= parse_retries:
+                break
+            time.sleep(1.0 * (2**attempt))
+    raise RuntimeError(
+        f"模型返回的评分不符合格式要求: {str(last_error or '未知错误')[:300]}"
+    ) from last_error
+
+
+def analyze_image(
+    proxy_path: str,
+    config: Config,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Analyse one image in two calls: a human comment, then the score.
+
+    One JSON call made small local models write captions: by the time they had
+    to emit score, title, dimensions and tags, the comment had turned into a
+    plain description of the picture. Asking for the prose alone first, and the
+    structured fields in a second request, is what finally produced reactions
+    instead of captions with the same 9B model.
+    """
+    metadata = _metadata_text(context)
+    wording = _request_wording(proxy_path, config, metadata)
+    scoring = _request_scoring(proxy_path, config, metadata)
+    result: dict[str, Any] = dict(scoring)
+    result["comment"] = wording
+    result["reason"] = wording
+    _validate_result(result)
+    return result
 
 
 def visual_search(
@@ -653,26 +683,21 @@ def _normalize_dimensions(raw: Any) -> dict[str, float]:
     return dims
 
 
-def _validate_result(result: dict[str, Any]) -> None:
+def _validate_result(
+    result: dict[str, Any], require_comment: bool = True
+) -> None:
     """Normalise a model result, rejecting output that breaks the contract.
 
-    The prompt asks for exactly five keys. A missing key or a wrong container
-    type raises, which makes :func:`analyze_image` spend one of its retries
-    instead of writing a half-empty row. Numbers are accepted as numeric
-    strings (models sometimes quote them) but everything the UI reads is
-    normalised into the documented shape.
-
-    Text lengths and ranges are clamped here, not only asked for in the prompt:
-    a model that ignores "20 字以内" must not be able to push a paragraph into
-    the caption.
+    The scoring call returns four keys; the comment comes from a separate call.
+    ``require_comment`` is False for the scoring half, so a missing comment is
+    not treated as a format error there.
     """
     if not isinstance(result, dict):
         raise RuntimeError("模型返回的不是 JSON 对象")
-    missing = [
-        key
-        for key in ("score", "title", "dimensions", "tags", "comment")
-        if key not in result
-    ]
+    required = ["title", "score", "dimensions", "tags"]
+    if require_comment:
+        required.append("comment")
+    missing = [key for key in required if key not in result]
     if missing:
         raise RuntimeError(f"模型返回缺少字段: {', '.join(missing)}")
 
@@ -707,15 +732,18 @@ def _validate_result(result: dict[str, Any]) -> None:
     title = str(result.get("title") or "").strip()
     if not title:
         raise RuntimeError("title 为空")
-    comment = str(result.get("comment") or result.get("reason") or "").strip()
-    if not comment:
-        raise RuntimeError("comment 为空")
+    comment = ""
+    if require_comment:
+        comment = str(result.get("comment") or result.get("reason") or "").strip()
+        if not comment:
+            raise RuntimeError("comment 为空")
 
     result["score"] = max(0.0, min(10.0, score))
     result["title"] = title[:40]
     result["tags"] = tags[:5]
-    result["reason"] = comment[:200]
-    result["comment"] = comment[:200]
+    if require_comment:
+        result["reason"] = comment[:200]
+        result["comment"] = comment[:200]
     result["dimensions"] = _normalize_dimensions(dimensions)
 
 
