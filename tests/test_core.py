@@ -394,7 +394,7 @@ class DatabaseTests(unittest.TestCase):
 
         cfg = Config(data_dir=self.tmp.name)
         self.assertEqual(cfg.model_retries, 3)
-        self.assertEqual(cfg.scan_concurrency, 1)
+        self.assertEqual(cfg.scan_concurrency, 3)
 
     def test_thumbnail_quality_defaults_to_fifty(self) -> None:
         from photo_reviewer.config import Config

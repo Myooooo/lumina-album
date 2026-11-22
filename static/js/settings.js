@@ -432,7 +432,7 @@ async function openSettings() {
     $("setProxyQuality").value = cfg.proxy_quality ?? 80;
     $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 640;
     $("setThumbQuality").value = cfg.thumb_quality ?? 50;
-    $("setModelConcurrency").value = cfg.scan_concurrency || 1;
+    $("setModelConcurrency").value = cfg.scan_concurrency || 3;
     $("setModelRetries").value = cfg.model_retries ?? 3;
     $("setTimeout").value = cfg.request_timeout || 120;
     $("setIndexThreads").value = cfg.index_concurrency || 4;
@@ -479,7 +479,7 @@ async function saveSettings() {
     proxy_quality: parseInt($("setProxyQuality").value, 10) || 80,
     gallery_thumb_size: parseInt($("setGalleryThumbSize").value, 10) || 640,
     thumb_quality: parseInt($("setThumbQuality").value, 10) || 50,
-    scan_concurrency: parseInt($("setModelConcurrency").value, 10) || 1,
+    scan_concurrency: parseInt($("setModelConcurrency").value, 10) || 3,
     model_retries: parseInt($("setModelRetries").value, 10) || 3,
     request_timeout: parseInt($("setTimeout").value, 10) || 120,
     index_concurrency: parseInt($("setIndexThreads").value, 10) || 4,

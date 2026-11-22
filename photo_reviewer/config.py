@@ -117,7 +117,9 @@ class Config:
 
     # Scanning.
     scan_concurrency: int = field(
-        default_factory=lambda: int(os.getenv("PHOTO_SCAN_CONCURRENCY", "1"))
+        # Measured on the local 4-slot llama.cpp server: 3 photos in flight is
+        # the throughput sweet spot (~1.8x one-at-a-time); 4 is slower.
+        default_factory=lambda: int(os.getenv("PHOTO_SCAN_CONCURRENCY", "3"))
     )
     index_concurrency: int = field(
         default_factory=lambda: int(os.getenv("PHOTO_INDEX_CONCURRENCY", "4"))

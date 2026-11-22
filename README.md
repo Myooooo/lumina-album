@@ -126,7 +126,7 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_GALLERY_THUMB_SIZE` | `640` | 画廊缩略图边长 |
 | `PHOTO_PROXY_QUALITY` | `80` | 代理图 JPEG 质量 |
 | `PHOTO_THUMB_QUALITY` | `50` | 缩略图 JPEG 质量 |
-| `PHOTO_SCAN_CONCURRENCY` | `1` | 同时分析的照片数 |
+| `PHOTO_SCAN_CONCURRENCY` | `3` | 同时分析的照片数（本地 4 slot 服务实测 3 最佳） |
 | `PHOTO_INDEX_CONCURRENCY` | `4` | 建索引线程数 |
 | `PHOTO_REQUEST_TIMEOUT` | `120` | 模型请求超时（秒） |
 | `PHOTO_MODEL_RETRIES` | `3` | 模型请求重试次数 |
