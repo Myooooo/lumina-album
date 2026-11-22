@@ -486,27 +486,34 @@
             <div class="full-row prompt-editor">
               <div class="prompt-editor-head">
                 <label for="setSystemPrompt">评价风格与评分标准</label>
-                <span class="prompt-fixed-note">输出格式和「说人话」规则由程序固定追加，不可修改</span>
               </div>
               <textarea id="setSystemPrompt" rows="9"
                         placeholder="写你想要的评价风格和打分标准，例如：语气像朋友聊天；9-10 分留给会立刻留下的照片"></textarea>
-              <div class="prompt-preset-row" id="promptPresetRow" aria-label="内置风格">
-                <button type="button" class="btn small preset-btn" data-preset="playful"><span class="btn-icon" data-icon="sparkles"></span>活泼（默认）</button>
-                <button type="button" class="btn small preset-btn" data-preset="literary"><span class="btn-icon" data-icon="feather"></span>文艺</button>
-                <button type="button" class="btn small preset-btn" data-preset="humorous"><span class="btn-icon" data-icon="smile"></span>幽默</button>
-                <button type="button" class="btn small preset-btn" data-preset="warm"><span class="btn-icon" data-icon="sun"></span>温暖</button>
-                <button type="button" class="btn small preset-btn" data-preset="melancholy"><span class="btn-icon" data-icon="cloudRain"></span>伤感</button>
+              <div class="prompt-preset-row">
+                <div class="prompt-builtin-row" id="promptPresetRow" aria-label="内置风格">
+                  <button type="button" class="btn small preset-btn" data-preset="playful"><span class="btn-icon" data-icon="sparkles"></span>活泼（默认）</button>
+                  <button type="button" class="btn small preset-btn" data-preset="literary"><span class="btn-icon" data-icon="feather"></span>文艺</button>
+                  <button type="button" class="btn small preset-btn" data-preset="humorous"><span class="btn-icon" data-icon="smile"></span>幽默</button>
+                  <button type="button" class="btn small preset-btn" data-preset="warm"><span class="btn-icon" data-icon="sun"></span>温暖</button>
+                  <button type="button" class="btn small preset-btn" data-preset="melancholy"><span class="btn-icon" data-icon="cloudRain"></span>伤感</button>
+                </div>
+                <div class="prompt-custom-menu" id="promptCustomMenuWrap">
+                  <button id="customPromptBtn" class="btn small custom-prompt-trigger" type="button"
+                          aria-haspopup="listbox" aria-expanded="false" aria-controls="customPromptMenu"
+                          title="我保存过的提示词">
+                    <span class="btn-icon" data-icon="customPrompt"></span>
+                    <span id="customPromptLabel">自定义提示词</span>
+                    <span class="custom-prompt-caret" data-icon="chevronDown"></span>
+                  </button>
+                  <div id="customPromptMenu" class="prompt-custom-menu-panel hidden"
+                       role="listbox" aria-label="自定义提示词"></div>
+                </div>
               </div>
-              <div class="prompt-custom-row hidden" id="promptCustomRow" aria-label="自定义提示词"></div>
               <div class="prompt-save-row">
-                <input id="promptPresetName" type="text" maxlength="30" placeholder="给这套提示词起个名字" />
+                <input id="promptPresetName" type="text" maxlength="30" placeholder="给这套提示词起个名字（可留空）" />
                 <button id="savePromptPresetBtn" class="btn small" type="button"><span class="btn-icon" data-icon="check"></span>保存为自定义</button>
                 <button id="deletePromptPresetBtn" class="btn small hidden" type="button"><span class="btn-icon" data-icon="trash"></span>删除当前自定义</button>
               </div>
-              <details class="prompt-fixed-details">
-                <summary>查看固定追加的「说人话」与输出格式</summary>
-                <pre id="promptFixedText" class="prompt-fixed-text"></pre>
-              </details>
             </div>
             <label>模型并发请求数
               <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />

@@ -1720,11 +1720,12 @@ section("prompt editor");
   for (const id of [
     "setSystemPrompt",
     "promptPresetRow",
-    "promptCustomRow",
+    "customPromptBtn",
+    "customPromptLabel",
+    "customPromptMenu",
     "promptPresetName",
     "savePromptPresetBtn",
     "deletePromptPresetBtn",
-    "promptFixedText",
   ]) {
     check(`the prompt editor has #${id}`, new RegExp(`id="${id}"`).test(html), true);
   }
@@ -1734,15 +1735,52 @@ section("prompt editor");
     true
   );
   check(
-    "the dialog says the fixed rules cannot be edited",
-    /输出格式和「说人话」规则由程序固定追加，不可修改/.test(html),
+    "the fixed-rules disclaimer and its viewer are gone",
+    !/prompt-fixed-note|promptFixedText|查看固定追加/.test(html),
     true
   );
   check(
-    "the prompt editor and its fixed block have styles",
+    "the saved-prompt dropdown sits beside the built-in voices",
+    /prompt-builtin-row[\s\S]{0,2000}customPromptBtn/.test(html),
+    true
+  );
+  check(
+    "the prompt editor, dropdown and aligned save row have styles",
     /\.prompt-editor \{/.test(css) &&
-      /\.prompt-fixed-details \{/.test(css) &&
-      /\.prompt-fixed-text \{/.test(css),
+      /\.prompt-custom-menu-panel \{/.test(css) &&
+      /\.custom-prompt-trigger\.active/.test(css) &&
+      /\.prompt-save-row \.btn\.small \{[\s\S]{0,80}height: 36px/.test(css),
+    true
+  );
+  check(
+    "saved prompts get their own icon",
+    /customPrompt:/.test(
+      fs.readFileSync(path.join(__dirname, "..", "static", "js", "icons.js"), "utf8")
+    ) && /data-icon="customPrompt"/.test(html),
+    true
+  );
+
+  // A blank name falls through to 自定义1, 自定义2, ... after the highest one.
+  const nextName = new Function(
+    "customPromptPresets",
+    `${extract("nextCustomPromptName")} return nextCustomPromptName;`
+  );
+  check(
+    "an empty name becomes 自定义1",
+    nextName([])(),
+    "自定义1"
+  );
+  check(
+    "the default name follows the highest saved one",
+    nextName([{ name: "自定义1" }, { name: "自定义3" }, { name: "海边" }])(),
+    "自定义4"
+  );
+  check(
+    "editing the name starts a new prompt, editing the text keeps the old base",
+    /setSystemPrompt"\)\.addEventListener\("input", onPromptTextInput\)/.test(src) &&
+      /promptPresetName"\)\.addEventListener\("input", onPromptNameInput\)/.test(src) &&
+      /function onPromptNameInput\(\)[\s\S]{0,120}activeCustomPresetId = ""/.test(src) &&
+      !/function onPromptTextInput\(\)[\s\S]{0,160}activeCustomPresetId = ""/.test(src),
     true
   );
 

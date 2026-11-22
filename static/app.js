@@ -228,6 +228,18 @@ function init() {
     e.preventDefault();
     saveCustomPrompt();
   });
+  // Typing in the editor drops a built-in highlight; touching the name field
+  // turns the next save into a new prompt rather than an update.
+  $("setSystemPrompt").addEventListener("input", onPromptTextInput);
+  $("promptPresetName").addEventListener("input", onPromptNameInput);
+  $("customPromptBtn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleCustomPromptMenu();
+  });
+  document.addEventListener("click", (e) => {
+    const wrap = $("promptCustomMenuWrap");
+    if (wrap && !wrap.contains(e.target)) closeCustomPromptMenu();
+  });
 
   document.querySelectorAll("[data-close]").forEach((btn) => {
     btn.addEventListener("click", () => {

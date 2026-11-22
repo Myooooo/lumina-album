@@ -112,8 +112,6 @@ const API = {
         text: "【评价风格】\n像家里人说话。\n\n【评分标准】\n7-8 留着。",
       },
     ],
-    fixed:
-      "【写作要求：说人话】\n说具体的。\n\n【输出格式：必须严格遵守】\n只输出 JSON。",
     markers: {
       preamble: "你在帮一个人整理他拍过的照片",
       anti_ai: "【写作要求：说人话】",
@@ -329,27 +327,96 @@ async function main() {
   // --- prompt editor ----------------------------------------------------
   await window.openSettings();
   await new Promise((resolve) => window.setTimeout(resolve, 120));
-  const fixedText = document.getElementById("promptFixedText").textContent;
+
+  const customTrigger = document.getElementById("customPromptBtn");
+  const customMenu = document.getElementById("customPromptMenu");
+  const promptTextarea = document.getElementById("setSystemPrompt");
+  const promptName = document.getElementById("promptPresetName");
+  const deletePrompt = document.getElementById("deletePromptPresetBtn");
   check(
-    "the fixed prompt rules are shown read-only",
-    fixedText.includes("【写作要求：说人话】") &&
-      fixedText.includes("【输出格式：必须严格遵守】"),
+    "saved prompts live behind a closed dropdown",
+    customMenu.classList.contains("hidden"),
     true
   );
-  const customChip = document.querySelector('[data-custom-id="c1"]');
-  check("a saved prompt appears as a chip", Boolean(customChip), true);
-  if (customChip) customChip.click();
-  await new Promise((resolve) => window.setTimeout(resolve, 30));
+
+  customTrigger.click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+  const savedOption = document.querySelector('[data-custom-id="c1"]');
+  check("opening it lists every saved prompt", Boolean(savedOption), true);
+  if (savedOption) savedOption.click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
   check(
-    "clicking a saved prompt loads it into the editor",
-    document.getElementById("setSystemPrompt").value.includes("像家里人"),
+    "picking a saved prompt loads it into the editor",
+    promptTextarea.value.includes("像家里人"),
     true
   );
   check(
-    "the delete action follows the active saved prompt",
-    document.getElementById("deletePromptPresetBtn").classList.contains("hidden"),
+    "the trigger is highlighted for a saved prompt",
+    customTrigger.classList.contains("active"),
+    true
+  );
+  check(
+    "the delete action follows the selected prompt",
+    deletePrompt.classList.contains("hidden"),
     false
   );
+  check("the menu closes after picking", customMenu.classList.contains("hidden"), true);
+
+  // Editing the text keeps the saved prompt as the base being edited.
+  promptTextarea.value += "\n再加一句。";
+  promptTextarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+  check(
+    "editing the text keeps the saved prompt active",
+    customTrigger.classList.contains("active"),
+    true
+  );
+
+  // A built-in is highlighted only while its text is exactly in the editor.
+  const builtinBtn = document.querySelector('.preset-btn[data-preset="playful"]');
+  builtinBtn.click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+  check(
+    "choosing a built-in clears the saved prompt",
+    customTrigger.classList.contains("active"),
+    false
+  );
+  check("the built-in is highlighted", builtinBtn.classList.contains("active"), true);
+  promptTextarea.value += "改写";
+  promptTextarea.dispatchEvent(new window.Event("input", { bubbles: true }));
+  check(
+    "editing after a built-in drops its highlight",
+    builtinBtn.classList.contains("active"),
+    false
+  );
+  check(
+    "a blank name falls back to a 自定义 name",
+    window.eval("nextCustomPromptName()"),
+    "自定义1"
+  );
+
+  // Touching the name field of a selected saved prompt means "save a new one".
+  customTrigger.click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+  document.querySelector('[data-custom-id="c1"]').click();
+  await new Promise((resolve) => window.setTimeout(resolve, 20));
+  check(
+    "the saved prompt is selected again",
+    customTrigger.classList.contains("active"),
+    true
+  );
+  promptName.value = "新名字";
+  promptName.dispatchEvent(new window.Event("input", { bubbles: true }));
+  check(
+    "editing the name clears the saved selection",
+    customTrigger.classList.contains("active"),
+    false
+  );
+  check(
+    "and hides the delete action",
+    deletePrompt.classList.contains("hidden"),
+    true
+  );
+
   window.LuminaUI.hideModal(document.getElementById("settingsModal"));
 
   check("booting and exercising the page raised no errors", problems, []);

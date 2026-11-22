@@ -14,10 +14,8 @@ from typing import Any
 from flask import jsonify, request
 
 from ..api_client import (
-    ANTI_AI_GUIDE,
     ANTI_AI_MARKER,
     JSON_FORMAT_MARKER,
-    JSON_FORMAT_SUFFIX,
     LEGACY_JSON_FORMAT_MARKER,
     PROMPT_PREAMBLE,
     PROMPT_PRESETS,
@@ -283,7 +281,6 @@ def register(app, cfg, database):
                 "presets": PROMPT_PRESETS,
                 "default": "playful",
                 "custom": custom_prompt_presets(database),
-                "fixed": f"{ANTI_AI_GUIDE}\n\n{JSON_FORMAT_SUFFIX}",
                 "markers": {
                     "anti_ai": ANTI_AI_MARKER,
                     "format": JSON_FORMAT_MARKER,

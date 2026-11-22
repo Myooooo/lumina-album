@@ -60,7 +60,6 @@ async function loadPromptPresets() {
     const data = await api("/api/prompt-presets");
     promptPresets = data.presets || {};
     customPromptPresets = Array.isArray(data.custom) ? data.custom : [];
-    promptFixedText = data.fixed || "";
     if (data.markers && typeof data.markers === "object") {
       promptMarkers = { ...promptMarkers, ...data.markers };
     }
@@ -112,49 +111,103 @@ function activeCustomPresetFor(text) {
   );
 }
 
-/** Render the saved-prompt chips and wire their clicks. */
-function renderPromptPresets() {
-  const row = $("promptCustomRow");
-  if (!row) return;
-  if (!customPromptPresets.length) {
-    row.innerHTML = "";
-    row.classList.add("hidden");
-    return;
+/** Next free 「自定义N」 name, in order of creation. */
+function nextCustomPromptName() {
+  let highest = 0;
+  for (const preset of customPromptPresets) {
+    const match = /^自定义(\d+)$/.exec(String(preset.name || ""));
+    if (match) highest = Math.max(highest, Number(match[1]));
   }
-  row.classList.remove("hidden");
-  row.innerHTML = customPromptPresets
-    .map(
-      (preset) => `
-      <button type="button" class="btn small preset-btn custom-preset-btn"
-              data-custom-id="${escapeHtml(preset.id)}"
-              title="自定义提示词：${escapeHtml(preset.name)}">
-        <span class="btn-icon" data-icon="sparkles"></span>${escapeHtml(preset.name)}
-      </button>`
-    )
-    .join("");
-  renderAllIcons(row);
-  row.querySelectorAll("[data-custom-id]").forEach((btn) => {
-    btn.addEventListener("click", () => applyCustomPrompt(btn.dataset.customId));
+  return `自定义${highest + 1}`;
+}
+
+/** Light the built-in chip whose text is exactly in the editor.
+ *
+ * A selected saved prompt wins: its trigger is the active choice even when its
+ * text happens to equal a built-in (for example, a saved copy of one).
+ */
+function paintBuiltinPresetHighlight(text) {
+  const active = activeCustomPresetId ? "" : activePresetFor(text);
+  document.querySelectorAll(".preset-btn[data-preset]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.preset === active);
   });
 }
 
-/** Mark the built-in or custom chip the editor text matches. */
-function highlightPromptPreset(text) {
-  const builtin = activePresetFor(text);
-  activeCustomPresetId = activeCustomPresetFor(text);
-  document.querySelectorAll(".preset-btn[data-preset]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.preset === builtin);
-  });
-  document.querySelectorAll(".preset-btn[data-custom-id]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.customId === activeCustomPresetId);
-  });
-  const deleteBtn = $("deletePromptPresetBtn");
-  if (deleteBtn) deleteBtn.classList.toggle("hidden", !activeCustomPresetId);
+/** Reflect the active saved prompt on the trigger, menu and delete button. */
+function paintCustomPromptSelection() {
   const current = customPromptPresets.find(
     (preset) => preset.id === activeCustomPresetId
   );
-  const nameInput = $("promptPresetName");
-  if (nameInput && current) nameInput.value = current.name;
+  const trigger = $("customPromptBtn");
+  const label = $("customPromptLabel");
+  if (trigger) {
+    trigger.classList.toggle("active", Boolean(current));
+    trigger.title = current ? current.name : "我保存过的提示词";
+  }
+  if (label) label.textContent = current ? current.name : "自定义提示词";
+  const deleteBtn = $("deletePromptPresetBtn");
+  if (deleteBtn) deleteBtn.classList.toggle("hidden", !current);
+  document.querySelectorAll(".prompt-custom-option").forEach((option) => {
+    const selected = option.dataset.customId === activeCustomPresetId;
+    option.classList.toggle("active", selected);
+    option.setAttribute("aria-selected", selected ? "true" : "false");
+  });
+}
+
+/** Build the dropdown rows for every saved prompt. */
+function renderCustomPromptMenu() {
+  const menu = $("customPromptMenu");
+  if (!menu) return;
+  if (!customPromptPresets.length) {
+    menu.innerHTML =
+      '<div class="prompt-custom-empty">还没有保存自定义提示词</div>';
+    paintCustomPromptSelection();
+    return;
+  }
+  menu.innerHTML = customPromptPresets
+    .map(
+      (preset) => `
+      <button type="button" class="prompt-custom-option" role="option"
+              data-custom-id="${escapeHtml(preset.id)}"
+              aria-selected="false"
+              title="${escapeHtml(preset.name)}">
+        ${ICONS.customPrompt || ""}<span>${escapeHtml(preset.name)}</span>
+      </button>`
+    )
+    .join("");
+  menu.querySelectorAll("[data-custom-id]").forEach((option) => {
+    option.addEventListener("click", () => {
+      applyCustomPrompt(option.dataset.customId);
+      closeCustomPromptMenu();
+    });
+  });
+  paintCustomPromptSelection();
+}
+
+function customPromptMenuOpen() {
+  const menu = $("customPromptMenu");
+  return Boolean(menu && !menu.classList.contains("hidden"));
+}
+
+function openCustomPromptMenu() {
+  renderCustomPromptMenu();
+  const menu = $("customPromptMenu");
+  const trigger = $("customPromptBtn");
+  if (!menu) return;
+  menu.classList.remove("hidden");
+  if (trigger) trigger.setAttribute("aria-expanded", "true");
+}
+
+function closeCustomPromptMenu() {
+  const menu = $("customPromptMenu");
+  const trigger = $("customPromptBtn");
+  if (menu) menu.classList.add("hidden");
+  if (trigger) trigger.setAttribute("aria-expanded", "false");
+}
+
+function toggleCustomPromptMenu() {
+  if (customPromptMenuOpen()) closeCustomPromptMenu();
+  else openCustomPromptMenu();
 }
 
 function applyPromptPreset(name) {
@@ -165,9 +218,11 @@ function applyPromptPreset(name) {
   }
   const promptText = stripPromptFormat(template);
   $("setSystemPrompt").value = promptText;
-  const nameInput = $("promptPresetName");
-  if (nameInput) nameInput.value = "";
-  highlightPromptPreset(promptText);
+  activeCustomPresetId = "";
+  $("promptPresetName").value = "";
+  paintBuiltinPresetHighlight(promptText);
+  paintCustomPromptSelection();
+  closeCustomPromptMenu();
 }
 
 function applyCustomPrompt(id) {
@@ -175,20 +230,37 @@ function applyCustomPrompt(id) {
   if (!preset) return;
   const promptText = stripPromptFormat(preset.text);
   $("setSystemPrompt").value = promptText;
-  activeCustomPresetId = preset.id;
   $("promptPresetName").value = preset.name;
-  highlightPromptPreset(promptText);
+  activeCustomPresetId = preset.id;
+  paintBuiltinPresetHighlight(promptText);
+  paintCustomPromptSelection();
 }
 
-/** Save the editor text as a named prompt (create, or update the active one). */
+/* Editing the text stops matching a built-in; a selected saved prompt stays
+   the base being edited until the name field itself is touched. */
+function onPromptTextInput() {
+  paintBuiltinPresetHighlight($("setSystemPrompt").value);
+  paintCustomPromptSelection();
+}
+
+/* Editing the name means "save this as a new prompt", not "update the old one". */
+function onPromptNameInput() {
+  activeCustomPresetId = "";
+  // It may now match a built-in exactly; with the saved prompt released, that
+  // chip is the right thing to highlight.
+  paintBuiltinPresetHighlight($("setSystemPrompt").value);
+  paintCustomPromptSelection();
+}
+
+/** Save the editor text; a blank name gets 自定义1, 自定义2, ... */
 async function saveCustomPrompt() {
-  const name = ($("promptPresetName").value || "").trim();
-  const text = stripPromptFormat($("setSystemPrompt").value);
+  const nameInput = $("promptPresetName");
+  let name = (nameInput.value || "").trim();
   if (!name) {
-    showToast("先给这套提示词起个名字", "error");
-    $("promptPresetName").focus();
-    return;
+    name = nextCustomPromptName();
+    nameInput.value = name;
   }
+  const text = stripPromptFormat($("setSystemPrompt").value);
   if (!text) {
     showToast("提示词内容不能为空", "error");
     return;
@@ -201,8 +273,10 @@ async function saveCustomPrompt() {
     customPromptPresets = Array.isArray(data.custom) ? data.custom : [];
     const saved = data.preset || {};
     if (saved.id) activeCustomPresetId = saved.id;
-    renderPromptPresets();
-    highlightPromptPreset(text);
+    nameInput.value = saved.name || name;
+    renderCustomPromptMenu();
+    paintBuiltinPresetHighlight(text);
+    paintCustomPromptSelection();
     showToast(
       `已保存自定义提示词「${saved.name || name}」，点「保存设置」后启用。`,
       "success"
@@ -212,7 +286,7 @@ async function saveCustomPrompt() {
   }
 }
 
-/** Delete the custom prompt the editor is based on. */
+/** Delete the saved prompt the editor is based on. */
 async function deleteCustomPrompt() {
   if (!activeCustomPresetId) return;
   const preset = customPromptPresets.find(
@@ -230,9 +304,10 @@ async function deleteCustomPrompt() {
     );
     customPromptPresets = Array.isArray(data.custom) ? data.custom : [];
     activeCustomPresetId = "";
-    renderPromptPresets();
     $("promptPresetName").value = "";
-    highlightPromptPreset($("setSystemPrompt").value);
+    renderCustomPromptMenu();
+    paintBuiltinPresetHighlight($("setSystemPrompt").value);
+    paintCustomPromptSelection();
     showToast("已删除这套自定义提示词。", "success");
   } catch (e) {
     showToast("删除提示词失败：" + e.message, "error");
@@ -338,18 +413,21 @@ async function paintFfmpegStatus() {
 async function openSettings() {
   try {
     await loadPromptPresets();
-    renderPromptPresets();
-    const fixedText = $("promptFixedText");
-    if (fixedText) fixedText.textContent = promptFixedText;
+    renderCustomPromptMenu();
+    closeCustomPromptMenu();
     const cfg = await api("/api/config");
     $("setApiBase").value = cfg.api_base_url || "";
     $("setApiKey").value = cfg.api_key || "";
     $("setModel").value = cfg.model || "";
     const promptText = stripPromptFormat(cfg.system_prompt || promptPresets.playful || "");
     $("setSystemPrompt").value = promptText;
-    $("promptPresetName").value = "";
-    activeCustomPresetId = "";
-    highlightPromptPreset(promptText);
+    activeCustomPresetId = activeCustomPresetFor(promptText);
+    const currentCustom = customPromptPresets.find(
+      (preset) => preset.id === activeCustomPresetId
+    );
+    $("promptPresetName").value = currentCustom ? currentCustom.name : "";
+    paintBuiltinPresetHighlight(promptText);
+    paintCustomPromptSelection();
     $("setMaxEdge").value = cfg.proxy_max_edge || 1280;
     $("setProxyQuality").value = cfg.proxy_quality ?? 80;
     $("setGalleryThumbSize").value = cfg.gallery_thumb_size || 640;

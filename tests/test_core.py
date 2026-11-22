@@ -1236,10 +1236,6 @@ class ServerApiTests(unittest.TestCase):
             self.assertTrue(data["presets"][key].strip())
             self.assertNotIn(JSON_FORMAT_MARKER, data["presets"][key])
             self.assertNotIn(ANTI_AI_MARKER, data["presets"][key])
-        # The fixed rules are shown read-only, so the dialog can say what cannot
-        # be edited.
-        self.assertIn(ANTI_AI_MARKER, data["fixed"])
-        self.assertIn(JSON_FORMAT_MARKER, data["fixed"])
         self.assertEqual(data["markers"]["anti_ai"], ANTI_AI_MARKER)
         self.assertEqual(data["markers"]["format"], JSON_FORMAT_MARKER)
 

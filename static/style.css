@@ -3543,8 +3543,9 @@ select {
 }
 
 /* ---------- Prompt editor (settings → 大模型) ----------
-   The editable half is the voice plus the scoring criteria; the fixed rules are
-   shown read-only underneath so it is obvious what cannot be tuned away. */
+   The editable half is the voice plus the scoring criteria. Built-in voices sit
+   on the left; the reader's saved prompts live in one dropdown beside them, so
+   the row stays short no matter how many were saved. */
 .prompt-editor {
   display: flex;
   flex-direction: column;
@@ -3557,10 +3558,7 @@ select {
 
 .prompt-editor-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 14px;
 }
 
 .prompt-editor-head label {
@@ -3569,30 +3567,129 @@ select {
   color: var(--text-secondary);
 }
 
-.prompt-fixed-note {
-  font-size: 12px;
-  color: var(--muted);
-}
-
 .prompt-editor textarea {
   min-height: 204px;
 }
 
-.prompt-preset-row,
-.prompt-custom-row,
-.prompt-save-row {
+.prompt-preset-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.prompt-custom-row {
-  padding-top: 10px;
-  border-top: 1px dashed var(--border);
+.prompt-builtin-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
+/* One dropdown for every saved prompt: a row of chips would grow without
+   bound, and the reader usually has one or two in use. */
+.prompt-custom-menu {
+  position: relative;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.custom-prompt-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+}
+
+.custom-prompt-trigger > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-prompt-caret {
+  display: inline-flex;
+  align-items: center;
+}
+
+.custom-prompt-caret svg {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.custom-prompt-trigger[aria-expanded="true"] .custom-prompt-caret svg {
+  transform: rotate(180deg);
+}
+
+.prompt-custom-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 8;
+  min-width: 240px;
+  max-width: 340px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 6px;
+  background: rgba(255, 254, 251, 0.98);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
+}
+
+.prompt-custom-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-press) var(--ease-out),
+              color var(--dur-press) var(--ease-out);
+}
+
+.prompt-custom-option svg {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.prompt-custom-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-custom-option:hover,
+.prompt-custom-option.active {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.prompt-custom-option.active {
+  font-weight: 600;
+}
+
+.prompt-custom-empty {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
 .prompt-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
@@ -3610,37 +3707,23 @@ select {
   color: var(--text);
 }
 
-.prompt-fixed-details {
-  font-size: 12.5px;
+/* Match the input's height exactly: a 30px button beside a 36px field reads as
+   two different rows. */
+.prompt-save-row .btn.small {
+  height: 36px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.prompt-fixed-details summary {
-  cursor: pointer;
-  color: var(--muted);
-  transition: color var(--dur-fast) var(--ease-out);
+.prompt-save-row .btn.small .btn-icon svg {
+  width: 15px;
+  height: 15px;
 }
 
-.prompt-fixed-details summary:hover {
-  color: var(--primary-dark);
-}
-
-.prompt-fixed-text {
-  margin: 10px 0 0;
-  padding: 12px;
-  max-height: 220px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: rgba(255, 253, 249, 0.92);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  line-height: 1.65;
-  color: var(--text-secondary);
-}
-
-.preset-btn.active {
+.preset-btn.active,
+.custom-prompt-trigger.active {
   border-color: var(--primary);
   background: rgba(179, 129, 90, 0.14);
   box-shadow: 0 0 0 2px rgba(179, 129, 90, 0.28);

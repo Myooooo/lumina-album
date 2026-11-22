@@ -111,9 +111,8 @@ const state = {
 };
 
 let promptPresets = {};
-//: Prompts the reader saved, and the fixed text shown read-only in settings.
+//: Prompts the reader saved.
 let customPromptPresets = [];
-let promptFixedText = "";
 //: Markers of the fixed prompt blocks. The server owns the strings; these are
 //: fallbacks for a page opened before the endpoint answers.
 let promptMarkers = {
