@@ -30,6 +30,11 @@
       <div class="folder-input-wrapper">
         <span class="input-icon" id="folderInputIcon"></span>
         <input id="folderInput" type="text" placeholder="选择存放照片的文件夹，例如 D:\Photos" />
+        <!-- Shown only while the open album is hidden: the path itself is the
+             only place that says so, because hidden albums do not appear in
+             any path selector. -->
+        <span id="folderHiddenBadge" class="folder-hidden-badge hidden"
+              title="这个目录已隐藏，请在「设置 → 数据管理 → 查看隐藏的目录」中重新进入">已隐藏</span>
         <button id="folderHistoryBtn" class="folder-history-toggle" type="button"
                 title="整理过的文件夹" aria-haspopup="listbox" aria-expanded="false"
                 aria-controls="folderHistory"><span class="btn-icon" data-icon="chevronDown"></span></button>
@@ -627,17 +632,27 @@
           <div class="settings-danger-zone">
             <div class="settings-danger-row">
               <div class="settings-danger-text">
-                <strong>移除当前目录</strong>
-                <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
-              </div>
-              <button id="removeFolderBtn" class="btn danger remove-folder-btn"><span class="btn-icon" data-icon="trash"></span>移除</button>
-            </div>
-            <div class="settings-danger-row">
-              <div class="settings-danger-text">
                 <strong>清理缓存</strong>
                 <span>删除没有被任何照片引用的代理图与缩略图，释放磁盘空间。</span>
               </div>
               <button id="cleanCacheBtn" class="btn"><span class="btn-icon" data-icon="clean"></span>清理</button>
+            </div>
+            <div class="settings-danger-row">
+              <div class="settings-danger-text">
+                <strong>隐藏当前目录</strong>
+                <span>隐藏后不会出现在主页的路径选择中，只能从这里重新进入；照片与索引都保留。</span>
+              </div>
+              <div class="settings-row-actions">
+                <button id="hideFolderBtn" class="btn"><span class="btn-icon" data-icon="eyeOff"></span>隐藏</button>
+                <button id="viewHiddenFoldersBtn" class="btn"><span class="btn-icon" data-icon="eye"></span>查看隐藏的目录</button>
+              </div>
+            </div>
+            <div class="settings-danger-row">
+              <div class="settings-danger-text">
+                <strong>移除当前目录</strong>
+                <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
+              </div>
+              <button id="removeFolderBtn" class="btn danger remove-folder-btn"><span class="btn-icon" data-icon="trash"></span>移除</button>
             </div>
           </div>
         </section>
@@ -647,6 +662,19 @@
       <div class="modal-actions">
         <button id="settingsCancelBtn" class="btn" data-close="settingsModal"><span class="btn-icon" data-icon="close"></span>取消</button>
         <button id="saveSettingsBtn" class="btn primary"><span class="btn-icon" data-icon="check"></span>保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden albums: reachable only from 设置 → 数据管理. -->
+  <div id="hiddenFoldersModal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" data-close="hiddenFoldersModal"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="eyeOff"></span>隐藏的目录</h2>
+      <p class="settings-hint">这些目录不会出现在主页的路径选择里。点一个进入相册（路径栏会标注「已隐藏」），或取消隐藏让它回到列表。</p>
+      <div id="hiddenFoldersList" class="hidden-folders-list"></div>
+      <div class="modal-actions">
+        <button class="btn" data-close="hiddenFoldersModal"><span class="btn-icon" data-icon="close"></span>关闭</button>
       </div>
     </div>
   </div>

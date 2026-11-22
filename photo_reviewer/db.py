@@ -1011,6 +1011,39 @@ class Database:
             finally:
                 conn.close()
 
+    def rows_missing_render(self, folder: str) -> list[dict[str, Any]]:
+        """Rows in one folder whose gallery render was never written.
+
+        A copy interrupted by a pulled disk, or an index pass that died halfway,
+        leaves a row behind without a thumbnail or a proxy. Its path is already
+        known, so the next incremental sync skipped it - the card stayed blank
+        for ever even after the disk came back. The rebuild pass asks for these
+        rows and finishes what the interrupted pass started.
+
+        ``status='error'`` is included because an interrupted index leaves the
+        row in that state; rows that do have a usable render are filtered out by
+        the caller, which keeps an ordinary model failure from being re-rendered
+        on every sync. Analysed rows are left out entirely: a render cleared by
+        "清理缓存" is regenerated on demand, and re-indexing a finished photo
+        would rewrite the EXIF and location that analysis already stored.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, path, raw_path, thumb_path, proxy_path, status "
+                    "FROM photos WHERE folder=? AND status != 'deleted' "
+                    "AND status != 'analyzed' "
+                    "AND COALESCE(media_kind, 'photo') != 'video' "
+                    "AND (thumb_path IS NULL OR thumb_path = '' "
+                    "     OR proxy_path IS NULL OR proxy_path = '' "
+                    "     OR status = 'error')",
+                    (folder,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+            finally:
+                conn.close()
+
     def get_settings(self) -> dict[str, str]:
         with self._lock:
             conn = self._connect()

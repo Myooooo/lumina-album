@@ -308,7 +308,7 @@ def discover_photo_pairs(
     """
     folder_path = Path(folder)
     if not folder_path.exists() or not folder_path.is_dir():
-        raise NotADirectoryError(f"文件夹不存在或不是目录: {folder}")
+        raise NotADirectoryError(f"文件夹不存在或所在磁盘未连接: {folder}")
     exts = {e.lower() for e in extensions}
     raws = {e.lower() for e in (raw_extensions if raw_extensions is not None else RAW_EXTENSIONS)}
     videos = {
@@ -586,7 +586,20 @@ def _index_one(
             # No ffmpeg, so there is nothing to send: keep it out of the queue
             # rather than failing it on every scan.
             status = "error"
+        # A row that failed before it had a render is not broken any more now
+        # that this pass wrote one: put it back in the queue and drop the stale
+        # message, or the card would keep saying it could not be read.
+        healed = bool(
+            existing
+            and has_picture
+            and status in ("error", "pending")
+            and not existing.get("score")
+        )
+        if healed:
+            status = "pending"
         record = base_record(prepared, existing=existing, status=status)
+        if healed:
+            record["error"] = None
         # Written unconditionally: turning "合并显示实况照片" off has to be able to
         # *clear* a live_path an earlier scan attached.
         record["live_path"] = prepared.live_path
@@ -678,6 +691,48 @@ def _stalled_video_pairs(
         _STALLED_PROBE_STAMPS[key] = stamp
         stalled.append((path, row.get("raw_path")))
     return stalled
+
+
+def _render_is_present(row: dict) -> bool:
+    """True when at least one rendered file for this row is still on disk."""
+    for key in ("thumb_path", "proxy_path"):
+        path = row.get(key)
+        if path and os.path.exists(path):
+            return True
+    return False
+
+
+def _stalled_photo_pairs(
+    folder: str, db: Database, queued: list[tuple[str, str | None]]
+) -> list[tuple[str, str | None]]:
+    """Photos already in the index whose render never got written.
+
+    A copy interrupted by a pulled disk - or an index pass that died halfway -
+    leaves a row behind with no thumbnail or proxy. Its path is already known, so
+    an incremental sync skipped it and the card stayed unopenable for ever, even
+    after the disk came back. These rows are handed to the index phase again so
+    one "同步相册" can finish the job.
+
+    Rows that do have a usable render are left alone: an ordinary model failure
+    also sets ``status='error'``, and re-rendering every one of those on every
+    sync would be work for nothing.
+    """
+    known = {os.path.normcase(canonical_path(path)) for path, _raw in queued}
+    found: list[tuple[str, str | None]] = []
+    for row in db.rows_missing_render(folder):
+        path = row.get("path")
+        # A row whose file is still gone (the disk is not back yet) is not an
+        # index candidate: the next sync will see it again.
+        if not path or not os.path.exists(path):
+            continue
+        key = os.path.normcase(canonical_path(path))
+        if key in known:
+            continue
+        if _render_is_present(row):
+            continue
+        known.add(key)
+        found.append((path, row.get("raw_path")))
+    return found
 
 
 def _inside_cache(path: str, folder: str, config: Config) -> bool:
@@ -987,6 +1042,10 @@ def _scan_worker(
                 for pair in to_index
                 if not (video.looks_like_video(pair[0]) and pair[0] in active_paths)
             ]
+        # An interrupted import leaves rows whose render never got written; the
+        # same healing the rebuild pass does belongs here, so "开始整理" also
+        # finishes a half-done album instead of leaving blank cards behind.
+        to_index.extend(_stalled_photo_pairs(folder, db, to_index))
         # A video whose probe failed - ffmpeg was not installed yet, the file was
         # on a disconnected drive, a codec ffprobe could not read - keeps an
         # empty ``video_info`` and never gets looked at again, because its path
@@ -1220,6 +1279,11 @@ def _rebuild_worker(
                 key = os.path.normcase(canonical_path(pair[0]))
                 if key in stale and key not in known:
                     to_index.append(pair)
+        # A copy interrupted by a pulled disk leaves the row without a render.
+        # Its path is already in the index, so "new files only" skipped it for
+        # ever; now that the disk is back, finish what the interrupted pass
+        # started. This is the fix for blank cards that a sync could not repair.
+        to_index.extend(_stalled_photo_pairs(folder, db, to_index))
         if skip_indexed_videos:
             # Keep the metadata of videos that are already indexed: on a machine
             # without ffmpeg a full redo would otherwise blank them out.

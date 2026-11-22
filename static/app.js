@@ -12,11 +12,7 @@ function init() {
   setSelectValue($("statusFilter"), "analyzed");
   $("folderInput").addEventListener("change", () => {
     const val = $("folderInput").value.trim();
-    if (val) {
-      rememberFolder(val);
-      saveUiState({ folder: val });
-      applyFolderChange(val);
-    }
+    if (val) openAlbumFolder(val);
   });
 
   $("scanBtn").addEventListener("click", startScan);
@@ -191,11 +187,8 @@ function init() {
       return;
     }
     const picked = state.currentDirPath;
-    rememberFolder(picked);
-    saveUiState({ folder: picked });
-    $("folderInput").value = picked;
     closeModal("dirModal");
-    applyFolderChange(picked);
+    openAlbumFolder(picked);
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
@@ -209,6 +202,8 @@ function init() {
     });
   });
   $("cleanCacheBtn").addEventListener("click", cleanCache);
+  $("hideFolderBtn").addEventListener("click", hideCurrentFolder);
+  $("viewHiddenFoldersBtn").addEventListener("click", openHiddenFolders);
   $("removeFolderBtn").addEventListener("click", removeCurrentFolder);
   document.querySelectorAll("#settingsModal .settings-tab").forEach((tab) => {
     tab.addEventListener("click", () => showSettingsTab(tab.dataset.tab));
@@ -340,7 +335,10 @@ function init() {
   // It used to run un-awaited in parallel with `initViews()`, so a deep link to
   // #memories asked the server for "folder = (empty)" - which means every album -
   // and the reader saw a library they had not chosen.
-  const albumReady = loadInitialFolder();
+  //
+  // The hidden list is read first: the boot album must never be a hidden one,
+  // and `selectBestFolder` needs to know which folders to leave out.
+  const albumReady = loadHiddenFolders().then(() => loadInitialFolder());
   // Playback preferences are needed before the first dialog opens, not only
   // when someone visits the settings page.
   loadPlaybackConfig();

@@ -32,7 +32,7 @@ def canonical_folder(path: str | None) -> str:
     """Canonicalise a photo folder, raising when it is not a directory."""
     resolved = canonical_path(path)
     if not resolved or not os.path.isdir(resolved):
-        raise NotADirectoryError(f"文件夹不存在: {resolved or path}")
+        raise NotADirectoryError(f"文件夹不存在或所在磁盘未连接: {resolved or path}")
     return resolved
 
 

@@ -158,12 +158,14 @@ const folderHistoryEntries = new Function(
   "state",
   "folderPathKey",
   `${extract("folderPathKey")}
+   ${extract("isHiddenFolder")}
    ${extract("folderHistoryEntries")}
    return folderHistoryEntries;`
 );
-const historyEntries = (indexed, history) =>
-  folderHistoryEntries({ folderHistory: history }, (p) =>
-    String(p).replace(/[\/\\]+$/, "").toLowerCase()
+const historyEntries = (indexed, history, hidden = []) =>
+  folderHistoryEntries(
+    { folderHistory: history, hiddenFolders: hidden },
+    (p) => String(p).replace(/[\/\\]+$/, "").toLowerCase()
   )(indexed);
 
 // The gallery helpers: what a poll changed, and where a card's thumbnail lives.
@@ -494,6 +496,20 @@ check(
   ["最近+已索引"]
 );
 check("an empty list stays empty", historyEntries([], []), []);
+check(
+  "a hidden album never reaches the dropdown",
+  historyEntries(
+    ["D:/a", "D:/hidden"],
+    ["D:/hidden", "D:/a"],
+    ["D:/hidden"]
+  ).map((e) => e.path),
+  ["D:/a"]
+);
+check(
+  "the marker is not painted for a hidden album",
+  historyEntries(["D:/hidden"], [], ["D:/hidden"]),
+  []
+);
 
 /* ---------------------------------------------------- diffPhotoRows (poll) */
 section("diffPhotoRows - what a background poll changes");
@@ -1557,11 +1573,14 @@ section("cross-view stability");
     true
   );
   check(
-    "the folder input goes through it",
-    // Every album switch takes the shared path, which clears the filters and the
-    // search box before it reloads - otherwise a query written for the previous
-    // album would be re-sent, and a folder change could cost a model request.
-    /applyFolderChange\(val\)/.test(script) &&
+    "the folder input goes through the one album switch",
+    // Every album switch takes the shared path, which knows about hidden
+    // albums, clears the filters and the search box, and only then reloads -
+    // otherwise a query written for the previous album would be re-sent, and a
+    // folder change could cost a model request.
+    /function openAlbumFolder\(folder\)/.test(script) &&
+      /openAlbumFolder\(val\)/.test(script) &&
+      /openAlbumFolder\(picked\)/.test(script) &&
       /function applyFolderChange\(folder\)/.test(script) &&
       /clearFilterControls\(/.test(script),
     true
@@ -1615,6 +1634,57 @@ section("cross-view stability");
   check(
     "empty state distinguishes filter/search miss from an empty folder",
     /没有寻访到相符的回忆/.test(script) && /id="emptyResetFiltersBtn"/.test(htmlDoc),
+    true
+  );
+}
+
+/* ------------------------------------------------------- hidden albums
+   Hiding an album is a visibility decision, not a delete: the album keeps its
+   photos and index, but disappears from every path selector on the main page. */
+section("hidden albums");
+{
+  const html = fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
+
+  const cacheAt = html.indexOf(">清理缓存<");
+  const hideAt = html.indexOf(">隐藏当前目录<");
+  const removeAt = html.indexOf(">移除当前目录<");
+  check(
+    "data management runs cache → hide → remove",
+    cacheAt > -1 && cacheAt < hideAt && hideAt < removeAt,
+    true
+  );
+  check(
+    "the hide row offers both buttons",
+    /id="hideFolderBtn"/.test(html) && /id="viewHiddenFoldersBtn"/.test(html),
+    true
+  );
+  check(
+    "the hidden list dialog exists",
+    /id="hiddenFoldersModal"[\s\S]{0,700}id="hiddenFoldersList"/.test(html) &&
+      /\.hidden-folders-empty \{/.test(css),
+    true
+  );
+  check(
+    "the path field carries a hidden marker",
+    /id="folderHiddenBadge"[^>]*>已隐藏</.test(html) &&
+      /\.folder-hidden-badge \{/.test(css) &&
+      /\.folder-input-wrapper\.has-hidden-badge input/.test(css),
+    true
+  );
+  check(
+    "a hidden album is never saved as the open album",
+    /function isHiddenFolder\(path\)/.test(src) &&
+      /if \(hidden\) \{[\s\S]{0,500}?\} else \{[\s\S]{0,160}?saveUiState\(\{ folder: clean \}\)/.test(
+        src
+      ),
+    true
+  );
+  check(
+    "the hidden list can be opened from the settings row",
+    /viewHiddenFoldersBtn"\)\.addEventListener\("click", openHiddenFolders\)/.test(src) &&
+      /async function openHiddenFolders\(\)/.test(src) &&
+      /function enterHiddenFolder\(folder\)/.test(src),
     true
   );
 }

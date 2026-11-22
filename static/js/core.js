@@ -11,6 +11,10 @@ const state = {
   // next to the album, not in the browser, so clearing site data cannot lose it.
   folder: "",
   folderHistory: [],
+  //: Albums hidden from every path selector. They are opened only from the
+  //: settings panel's hidden list, and never remembered as the open album.
+  hiddenFolders: [],
+  folderHidden: false,
   importSource: "",
   photos: [],
   selected: new Set(),
@@ -142,6 +146,32 @@ function folderPathKey(path) {
   return String(path || "").replace(/[\/]+$/, "").toLowerCase();
 }
 
+/** True when ``path`` is one of the albums hidden from the path selectors. */
+function isHiddenFolder(path) {
+  const key = folderPathKey(path);
+  if (!key) return false;
+  return state.hiddenFolders.some((item) => folderPathKey(item) === key);
+}
+
+/** Load the hidden-album list; a failure just means nothing is hidden. */
+async function loadHiddenFolders() {
+  try {
+    const data = await api("/api/folders/hidden");
+    state.hiddenFolders = Array.isArray(data.folders) ? data.folders : [];
+  } catch (e) {
+    console.warn("加载隐藏目录失败", e);
+    state.hiddenFolders = [];
+  }
+}
+
+/** Show or hide the 「已隐藏」 marker beside the path field. */
+function paintFolderHiddenBadge() {
+  const badge = $("folderHiddenBadge");
+  if (badge) badge.classList.toggle("hidden", !state.folderHidden);
+  const wrapper = document.querySelector(".folder-input-wrapper");
+  if (wrapper) wrapper.classList.toggle("has-hidden-badge", !!state.folderHidden);
+}
+
 /* ==========================================================================
    Photo index
    A long album holds thousands of rows, and almost every interaction needs one
@@ -241,6 +271,8 @@ function saveUiState(patch) {
 function rememberFolder(folder) {
   const clean = String(folder || "").trim();
   if (!clean) return;
+  // A hidden album is never part of the visible history.
+  if (isHiddenFolder(clean)) return;
   state.folderHistory = [
     clean,
     ...state.folderHistory.filter((item) => folderPathKey(item) !== folderPathKey(clean)),
@@ -256,7 +288,9 @@ async function selectBestFolder() {
   } catch (e) {
     folders = [];
   }
-  const candidates = [state.folder, ...state.folderHistory].filter(Boolean);
+  const candidates = [state.folder, ...state.folderHistory]
+    .filter(Boolean)
+    .filter((candidate) => !isHiddenFolder(candidate));
   const chosen =
     candidates.find((candidate) =>
       folders.some((folder) => folderPathKey(folder) === folderPathKey(candidate))
@@ -321,6 +355,9 @@ async function loadInitialFolder() {
   state.folder = await selectBestFolder();
   saveUiState({ folder: state.folder });
   $("folderInput").value = state.folder;
+  // Whatever the stored state says, the boot album is always a visible one.
+  state.folderHidden = isHiddenFolder(state.folder);
+  paintFolderHiddenBadge();
   if (state.folder) {
     await applyDefaultStatusFilter();
     await loadPhotos();

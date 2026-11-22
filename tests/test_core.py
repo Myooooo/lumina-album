@@ -7302,5 +7302,236 @@ class FaviconAndTitleTests(unittest.TestCase):
             self.assertIn("<svg", resp.get_data(as_text=True))
 
 
+class UnfinishedImportHealingTests(unittest.TestCase):
+    """A sync must finish an import that was interrupted half-way.
+
+    The row exists (the copy finished, the index pass did not), so the folder
+    knows the file and an incremental sync used to skip it for ever: the card
+    stayed blank even after the disk came back.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+
+    def tearDown(self) -> None:
+        # The jobs this class starts are awaited in the tests themselves. Do not
+        # sweep the process-wide job registry here: it also holds jobs owned by
+        # other test classes, and waiting on one of those proves nothing.
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _image(self, name: str) -> str:
+        path = os.path.join(self.folder, name)
+        Image.new("RGB", (60, 40), (120, 90, 60)).save(path, "JPEG")
+        return path
+
+    def _unfinished_row(self, name: str, **extra) -> str:
+        path = self._image(name)
+        record = {
+            "path": path,
+            "folder": self.folder,
+            "filename": name,
+            "status": "error",
+            "error": "导入中断，未能生成缩略图",
+        }
+        record.update(extra)
+        self.db.upsert_photo(record)
+        return path
+
+    def test_a_sync_renders_the_photos_an_interrupted_import_left_behind(self) -> None:
+        first = self._unfinished_row("a.jpg")
+        second = self._unfinished_row("b.jpg")
+
+        wait_for_job(start_rebuild_index(self.folder, self.db, self.cfg).id)
+
+        for path in (first, second):
+            row = self.db.get_photo_by_path(path)
+            self.assertTrue(row["thumb_path"], path)
+            self.assertTrue(row["proxy_path"], path)
+            self.assertTrue(os.path.exists(row["thumb_path"]), row["thumb_path"])
+            self.assertTrue(os.path.exists(row["proxy_path"]), row["proxy_path"])
+            # The stale "could not be read" state must not survive the repair.
+            self.assertEqual(row["status"], "pending")
+            self.assertIsNone(row["error"])
+
+    def test_a_photo_that_was_already_analysed_is_not_re_indexed(self) -> None:
+        """A render cleared by 「清理缓存」 is regenerated on demand instead.
+
+        Re-indexing a finished photo would rewrite the EXIF and location that
+        analysis already stored, so the heal pass deliberately leaves it alone.
+        """
+        path = self._image("done.jpg")
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": "done.jpg",
+                "status": "analyzed",
+                "score": 7,
+                "exif": {"make": "Stored"},
+            }
+        )
+
+        wait_for_job(start_rebuild_index(self.folder, self.db, self.cfg).id)
+
+        row = self.db.get_photo_by_path(path)
+        self.assertFalse(row["thumb_path"])
+        self.assertEqual(row["exif"], {"make": "Stored"})
+
+    def test_a_sync_while_the_disk_is_away_keeps_the_rows(self) -> None:
+        path = self._unfinished_row("away.jpg")
+        away = self.folder + "-unplugged"
+        os.rename(self.folder, away)
+        try:
+            # The album path is what the app knows; it is simply not on disk.
+            job = wait_for_job(start_rebuild_index(self.folder, self.db, self.cfg).id)
+            self.assertEqual(job.status, "error")
+            self.assertIn("磁盘", job.error or "")
+            row = self.db.get_photo_by_path(path)
+            self.assertIsNotNone(row, "断开时不能丢掉现有记录")
+            self.assertFalse(row["thumb_path"])
+        finally:
+            os.rename(away, self.folder)
+
+        # The disk is back: one sync finishes the interrupted import.
+        wait_for_job(start_rebuild_index(self.folder, self.db, self.cfg).id)
+        row = self.db.get_photo_by_path(path)
+        self.assertEqual(row["status"], "pending")
+        self.assertTrue(row["thumb_path"])
+        self.assertTrue(os.path.exists(row["thumb_path"]))
+
+
+class HiddenFolderTests(unittest.TestCase):
+    """Hiding an album only changes where it can be reached from."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.parent = os.path.join(self.tmp.name, "photos")
+        self.album = os.path.join(self.parent, "album")
+        self.other = os.path.join(self.parent, "other")
+        os.makedirs(self.album)
+        os.makedirs(self.other)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        for folder, name in ((self.album, "a.jpg"), (self.other, "b.jpg")):
+            path = os.path.join(folder, name)
+            Image.new("RGB", (30, 20), (90, 80, 70)).save(path, "JPEG")
+            self.db.upsert_photo(
+                {
+                    "path": path,
+                    "folder": folder,
+                    "filename": name,
+                    "status": "analyzed",
+                    "score": 6,
+                }
+            )
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def _hide(self, folder: str):
+        return self.client.post("/api/folders/hide", json={"folder": folder})
+
+    def _unhide(self, folder: str):
+        return self.client.post("/api/folders/unhide", json={"folder": folder})
+
+    def test_hiding_keeps_the_album_and_its_rows(self) -> None:
+        resp = self._hide(self.album)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(self._canonical(self.album), resp.get_json()["folders"])
+        self.assertEqual(self.db.stats(self.album)["total"], 1)
+
+    def test_a_hidden_album_leaves_the_path_lists(self) -> None:
+        self._hide(self.album)
+
+        folders = self.client.get("/api/folders").get_json()["folders"]
+        self.assertNotIn(self._canonical(self.album), folders)
+        self.assertIn(self._canonical(self.other), folders)
+
+        hidden = self.client.get("/api/folders/hidden").get_json()["folders"]
+        self.assertEqual(hidden, [self._canonical(self.album)])
+
+        # The folder browser is a path selector too.
+        dirs = self.client.get(
+            "/api/dirs", query_string={"path": self.parent}
+        ).get_json()["directories"]
+        names = [entry["name"] for entry in dirs]
+        self.assertNotIn("album", names)
+        self.assertIn("other", names)
+
+    def test_a_hidden_album_is_never_the_remembered_one(self) -> None:
+        self.client.post(
+            "/api/ui-state",
+            json={
+                "folder": self.album,
+                "folder_history": [self.album, self.other],
+            },
+        )
+        state = self.client.get("/api/ui-state").get_json()["state"]
+        self.assertEqual(len(state["folder_history"]), 2)
+
+        self._hide(self.album)
+        state = self.client.get("/api/ui-state").get_json()["state"]
+        self.assertEqual(state["folder"], "")
+        self.assertEqual(state["folder_history"], [self.other])
+
+        # A late client that still remembers the old path cannot put it back.
+        saved = self.client.post(
+            "/api/ui-state",
+            json={"folder": self.album, "folder_history": [self.album]},
+        ).get_json()["state"]
+        self.assertEqual(saved["folder"], "")
+        self.assertEqual(saved["folder_history"], [])
+
+    def test_unhiding_puts_it_back(self) -> None:
+        self._hide(self.album)
+        resp = self._unhide(self.album)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()["folders"], [])
+        self.assertIn(
+            self._canonical(self.album),
+            self.client.get("/api/folders").get_json()["folders"],
+        )
+
+    def test_the_hidden_list_is_newest_first(self) -> None:
+        self._hide(self.album)
+        self._hide(self.other)
+        hidden = self.client.get("/api/folders/hidden").get_json()["folders"]
+        self.assertEqual(
+            hidden, [self._canonical(self.other), self._canonical(self.album)]
+        )
+
+    def test_hiding_needs_a_folder(self) -> None:
+        self.assertEqual(
+            self.client.post("/api/folders/hide", json={}).status_code, 400
+        )
+
+    def test_removing_the_album_drops_its_hidden_mark(self) -> None:
+        """A removed album must not linger as a dead row in the hidden list."""
+        self._hide(self.album)
+        resp = self.client.post("/api/folder/remove", json={"folder": self.album})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/folders/hidden").get_json()["folders"], []
+        )
+
+    @staticmethod
+    def _canonical(path: str) -> str:
+        from photo_reviewer.paths import canonical_path
+
+        return canonical_path(path)
+
+
 if __name__ == "__main__":
     unittest.main()

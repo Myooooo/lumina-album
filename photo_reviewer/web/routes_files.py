@@ -20,6 +20,9 @@ from ..paths import (
 
 from .helpers import (
     _open_with_system,
+    drop_folder_from_ui_state,
+    hidden_folder_list,
+    set_folder_hidden,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,15 +50,63 @@ def register(app, cfg, database):
         except OSError as exc:
             return jsonify({"error": str(exc)}), 500
         hidden = {cfg.cache_dir_name, cfg.trash_dir_name}
+        # A hidden album is only reachable from the settings panel, so the
+        # browser must not offer it as a path either.
+        hidden_albums = {
+            os.path.normcase(canonical_path(item))
+            for item in hidden_folder_list(database)
+        }
         dirs = []
         for name in entries:
             if name in hidden:
                 continue
             full = os.path.join(path, name)
+            if os.path.normcase(full) in hidden_albums:
+                continue
             if os.path.isdir(full) and not os.path.islink(full):
                 dirs.append({"name": name, "path": full})
         parent = os.path.dirname(path)
         return jsonify({"path": path, "parent": parent, "directories": dirs})
+
+    @app.get("/api/folders/hidden")
+    def api_hidden_folders():
+        """The albums hidden from the main path selectors."""
+        return jsonify({"folders": hidden_folder_list(database)})
+
+    @app.post("/api/folders/hide")
+    def api_hide_folder():
+        """Hide one album from the main path selectors.
+
+        Nothing on disk and no index row is touched: the album keeps its photos,
+        scores and cache, it is just not offered as a path any more. It stays
+        reachable from the settings panel's hidden list.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        folder = str(data.get("folder") or "").strip()
+        if not folder:
+            return jsonify({"error": "请提供文件夹路径"}), 400
+        try:
+            folders = set_folder_hidden(database, folder, True)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        resolved = canonical_path(folder)
+        # A refresh must land on the last visible album, and the history
+        # dropdown must not offer this one: drop it from the remembered state.
+        drop_folder_from_ui_state(database, resolved)
+        return jsonify({"folders": folders, "folder": resolved})
+
+    @app.post("/api/folders/unhide")
+    def api_unhide_folder():
+        """Bring one album back to the main path selectors."""
+        data = request.get_json(force=True, silent=True) or {}
+        folder = str(data.get("folder") or "").strip()
+        if not folder:
+            return jsonify({"error": "请提供文件夹路径"}), 400
+        try:
+            folders = set_folder_hidden(database, folder, False)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"folders": folders})
 
     @app.post("/api/open-folder")
     def api_open_folder():

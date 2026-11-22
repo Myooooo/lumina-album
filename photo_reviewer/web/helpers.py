@@ -209,6 +209,82 @@ def _normalize_folder(path: str) -> str:
     return canonical_folder(path)
 
 
+#: ui_state key holding the albums the main path selectors must not offer.
+HIDDEN_FOLDERS_KEY = "hidden_folders"
+
+
+def hidden_folder_list(database: Database) -> list[str]:
+    """Albums the reader hid from the main path selectors, newest first."""
+    raw = database.get_ui_state().get(HIDDEN_FOLDERS_KEY)
+    if not isinstance(raw, list):
+        return []
+    folders: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        resolved = canonical_path(text)
+        key = os.path.normcase(resolved)
+        if not resolved or key in seen:
+            continue
+        seen.add(key)
+        folders.append(resolved)
+    return folders
+
+
+def is_hidden_folder(database: Database, folder: str | None) -> bool:
+    """True when ``folder`` is one of the hidden albums."""
+    if not folder:
+        return False
+    key = os.path.normcase(canonical_path(folder))
+    return any(
+        os.path.normcase(item) == key for item in hidden_folder_list(database)
+    )
+
+
+def set_folder_hidden(
+    database: Database, folder: str, hidden: bool
+) -> list[str]:
+    """Hide or unhide one album, returning the new hidden list (newest first)."""
+    resolved = canonical_path(folder)
+    if not resolved:
+        raise ValueError("文件夹路径不合法")
+    key = os.path.normcase(resolved)
+    kept = [
+        item for item in hidden_folder_list(database) if os.path.normcase(item) != key
+    ]
+    if hidden:
+        kept.insert(0, resolved)
+    database.save_ui_state({HIDDEN_FOLDERS_KEY: kept})
+    return kept
+
+
+def drop_folder_from_ui_state(database: Database, folder: str) -> None:
+    """Forget ``folder`` as the remembered album and in the history.
+
+    Called when an album is hidden: the next page load must land on the last
+    *visible* album, and the history dropdown must not offer the hidden one.
+    """
+    key = os.path.normcase(canonical_path(folder))
+    state = database.get_ui_state()
+    patch: dict[str, Any] = {}
+    remembered = state.get("folder")
+    if isinstance(remembered, str) and os.path.normcase(canonical_path(remembered)) == key:
+        patch["folder"] = ""
+    history = state.get("folder_history")
+    if isinstance(history, list):
+        kept = [
+            item
+            for item in history
+            if os.path.normcase(canonical_path(str(item))) != key
+        ]
+        if len(kept) != len(history):
+            patch["folder_history"] = kept
+    if patch:
+        database.save_ui_state(patch)
+
+
 def _as_bool(value: Any, default: bool = False) -> bool:
     """Read a checkbox value that may arrive as a real bool or a string."""
     if value is None:

@@ -38,6 +38,7 @@ from .helpers import (
     _cached_years,
     _job_payload,
     _normalize_folder,
+    hidden_folder_list,
 )
 
 
@@ -205,4 +206,18 @@ def register(app, cfg, database):
 
     @app.get("/api/folders")
     def api_folders():
-        return jsonify({"folders": database.all_folders()})
+        """Indexed albums, most recently active first.
+
+        Hidden albums are left out: everything that uses this list is a path
+        selector on the main page, and a hidden album is only reachable from the
+        settings panel's hidden list.
+        """
+        hidden = {
+            os.path.normcase(item) for item in hidden_folder_list(database)
+        }
+        folders = [
+            folder
+            for folder in database.all_folders()
+            if os.path.normcase(folder) not in hidden
+        ]
+        return jsonify({"folders": folders})

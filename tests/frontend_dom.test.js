@@ -103,6 +103,7 @@ const API = {
   "/api/prompt-presets": { presets: {}, default: "playful" },
   "/api/video/status": { available: true, extensions: [], version: "" },
   "/api/folders": { folders: ["E:\\album"] },
+  "/api/folders/hidden": { folders: ["E:\\album-hidden"] },
 };
 
 async function main() {
@@ -152,7 +153,9 @@ async function main() {
   window.scrollTo = () => {};
   window.HTMLElement.prototype.scrollIntoView = () => {};
 
-  window.fetch = async (url) => {
+  const calls = [];
+  window.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), body: options.body || "" });
     const key = String(url).split("?")[0];
     const body = API[key] ?? {};
     return {
@@ -194,6 +197,35 @@ async function main() {
   check("the thumbnail URL is content-addressed", /\/api\/thumbnail\/1/.test(thumbUrl), true);
   check("the thumbnail URL carries the version token", /v1/.test(thumbUrl), true);
 
+  // --- hidden albums ----------------------------------------------------
+  const badge = document.getElementById("folderHiddenBadge");
+  check("a visible album carries no hidden marker", badge.classList.contains("hidden"), true);
+
+  window.openAlbumFolder("E:\\album-hidden");
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+  check("opening a hidden album shows the marker", badge.classList.contains("hidden"), false);
+  check(
+    "the path field names the hidden album",
+    document.getElementById("folderInput").value,
+    "E:\\album-hidden"
+  );
+  check(
+    "hidden albums stay out of the history dropdown",
+    window.folderHistoryEntries(["E:\\album", "E:\\album-hidden"]).map((entry) => entry.path),
+    ["E:\\album"]
+  );
+  check(
+    "a hidden album is never saved as the current album",
+    calls.filter(
+      (call) => call.url === "/api/ui-state" && call.body.includes("album-hidden")
+    ).length,
+    0
+  );
+
+  window.openAlbumFolder("E:\\album");
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+  check("the marker clears on a visible album", badge.classList.contains("hidden"), true);
+
   // --- toast: text, never markup -----------------------------------------
   window.LuminaUI.showToast('<img src=x onerror="window.__pwned = 1">', "warning");
   const toast = document.querySelector("#toastContainer .toast");
@@ -211,7 +243,6 @@ async function main() {
     Number(edit.style.zIndex) > Number(settings.style.zIndex),
     true
   );
-
   window.LuminaUI.hideModal(edit);
   window.LuminaUI.hideModal(settings);
   check("closing a dialog releases its inline layer", settings.style.zIndex, "");

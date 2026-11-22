@@ -56,6 +56,7 @@ from .helpers import (
     _trash_only,
     _trashed_live_candidate,
     _trashed_raw_candidate,
+    set_folder_hidden,
 )
 
 from datetime import date
@@ -316,6 +317,12 @@ def register(app, cfg, database):
             if existing.folder == folder and existing.status == "running":
                 return jsonify({"error": "该文件夹正在整理中，请稍后再试"}), 409
         removed = database.remove_folder(folder)
+        # The album is gone from the library, so a "hidden" mark on it would
+        # only leave a dead row in the hidden list; drop it with the index.
+        try:
+            set_folder_hidden(database, folder, False)
+        except ValueError:
+            pass
         # The folder is no longer indexed, so it is no longer a camera album
         # either; forgetting the pairing drops queued card work with it. No file
         # on the card is touched by this.

@@ -28,12 +28,15 @@ from ..geocode import (
     reverse_geocode,
 )
 
+from ..paths import canonical_path
+
 from .constants import (
     UI_STATE_HISTORY_LIMIT,
 )
 
 from .helpers import (
     _save_settings_to_db,
+    hidden_folder_list,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,8 +57,29 @@ def register(app, cfg, database):
         live in ``localStorage``, so clearing the browser's site data threw the
         album's memory away. They are kept in the database instead, next to the
         photos they describe.
+
+        Hidden albums are stripped here as well as in ``/api/folders``: the
+        history is a path selector too, and a refresh must never open one.
         """
-        return jsonify({"state": database.get_ui_state()})
+        state = database.get_ui_state()
+        hidden = {
+            os.path.normcase(canonical_path(item))
+            for item in hidden_folder_list(database)
+        }
+        history = state.get("folder_history")
+        if isinstance(history, list):
+            state["folder_history"] = [
+                item
+                for item in history
+                if isinstance(item, str)
+                and os.path.normcase(canonical_path(item)) not in hidden
+            ]
+        remembered = state.get("folder")
+        if isinstance(remembered, str) and os.path.normcase(
+            canonical_path(remembered)
+        ) in hidden:
+            state["folder"] = ""
+        return jsonify({"state": state})
 
     @app.post("/api/ui-state")
     def api_save_ui_state():
@@ -70,9 +94,18 @@ def register(app, cfg, database):
         if not isinstance(data, dict):
             return jsonify({"error": "请求内容不合法"}), 400
         staged: dict[str, Any] = {}
+        hidden = {
+            os.path.normcase(canonical_path(item))
+            for item in hidden_folder_list(database)
+        }
 
         if "folder" in data:
-            staged["folder"] = str(data["folder"] or "").strip()[:512]
+            value = str(data["folder"] or "").strip()[:512]
+            # A hidden album is never the remembered one: the next refresh has
+            # to land back on the last visible album.
+            if value and os.path.normcase(canonical_path(value)) in hidden:
+                value = ""
+            staged["folder"] = value
 
         if "folder_history" in data:
             raw = data["folder_history"]
@@ -83,6 +116,8 @@ def register(app, cfg, database):
             for item in raw:
                 text = str(item or "").strip()[:512]
                 if not text:
+                    continue
+                if os.path.normcase(canonical_path(text)) in hidden:
                     continue
                 key = os.path.normcase(text.rstrip("\\/"))
                 if key in seen:

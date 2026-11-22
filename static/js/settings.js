@@ -43,6 +43,10 @@ function resetFilters() {
  */
 async function applyFolderChange(folder) {
   state.folder = folder || "";
+  // The badge belongs to the album that is actually open, so it is painted
+  // before anything is awaited.
+  state.folderHidden = isHiddenFolder(state.folder);
+  paintFolderHiddenBadge();
   // A new album's default status filter is derived from what it actually holds,
   // so the controls are cleared before that answer is known - then corrected.
   clearFilterControls({ status: "all" });
@@ -515,6 +519,127 @@ async function removeCurrentFolder() {
   }
 }
 
+/** Hide the open album from every main-page path selector. */
+async function hideCurrentFolder() {
+  const folder = state.folder || $("folderInput").value.trim();
+  if (!folder) {
+    showToast("请先选择一个照片文件夹", "error");
+    return;
+  }
+  if (isHiddenFolder(folder)) {
+    showToast("这个目录已经隐藏了。", "info");
+    return;
+  }
+  const ok = await confirmDialog(
+    `隐藏「${folder}」吗？\n隐藏后它不会出现在主页的路径选择里，只能从「设置 → 数据管理 → 查看隐藏的目录」进入。照片、评分与缓存都会保留。`,
+    { title: "隐藏当前目录", confirmText: "隐藏" }
+  );
+  if (!ok) return;
+  try {
+    const data = await api("/api/folders/hide", {
+      method: "POST",
+      body: JSON.stringify({ folder }),
+    });
+    state.hiddenFolders = Array.isArray(data.folders) ? data.folders : [];
+    state.folderHistory = state.folderHistory.filter(
+      (item) => !isHiddenFolder(item)
+    );
+    // The album that was open just left the visible world: move to the last
+    // album that is still visible, and remember *that* one for the next boot.
+    const next = await selectBestFolder();
+    if (!next) {
+      // No visible album left. Show the empty state rather than letting the
+      // gallery fall back to "every album", which would put the photos that
+      // were just hidden back on screen.
+      state.folder = "";
+      state.folderHidden = false;
+      $("folderInput").value = "";
+      saveUiState({ folder: "" });
+      indexPhotos([]);
+      renderGallery();
+      updateSelectionBar();
+      loadStats();
+      loadTags();
+      loadYears();
+      paintFolderHiddenBadge();
+      showToast("已隐藏这个目录，现在没有其他可见目录。", "success");
+      return;
+    }
+    state.folder = next;
+    $("folderInput").value = next;
+    saveUiState({ folder: next });
+    await applyFolderChange(next);
+    showToast("已隐藏这个目录，可以从设置面板重新进入。", "success");
+  } catch (e) {
+    showToast("隐藏目录失败：" + e.message, "error");
+  }
+}
+
+/** Build the rows of the hidden-album dialog. */
+function renderHiddenFolders() {
+  const list = $("hiddenFoldersList");
+  if (!list) return;
+  if (!state.hiddenFolders.length) {
+    list.innerHTML = '<div class="hidden-folders-empty">还没有隐藏的目录。</div>';
+    return;
+  }
+  list.innerHTML = state.hiddenFolders
+    .map(
+      (folder) => `
+      <div class="hidden-folder-row">
+        <button type="button" class="hidden-folder-open" data-enter="${escapeHtml(folder)}" title="${escapeHtml(folder)}">
+          ${ICONS.folder || ""}<span>${escapeHtml(folder)}</span>
+        </button>
+        <button type="button" class="btn small hidden-folder-unhide" data-unhide="${escapeHtml(folder)}">取消隐藏</button>
+      </div>`
+    )
+    .join("");
+  list.querySelectorAll("[data-enter]").forEach((btn) => {
+    btn.addEventListener("click", () => enterHiddenFolder(btn.dataset.enter));
+  });
+  list.querySelectorAll("[data-unhide]").forEach((btn) => {
+    btn.addEventListener("click", () => unhideFolder(btn.dataset.unhide));
+  });
+}
+
+/** Open the hidden-album list from the settings panel. */
+async function openHiddenFolders() {
+  await loadHiddenFolders();
+  renderHiddenFolders();
+  showModal($("hiddenFoldersModal"));
+  pushModal($("hiddenFoldersModal"));
+}
+
+/** Leave the settings panel and open a hidden album, marker included. */
+function enterHiddenFolder(folder) {
+  closeModal("hiddenFoldersModal");
+  closeModal("settingsModal");
+  showView("album");
+  openAlbumFolder(folder);
+  showToast(`已进入隐藏目录：${folder}`, "info");
+}
+
+/** Bring an album back to the normal path selectors. */
+async function unhideFolder(folder) {
+  try {
+    const data = await api("/api/folders/unhide", {
+      method: "POST",
+      body: JSON.stringify({ folder }),
+    });
+    state.hiddenFolders = Array.isArray(data.folders) ? data.folders : [];
+    renderHiddenFolders();
+    if (state.folder && folderPathKey(state.folder) === folderPathKey(folder)) {
+      state.folderHidden = false;
+      paintFolderHiddenBadge();
+      rememberFolder(state.folder);
+      saveUiState({ folder: state.folder });
+    }
+    showToast("已取消隐藏，它会重新出现在路径选择里。", "success");
+  } catch (e) {
+    showToast("取消隐藏失败：" + e.message, "error");
+  }
+}
+
 async function emptyTrash() {
   const scope = state.folder ? "当前目录" : "全部目录";
   const answer = await confirmDialog(
@@ -584,6 +709,9 @@ async function loadDirList(path) {
       list.appendChild(li);
     }
     for (const dir of data.directories) {
+      // Hidden albums are not offered as a path anywhere on the main page; the
+      // settings panel's hidden list is the way back in.
+      if (isHiddenFolder(dir.path)) continue;
       const li = document.createElement("li");
       li.innerHTML = `${ICONS.folder || ""} <span>${escapeHtml(dir.name)}</span>`;
       li.dataset.path = dir.path;

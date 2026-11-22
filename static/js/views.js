@@ -1263,8 +1263,9 @@ function folderHistoryEntries(indexed) {
     byKey.set(key, entry);
     entries.push(entry);
   };
-  push(state.folderHistory[0], "最近");
-  (indexed || []).forEach((f) => push(f, "已索引"));
+  const visible = (path) => path && !isHiddenFolder(path);
+  push(state.folderHistory.find(visible), "最近");
+  (indexed || []).filter(visible).forEach((f) => push(f, "已索引"));
   return entries;
 }
 
@@ -1312,16 +1313,39 @@ async function toggleFolderHistory() {
   $("folderHistoryBtn").setAttribute("aria-expanded", "true");
 }
 
-/** Switch the album to ``folder`` and remember the choice server-side. */
-function selectFolder(folder) {
+/**
+ * Switch the album to ``folder``.
+ *
+ * This is the one path every album change takes. A hidden album - opened from
+ * the settings panel's hidden list, or typed into the path field - gets its
+ * 「已隐藏」 marker and is never remembered as the open album: a refresh or a
+ * backend restart has to land back on the last visible one.
+ */
+function openAlbumFolder(folder) {
   const clean = String(folder || "").trim();
   if (!clean) return;
-  rememberFolder(clean);
-  saveUiState({ folder: clean });
+  const hidden = isHiddenFolder(clean);
+  state.folderHidden = hidden;
   $("folderInput").value = clean;
+  paintFolderHiddenBadge();
+  if (hidden) {
+    // Keep it out of the in-memory history too: the dropdown is a path
+    // selector, and hidden albums do not belong there.
+    state.folderHistory = state.folderHistory.filter(
+      (item) => folderPathKey(item) !== folderPathKey(clean)
+    );
+  } else {
+    rememberFolder(clean);
+    saveUiState({ folder: clean });
+  }
   // Goes through the shared path so the filters and the search box are cleared
   // first: a query written for the previous album must not be re-sent.
   applyFolderChange(clean);
+}
+
+/** Switch the album to ``folder``; the dropdown only offers visible albums. */
+function selectFolder(folder) {
+  openAlbumFolder(folder);
 }
 
 async function openFolder() {
