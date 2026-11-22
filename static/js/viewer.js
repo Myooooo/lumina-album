@@ -656,7 +656,7 @@ function hideLiveButton() {
 function closeModal(id, onHidden) {
   hideModal($(id), onHidden);
   // Keep the open-order stack honest however the dialog was dismissed - the ×
-  // button, Escape, a backdrop click or a code path like "cancelling the folder
+  // button, Escape or a code path like "cancelling the folder
   // browser returns to the import sheet".
   const at = state.modalStack.lastIndexOf(id);
   if (at !== -1) state.modalStack.splice(at, 1);

@@ -37,6 +37,35 @@ DIMENSION_KEYS = ("technical", "memory", "uniqueness")
 #: A dimension older builds stored and the prompt no longer asks for.
 LEGACY_DIMENSION_KEYS = ("composition",)
 
+#: Long, specific model tags mapped to the high-level two-character vocabulary
+#: the gallery is designed around. Anything else is cut to its first two
+#: characters, which keeps a tag like 「清晨光影」 from becoming a whole phrase.
+TAG_ALIASES = {
+    "城市景观": "城市",
+    "城市风光": "城市",
+    "城市天际线": "城市",
+    "建筑摄影": "建筑",
+    "建筑层次": "建筑",
+    "清晨光影": "清晨",
+    "住宅区": "城市",
+    "居住区": "城市",
+    "居家生活": "日常",
+    "人宠互动": "宠物",
+    "自然抓拍": "日常",
+    "温馨瞬间": "温馨",
+    "亲密时刻": "亲密",
+    "家常餐桌": "家常",
+    "手工饺子": "美食",
+    "家常饭菜": "家常",
+    "热气腾腾": "美食",
+    "团圆饭": "节日",
+    "生活记录": "日常",
+    "暖色调": "暖色",
+    "街头摄影": "街拍",
+    "人像摄影": "人像",
+    "风景摄影": "风景",
+}
+
 #: Markers of the fixed blocks older builds appended to a prompt. They are kept
 #: so a prompt saved by one of those builds can be reduced to its editable part.
 ANTI_AI_MARKER = "【写作要求：说人话】"
@@ -59,6 +88,7 @@ WORDING_RULES = """{style}
 不管前面怎么说，下面几条必须遵守：
 写一句照片背面的小字，不要描述画面里有什么。
 只写看到它时心里冒出来的一句话，20 个字以内。
+只输出这句话本身：不要“背面小字：”“背面写着”“心里话：”这类标签，不要日期、地点、人名，不要换行。
 不要用“这一刻、仿佛、时间、温柔、治愈、岁月、人间烟火、美好、时光”这些词。
 不编照片里没有的人名、地点、日期。
 
@@ -86,15 +116,15 @@ STYLE_TEMPLATE = (
 #: in a separate call, and a long persona starts reading like an instruction to
 #: describe the picture.
 STYLE_DESCRIPTIONS = {
-    "playful": "用打趣的口吻写，允许夸张、允许损一句，但不刻薄。",
+    "playful": "用朋友群里打趣的口吻写，允许夸张、允许损一句，但不刻薄，像一位多年的老友。不要拿身份、收入、身体状况开玩笑。",
     "literary": (
         "用文艺摄影师的口吻写，像一本安静而有质感的摄影杂志。"
         "句子干净、克制、有留白，像给照片配一行诗；写一个意象、一点情绪，或一句没头没尾的话。"
         "不要复述画面里有什么，也不要解释意义。"
     ),
-    "humorous": "用一本正经的吐槽口吻写，不要解释笑点。",
-    "warm": "用关心人的口吻写，像对家里人说话，别腻。",
-    "melancholy": "用舍不得的口吻写，收着一点，不煽情。",
+    "humorous": "用一本正经的吐槽口吻写，找一个画面里反常、好笑或别扭的点，像讲冷笑话，不解释笑点。不要编日期、天气、保质期、价格这类事实。",
+    "warm": "像家里人看到这张照片时随口说的一句关心或日常话，语气软，不总结，不煽情。只根据照片里看得见的东西说，不要编搬家、过年、年龄、生日这类具体经历。",
+    "melancholy": "像翻到旧照片时停了一下：写一句舍不得，或想起某个人、某个时刻的话；收着一点，不哭诉，不总结。不要编具体年份、地点、人名。",
 }
 
 
@@ -111,6 +141,24 @@ def build_style_prompt(style: str) -> str:
 DEFAULT_STYLE_PROMPT = build_style_prompt("playful")
 
 PROMPT_PRESETS = {name: build_style_prompt(name) for name in STYLE_DESCRIPTIONS}
+
+#: If the wording call cannot produce even one usable line after retries, a
+#: neutral human line is better than marking the photo failed. It is still a
+#: reaction, not a caption.
+FALLBACK_WORDINGS = {
+    "playful": "这张有点意思。",
+    "literary": "留个念想。",
+    "humorous": "这张值得笑一下。",
+    "warm": "看着就挺暖的。",
+    "melancholy": "有些日子，过去了才想起来。",
+}
+
+
+def _fallback_wording(user_prompt: str | None) -> str:
+    for name, preset in PROMPT_PRESETS.items():
+        if user_prompt == preset:
+            return FALLBACK_WORDINGS[name]
+    return "留个念想。"
 
 
 def strip_fixed_sections(prompt: str | None) -> str:
@@ -166,7 +214,8 @@ def build_scoring_prompt(user_prompt: str | None = None) -> str:
     _style, criteria = split_editable_prompt(user_prompt)
     return f"""给这张照片打分、打标签、起标题。不要写简评。
 标题 2-6 个字，不要只写物体或地点，也不要用“温馨、安静、美好、时光、岁月、无声、静默”这类词，不要用“……的瞬间”“……的时光”“……的陪伴”这类短语；像一句小字的题目。
-tags 用 2-4 个简短中文词，不要长短语。
+tags 用 2-3 个两字的高层标签，例如：人像、合影、自拍、宠物、风景、天空、晚霞、日出、夜景、城市、建筑、街道、海边、山、湖、花、美食、家常、旅行、日常、节日、复古、黑白。
+不要写“手工饺子”“城市景观”“清晨光影”这种长短语；每个标签尽量 2 个字。
 评分标准：
 {criteria}
 
@@ -184,7 +233,7 @@ tags 用 2-4 个简短中文词，不要长短语。
 }}
 要求：
 - 只输出这个 JSON 对象本身，第一个字符是 {{，最后一个字符是 }}。
-- tags 是 2-4 个简短中文词的数组，不带 #，不是句子，不能为空。
+- tags 是 2-3 个简短中文词的数组，每个尽量两个字，不带 #，不是句子，不能为空。
 - score 和 dimensions 的三项都是数字，不是字符串，取值 0-10。
 - title、tags 用简体中文。"""
 
@@ -393,13 +442,23 @@ def _clean_wording(content: Any) -> str:
     """Turn whatever the wording call returned into one usable sentence.
 
     The model is asked for the sentence alone, but small models sometimes wrap
-    it in a code fence, a label (``简评：``), or a title line. Those are peeled
-    off; a JSON object or an empty answer is treated as a failure and retried.
+    it in a code fence, a label (``简评：`` / ``背面写着``), a date, or a title
+    line. Those are peeled off; an empty answer is treated as a failure and
+    retried.
     """
     text = str(content or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[A-Za-z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text).strip()
+    # Small models often pack several labelled fragments into one JSON string:
+    # "背面小字：2014年冬… 心里话：她…". Keep the last labelled fragment, which
+    # is the actual sentence; a date-only fragment is rejected below.
+    label_re = re.compile(
+        r"(?:简评|评论|背面小字|背面的小字|背面写着|照片背面|照片说明|图片说明|心里话|心里冒出的话|小字)\s*[：:]"
+    )
+    if label_re.search(text):
+        parts = [part.strip() for part in label_re.split(text) if part.strip()]
+        text = parts[-1] if parts else ""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     labels = (
         "简评",
@@ -421,31 +480,38 @@ def _clean_wording(content: Any) -> str:
             continue
         if line.lower().startswith(("caption", "photo credit")):
             continue
-        if line.startswith(("拍摄于", "摄于")):
-            continue
         if line.startswith(("标题：", "标题:")):
             continue
-        # A label on its own line ("背面小字：") is not the sentence.
         if line.rstrip("：:").strip() in labels:
             continue
-        # A label and the sentence on the same line.
         for label in labels:
             if line.startswith(label):
-                parts = re.split(r"[:：]", line, maxsplit=1)
-                if len(parts) == 2:
-                    line = parts[1].strip()
+                line = line[len(label) :].lstrip("：: ").strip()
                 break
-        # A date is invented metadata, not a comment.
-        if re.match(r"^\d{4}\s*年", line) or re.match(
+        line = line.strip().strip("“”‘’\"'").strip()
+        if not line:
+            continue
+        if line.startswith(("拍摄于", "摄于")):
+            continue
+        date_prefix = re.match(r"^\d{4}\s*年[^，,。；;]*[，,、]\s*", line)
+        numeric_prefix = re.match(
+            r"^\d{1,4}\s*[-./]\s*\d{1,2}(?:\s*[^，,。；;]*)?[，,、]\s*", line
+        )
+        if date_prefix:
+            line = line[date_prefix.end() :].strip()
+        elif numeric_prefix:
+            line = line[numeric_prefix.end() :].strip()
+        elif re.match(r"^\d{4}\s*年", line) or re.match(
             r"^\d{1,4}\s*[-./]\s*\d{1,2}", line
         ):
             continue
-        line = line.strip().strip("“”\"'")
+        if re.match(r"^[\u4e00-\u9fa5]{0,6}(晴|雨|阴|雪|多云)$", line):
+            continue
         line = re.sub(r"^[*#>\s]+", "", line).strip()
         if line:
             picked = line
             break
-    picked = re.sub(r"\s+", " ", picked)
+    picked = re.sub(r"\s+", " ", picked).strip()
     if not picked or picked.startswith(("{", "[")):
         return ""
     return picked[:60]
@@ -487,26 +553,33 @@ def _request_wording(
     corrective: str = "",
 ) -> str:
     """Ask for the one-line comment; the only call that writes prose."""
+    system_prompt = build_wording_prompt(config.system_prompt) + "\n\n" + WORDING_FORMAT
     if corrective:
-        instruction = (
+        first_instruction = (
             f"上一句“{corrective}”只是在描述画面。"
             "重写一句：不要罗列画面，写一个意象或感受。只输出一句话。"
         )
     else:
-        instruction = "只输出一句话。"
+        first_instruction = "只输出一句话。"
     if metadata:
-        instruction = f"{instruction}\n{metadata}"
-    payload = {
-        "model": config.model,
-        "messages": _image_messages(
-            build_wording_prompt(config.system_prompt) + "\n\n" + WORDING_FORMAT, proxy_path, instruction
-        ),
-        "temperature": 0.5,
-        "max_tokens": 160,
-    }
+        first_instruction = f"{first_instruction}\n{metadata}"
+    retry_instruction = (
+        "上一句只有标签或日期，没有简评。只写一句感受或意象，"
+        "不要标签、日期、标题，直接输出 JSON。"
+    )
+    if metadata:
+        retry_instruction = f"{retry_instruction}\n{metadata}"
+
     parse_retries = max(0, int(getattr(config, "model_retries", 2) or 2))
     last_error: Exception | None = None
     for attempt in range(parse_retries + 1):
+        instruction = first_instruction if attempt == 0 else retry_instruction
+        payload = {
+            "model": config.model,
+            "messages": _image_messages(system_prompt, proxy_path, instruction),
+            "temperature": 0.5,
+            "max_tokens": 160,
+        }
         resp = _post_chat_completion(
             payload,
             config,
@@ -588,7 +661,10 @@ def analyze_image(
     instead of captions with the same 9B model.
     """
     metadata = _metadata_text(context)
-    wording = _request_wording(proxy_path, config, metadata)
+    try:
+        wording = _request_wording(proxy_path, config, metadata)
+    except RuntimeError:
+        wording = _fallback_wording(config.system_prompt)
     if _looks_like_description(wording, config):
         try:
             rewritten = _request_wording(
@@ -823,6 +899,19 @@ def _validate_result(
     if not tags:
         raise RuntimeError("tags 为空")
 
+    # Keep the gallery vocabulary high-level: two characters, no duplicates.
+    compact_tags: list[str] = []
+    for tag in tags:
+        compact = re.sub(r"\s+", "", str(tag)).lstrip("#")
+        if not compact:
+            continue
+        compact = TAG_ALIASES.get(compact, compact[:2])
+        if compact not in compact_tags:
+            compact_tags.append(compact)
+    tags = compact_tags
+    if not tags:
+        raise RuntimeError("tags 为空")
+
     title = str(result.get("title") or "").strip()
     if not title:
         raise RuntimeError("title 为空")
@@ -834,7 +923,7 @@ def _validate_result(
 
     result["score"] = max(0.0, min(10.0, score))
     result["title"] = title[:40]
-    result["tags"] = tags[:5]
+    result["tags"] = tags[:4]
     if require_comment:
         result["reason"] = comment[:200]
         result["comment"] = comment[:200]

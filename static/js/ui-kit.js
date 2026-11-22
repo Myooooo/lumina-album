@@ -331,13 +331,11 @@ window.LuminaUI = (() => {
         if (okBtn) okBtn.removeEventListener("click", onOk);
         if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
         if (closeBtn) closeBtn.removeEventListener("click", onCancel);
-        modal.removeEventListener("click", onOverlay);
         document.removeEventListener("keydown", onKey);
       }
 
       function onOk() { const value = result(true); cleanup(); resolve(value); }
       function onCancel() { const value = result(false); cleanup(); resolve(value); }
-      function onOverlay(e) { if (e.target === modal) onCancel(); }
       function onKey(e) {
         // Escape is the reflex for "not this" and every other dialog in the app
         // answers it; this one used to require aiming at the × button.
@@ -350,7 +348,6 @@ window.LuminaUI = (() => {
       if (okBtn) okBtn.addEventListener("click", onOk);
       if (cancelBtn) cancelBtn.addEventListener("click", onCancel);
       if (closeBtn) closeBtn.addEventListener("click", onCancel);
-      modal.addEventListener("click", onOverlay);
       document.addEventListener("keydown", onKey);
       activeConfirm = onCancel;
       showModal(modal);

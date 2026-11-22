@@ -293,6 +293,23 @@ async function main() {
   document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   check("a second Escape closes the next dialog", settings.classList.contains("hidden"), true);
 
+  // --- a backdrop click never dismisses a dialog ------------------------
+  window.LuminaUI.showModal(settings);
+  window.pushModal(settings);
+  settings.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  check(
+    "clicking the backdrop leaves the dialog open",
+    settings.classList.contains("hidden"),
+    false
+  );
+  settings.querySelector(".modal-close").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 260));
+  check(
+    "the close button still closes it",
+    settings.classList.contains("hidden"),
+    true
+  );
+
   // --- empty state ------------------------------------------------------
   window.openAlbumFolder("E:\\empty");
   await new Promise((resolve) => window.setTimeout(resolve, 120));

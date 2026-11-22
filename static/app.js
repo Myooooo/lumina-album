@@ -281,23 +281,9 @@ function init() {
     e.preventDefault();
     closeModal(topmost);
   });
-  document.querySelectorAll(".modal").forEach((modal) => {
-    // The confirm dialog handles its own backdrop: it is a promise, and hiding
-    // it without resolving would leave the caller waiting for ever. Binding the
-    // generic handler here as well meant one click ran both paths.
-    if (modal.id === "confirmModal") return;
-    modal.addEventListener("click", (e) => {
-      if (e.target !== modal) return;
-      if (state.importPickPending && modal.id === "dirModal") {
-        state.importPickPending = false;
-        closeModal("dirModal");
-        showModal($("importModal"));
-        pushModal($("importModal"));
-        return;
-      }
-      closeModal(modal.id);
-    });
-  });
+  // A dialog is closed only by its own close/confirm/cancel controls. Clicking
+  // the dimmed area around it must not discard a half-written edit or a
+  // settings change by accident; there is intentionally no backdrop handler.
   document.addEventListener("click", (e) => {
     if (
       !e.target.closest("#folderHistoryBtn") &&

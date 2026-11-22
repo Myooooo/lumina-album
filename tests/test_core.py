@@ -463,6 +463,19 @@ class ApiClientTests(unittest.TestCase):
         self.assertEqual(result["reason"], "风很大。")
         self.assertEqual(result["dimensions"]["memory"], 8.0)
 
+    def test_tags_are_high_level_two_characters(self) -> None:
+        from photo_reviewer.api_client import _validate_result
+
+        result = {
+            "score": 7,
+            "title": "标题",
+            "dimensions": {"technical": 7, "memory": 7, "uniqueness": 7},
+            "tags": ["城市景观", "清晨光影", "城市风光", "手工饺子", "人像摄影"],
+            "comment": "风很大。",
+        }
+        _validate_result(result)
+        self.assertEqual(result["tags"], ["城市", "清晨", "美食", "人像"])
+
     def test_parse_fenced_and_bare_json(self) -> None:
         self.assertEqual(_parse_model_json('```json\n{"a": 1}\n```'), {"a": 1})
         self.assertEqual(_parse_model_json('{"a": 1}'), {"a": 1})
@@ -576,7 +589,9 @@ class ApiClientTests(unittest.TestCase):
         self.assertEqual(_clean_wording("标题：海边\n简评：风很大。"), "风很大。")
         self.assertEqual(_clean_wording("**简评：** 风很大。"), "风很大。")
         self.assertEqual(_clean_wording("背面小字：\n风很大。"), "风很大。")
-        self.assertEqual(_clean_wording("背面的小字：\n2013年冬夜，她抱紧它。"), "")
+        self.assertEqual(_clean_wording("背面的小字：\n2013年冬夜，她抱紧它。"), "她抱紧它。")
+        self.assertEqual(_clean_wording("背面的小字：2013年冬夜"), "")
+        self.assertEqual(_clean_wording("春分日晴"), "")
         self.assertEqual(_clean_wording("背面小字：风很大。"), "风很大。")
         self.assertEqual(
             _clean_wording("背面小字：\n2014年冬，客厅。\n心里话：\n抱紧一点。"),
