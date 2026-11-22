@@ -59,15 +59,39 @@ async function loadPromptPresets() {
   try {
     const data = await api("/api/prompt-presets");
     promptPresets = data.presets || {};
+    customPromptPresets = Array.isArray(data.custom) ? data.custom : [];
+    promptFixedText = data.fixed || "";
+    if (data.markers && typeof data.markers === "object") {
+      promptMarkers = { ...promptMarkers, ...data.markers };
+    }
   } catch (e) {
     console.warn("加载提示词预设失败", e);
   }
 }
 
+/**
+ * Reduce a prompt to its editable part.
+ *
+ * A stored prompt may predate this version, or the reader may paste a whole
+ * prompt (fixed blocks included). Only the style and criteria survive: the
+ * anti-AI and output rules are not something a prompt can replace.
+ */
 function stripPromptFormat(text) {
-  if (!text) return "";
-  const idx = text.indexOf(PROMPT_FORMAT_MARKER);
-  return idx >= 0 ? text.slice(0, idx).trim() : text.trim();
+  let value = String(text || "").trim();
+  const preamble = promptMarkers.preamble || "";
+  if (preamble && value.startsWith(preamble)) {
+    value = value.slice(preamble.length).replace(/^\s+/, "");
+  }
+  for (const marker of [
+    promptMarkers.anti_ai,
+    promptMarkers.format,
+    promptMarkers.legacy_format,
+  ]) {
+    if (!marker) continue;
+    const index = value.indexOf(marker);
+    if (index >= 0) value = value.slice(0, index).trim();
+  }
+  return value;
 }
 
 function activePresetFor(text) {
@@ -79,11 +103,58 @@ function activePresetFor(text) {
   );
 }
 
-function highlightPromptPreset(text) {
-  const active = activePresetFor(text);
-  document.querySelectorAll(".preset-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.preset === active);
+function activeCustomPresetFor(text) {
+  const normalized = stripPromptFormat(text);
+  return (
+    customPromptPresets.find(
+      (preset) => stripPromptFormat(preset.text) === normalized
+    )?.id || ""
+  );
+}
+
+/** Render the saved-prompt chips and wire their clicks. */
+function renderPromptPresets() {
+  const row = $("promptCustomRow");
+  if (!row) return;
+  if (!customPromptPresets.length) {
+    row.innerHTML = "";
+    row.classList.add("hidden");
+    return;
+  }
+  row.classList.remove("hidden");
+  row.innerHTML = customPromptPresets
+    .map(
+      (preset) => `
+      <button type="button" class="btn small preset-btn custom-preset-btn"
+              data-custom-id="${escapeHtml(preset.id)}"
+              title="自定义提示词：${escapeHtml(preset.name)}">
+        <span class="btn-icon" data-icon="sparkles"></span>${escapeHtml(preset.name)}
+      </button>`
+    )
+    .join("");
+  renderAllIcons(row);
+  row.querySelectorAll("[data-custom-id]").forEach((btn) => {
+    btn.addEventListener("click", () => applyCustomPrompt(btn.dataset.customId));
   });
+}
+
+/** Mark the built-in or custom chip the editor text matches. */
+function highlightPromptPreset(text) {
+  const builtin = activePresetFor(text);
+  activeCustomPresetId = activeCustomPresetFor(text);
+  document.querySelectorAll(".preset-btn[data-preset]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.preset === builtin);
+  });
+  document.querySelectorAll(".preset-btn[data-custom-id]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.customId === activeCustomPresetId);
+  });
+  const deleteBtn = $("deletePromptPresetBtn");
+  if (deleteBtn) deleteBtn.classList.toggle("hidden", !activeCustomPresetId);
+  const current = customPromptPresets.find(
+    (preset) => preset.id === activeCustomPresetId
+  );
+  const nameInput = $("promptPresetName");
+  if (nameInput && current) nameInput.value = current.name;
 }
 
 function applyPromptPreset(name) {
@@ -94,7 +165,78 @@ function applyPromptPreset(name) {
   }
   const promptText = stripPromptFormat(template);
   $("setSystemPrompt").value = promptText;
+  const nameInput = $("promptPresetName");
+  if (nameInput) nameInput.value = "";
   highlightPromptPreset(promptText);
+}
+
+function applyCustomPrompt(id) {
+  const preset = customPromptPresets.find((item) => item.id === id);
+  if (!preset) return;
+  const promptText = stripPromptFormat(preset.text);
+  $("setSystemPrompt").value = promptText;
+  activeCustomPresetId = preset.id;
+  $("promptPresetName").value = preset.name;
+  highlightPromptPreset(promptText);
+}
+
+/** Save the editor text as a named prompt (create, or update the active one). */
+async function saveCustomPrompt() {
+  const name = ($("promptPresetName").value || "").trim();
+  const text = stripPromptFormat($("setSystemPrompt").value);
+  if (!name) {
+    showToast("先给这套提示词起个名字", "error");
+    $("promptPresetName").focus();
+    return;
+  }
+  if (!text) {
+    showToast("提示词内容不能为空", "error");
+    return;
+  }
+  try {
+    const data = await api("/api/prompt-presets", {
+      method: "POST",
+      body: JSON.stringify({ id: activeCustomPresetId || "", name, text }),
+    });
+    customPromptPresets = Array.isArray(data.custom) ? data.custom : [];
+    const saved = data.preset || {};
+    if (saved.id) activeCustomPresetId = saved.id;
+    renderPromptPresets();
+    highlightPromptPreset(text);
+    showToast(
+      `已保存自定义提示词「${saved.name || name}」，点「保存设置」后启用。`,
+      "success"
+    );
+  } catch (e) {
+    showToast("保存提示词失败：" + e.message, "error");
+  }
+}
+
+/** Delete the custom prompt the editor is based on. */
+async function deleteCustomPrompt() {
+  if (!activeCustomPresetId) return;
+  const preset = customPromptPresets.find(
+    (item) => item.id === activeCustomPresetId
+  );
+  const ok = await confirmDialog(
+    `删除自定义提示词「${preset ? preset.name : ""}」吗？\n删除后不能恢复，但编辑框里的文字会保留。`,
+    { title: "删除提示词", confirmText: "删除", danger: true }
+  );
+  if (!ok) return;
+  try {
+    const data = await api(
+      `/api/prompt-presets/${encodeURIComponent(activeCustomPresetId)}`,
+      { method: "DELETE" }
+    );
+    customPromptPresets = Array.isArray(data.custom) ? data.custom : [];
+    activeCustomPresetId = "";
+    renderPromptPresets();
+    $("promptPresetName").value = "";
+    highlightPromptPreset($("setSystemPrompt").value);
+    showToast("已删除这套自定义提示词。", "success");
+  } catch (e) {
+    showToast("删除提示词失败：" + e.message, "error");
+  }
 }
 
 /* ==========================================================================
@@ -196,12 +338,17 @@ async function paintFfmpegStatus() {
 async function openSettings() {
   try {
     await loadPromptPresets();
+    renderPromptPresets();
+    const fixedText = $("promptFixedText");
+    if (fixedText) fixedText.textContent = promptFixedText;
     const cfg = await api("/api/config");
     $("setApiBase").value = cfg.api_base_url || "";
     $("setApiKey").value = cfg.api_key || "";
     $("setModel").value = cfg.model || "";
     const promptText = stripPromptFormat(cfg.system_prompt || promptPresets.playful || "");
     $("setSystemPrompt").value = promptText;
+    $("promptPresetName").value = "";
+    activeCustomPresetId = "";
     highlightPromptPreset(promptText);
     $("setMaxEdge").value = cfg.proxy_max_edge || 1280;
     $("setProxyQuality").value = cfg.proxy_quality ?? 80;

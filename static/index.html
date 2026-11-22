@@ -483,16 +483,31 @@
             <label class="full-row">多模态模型名称
               <input id="setModel" type="text" placeholder="例如：llava, qwen-vl, local-model" />
             </label>
-            <label class="full-row">自定义系统提示词
-              <textarea id="setSystemPrompt" rows="5" placeholder="只填写风格/身份提示词；JSON 格式要求会在请求时自动拼接"></textarea>
-              <div class="prompt-template-row" id="promptPresetRow">
+            <div class="full-row prompt-editor">
+              <div class="prompt-editor-head">
+                <label for="setSystemPrompt">评价风格与评分标准</label>
+                <span class="prompt-fixed-note">输出格式和「说人话」规则由程序固定追加，不可修改</span>
+              </div>
+              <textarea id="setSystemPrompt" rows="9"
+                        placeholder="写你想要的评价风格和打分标准，例如：语气像朋友聊天；9-10 分留给会立刻留下的照片"></textarea>
+              <div class="prompt-preset-row" id="promptPresetRow" aria-label="内置风格">
                 <button type="button" class="btn small preset-btn" data-preset="playful"><span class="btn-icon" data-icon="sparkles"></span>活泼（默认）</button>
                 <button type="button" class="btn small preset-btn" data-preset="literary"><span class="btn-icon" data-icon="feather"></span>文艺</button>
                 <button type="button" class="btn small preset-btn" data-preset="humorous"><span class="btn-icon" data-icon="smile"></span>幽默</button>
                 <button type="button" class="btn small preset-btn" data-preset="warm"><span class="btn-icon" data-icon="sun"></span>温暖</button>
                 <button type="button" class="btn small preset-btn" data-preset="melancholy"><span class="btn-icon" data-icon="cloudRain"></span>伤感</button>
               </div>
-            </label>
+              <div class="prompt-custom-row hidden" id="promptCustomRow" aria-label="自定义提示词"></div>
+              <div class="prompt-save-row">
+                <input id="promptPresetName" type="text" maxlength="30" placeholder="给这套提示词起个名字" />
+                <button id="savePromptPresetBtn" class="btn small" type="button"><span class="btn-icon" data-icon="check"></span>保存为自定义</button>
+                <button id="deletePromptPresetBtn" class="btn small hidden" type="button"><span class="btn-icon" data-icon="trash"></span>删除当前自定义</button>
+              </div>
+              <details class="prompt-fixed-details">
+                <summary>查看固定追加的「说人话」与输出格式</summary>
+                <pre id="promptFixedText" class="prompt-fixed-text"></pre>
+              </details>
+            </div>
             <label>模型并发请求数
               <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />
             </label>

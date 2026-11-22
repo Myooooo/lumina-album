@@ -8,6 +8,7 @@ from Flask.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -25,7 +26,11 @@ from typing import Any
 from flask import request
 
 from .. import video
-from ..api_client import LEGACY_DIMENSION_KEYS, strip_json_format
+from ..api_client import (
+    LEGACY_DIMENSION_KEYS,
+    migrate_legacy_style_prompt,
+    strip_json_format,
+)
 from ..backup import backup_due
 from ..cache import (
     DERIVED_PATH_FIELDS,
@@ -286,6 +291,57 @@ def drop_folder_from_ui_state(database: Database, folder: str) -> None:
             patch["folder_history"] = kept
     if patch:
         database.save_ui_state(patch)
+
+
+#: ``settings`` key holding the prompts the reader saved for themselves.
+CUSTOM_PRESETS_KEY = "custom_prompt_presets"
+
+#: A library is a personal thing, not a preset store; this is enough for a
+#: handful of voices per person and keeps the settings payload small.
+MAX_CUSTOM_PRESETS = 20
+
+#: One prompt's text cap. Well above the editor's normal size, low enough that a
+#: paste of a whole novel cannot end up in every request.
+MAX_PROMPT_CHARS = 4000
+
+
+def custom_prompt_presets(database: Database) -> list[dict[str, str]]:
+    """Prompts the reader saved, newest last, in a shape the API can serve.
+
+    Stored as JSON in the ``settings`` table under one key: prompt presets are
+    user data like any setting, and a dedicated table would need a migration
+    for three fields.
+    """
+    raw = database.get_settings().get(CUSTOM_PRESETS_KEY)
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("stored custom prompt presets are not valid JSON")
+        return []
+    if not isinstance(parsed, list):
+        return []
+    presets: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        preset_id = str(item.get("id") or "").strip()[:16]
+        name = str(item.get("name") or "").strip()[:30]
+        text = str(item.get("text") or "").strip()[:MAX_PROMPT_CHARS]
+        if not preset_id or not name or not text or preset_id in seen:
+            continue
+        seen.add(preset_id)
+        presets.append({"id": preset_id, "name": name, "text": text})
+    return presets[:MAX_CUSTOM_PRESETS]
+
+
+def save_custom_prompt_presets(
+    database: Database, presets: list[dict[str, str]]
+) -> None:
+    """Persist the custom preset list (already validated by the caller)."""
+    database.save_settings({CUSTOM_PRESETS_KEY: presets})
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
@@ -1087,6 +1143,15 @@ def _load_settings_from_db(database: Database, cfg: Config) -> None:
     if _stored_video_clip_seconds(raw) == 5.0:
         cfg.video_clip_seconds = 3.0
         database.save_settings({"video_clip_seconds": 3.0})
+
+    # The old stock prompts were cached selections, not writing: upgrade an
+    # exact match to the current voice, and leave an edited prompt alone.
+    if "system_prompt" in raw:
+        migrated = migrate_legacy_style_prompt(cfg.system_prompt)
+        if migrated:
+            cfg.system_prompt = migrated
+            database.save_settings({"system_prompt": migrated})
+            logger.info("upgraded a stock prompt to the current version")
 
 
 def _stored_video_clip_seconds(raw: dict) -> float | None:

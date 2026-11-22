@@ -100,7 +100,28 @@ const API = {
   "/api/years": { years: [2025] },
   "/api/card/status": { cards: [], current: null },
   "/api/scan/jobs": { jobs: [] },
-  "/api/prompt-presets": { presets: {}, default: "playful" },
+  "/api/prompt-presets": {
+    presets: {
+      playful: "【评价风格】\n像朋友聊天。\n\n【评分标准】\n9-10 留下。",
+    },
+    default: "playful",
+    custom: [
+      {
+        id: "c1",
+        name: "我的语气",
+        text: "【评价风格】\n像家里人说话。\n\n【评分标准】\n7-8 留着。",
+      },
+    ],
+    fixed:
+      "【写作要求：说人话】\n说具体的。\n\n【输出格式：必须严格遵守】\n只输出 JSON。",
+    markers: {
+      preamble: "你在帮一个人整理他拍过的照片",
+      anti_ai: "【写作要求：说人话】",
+      format: "【输出格式：必须严格遵守】",
+      legacy_format:
+        "Return ONLY a JSON object, no markdown, with exactly these keys:",
+    },
+  },
   "/api/video/status": { available: true, extensions: [], version: "" },
   "/api/folders": { folders: ["E:\\album"] },
   "/api/folders/hidden": { folders: ["E:\\album-hidden"] },
@@ -304,6 +325,32 @@ async function main() {
     emptyReset.classList.contains("hidden"),
     false
   );
+
+  // --- prompt editor ----------------------------------------------------
+  await window.openSettings();
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  const fixedText = document.getElementById("promptFixedText").textContent;
+  check(
+    "the fixed prompt rules are shown read-only",
+    fixedText.includes("【写作要求：说人话】") &&
+      fixedText.includes("【输出格式：必须严格遵守】"),
+    true
+  );
+  const customChip = document.querySelector('[data-custom-id="c1"]');
+  check("a saved prompt appears as a chip", Boolean(customChip), true);
+  if (customChip) customChip.click();
+  await new Promise((resolve) => window.setTimeout(resolve, 30));
+  check(
+    "clicking a saved prompt loads it into the editor",
+    document.getElementById("setSystemPrompt").value.includes("像家里人"),
+    true
+  );
+  check(
+    "the delete action follows the active saved prompt",
+    document.getElementById("deletePromptPresetBtn").classList.contains("hidden"),
+    false
+  );
+  window.LuminaUI.hideModal(document.getElementById("settingsModal"));
 
   check("booting and exercising the page raised no errors", problems, []);
 

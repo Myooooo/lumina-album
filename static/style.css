@@ -3542,12 +3542,104 @@ select {
   .settings-tab { padding: 9px 8px; }
 }
 
-.prompt-template-row {
+/* ---------- Prompt editor (settings → 大模型) ----------
+   The editable half is the voice plus the scoring criteria; the fixed rules are
+   shown read-only underneath so it is obvious what cannot be tuned away. */
+.prompt-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.prompt-editor-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 6px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 14px;
 }
+
+.prompt-editor-head label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.prompt-fixed-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.prompt-editor textarea {
+  min-height: 204px;
+}
+
+.prompt-preset-row,
+.prompt-custom-row,
+.prompt-save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.prompt-custom-row {
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.prompt-save-row {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.prompt-save-row input[type="text"] {
+  flex: 1 1 220px;
+  height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+}
+
+.prompt-fixed-details {
+  font-size: 12.5px;
+}
+
+.prompt-fixed-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.prompt-fixed-details summary:hover {
+  color: var(--primary-dark);
+}
+
+.prompt-fixed-text {
+  margin: 10px 0 0;
+  padding: 12px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(255, 253, 249, 0.92);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
 .preset-btn.active {
   border-color: var(--primary);
   background: rgba(179, 129, 90, 0.14);

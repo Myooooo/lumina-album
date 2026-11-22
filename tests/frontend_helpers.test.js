@@ -1709,6 +1709,71 @@ section("empty states");
   );
 }
 
+/* ------------------------------------------------------- prompt editor
+   The reader owns the voice and the criteria; the anti-AI rules and the JSON
+   contract are appended by the server and cannot be edited away. */
+section("prompt editor");
+{
+  const html = fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
+
+  for (const id of [
+    "setSystemPrompt",
+    "promptPresetRow",
+    "promptCustomRow",
+    "promptPresetName",
+    "savePromptPresetBtn",
+    "deletePromptPresetBtn",
+    "promptFixedText",
+  ]) {
+    check(`the prompt editor has #${id}`, new RegExp(`id="${id}"`).test(html), true);
+  }
+  check(
+    "five built-in voices are still offered",
+    (html.match(/class="btn small preset-btn" data-preset=/g) || []).length === 5,
+    true
+  );
+  check(
+    "the dialog says the fixed rules cannot be edited",
+    /输出格式和「说人话」规则由程序固定追加，不可修改/.test(html),
+    true
+  );
+  check(
+    "the prompt editor and its fixed block have styles",
+    /\.prompt-editor \{/.test(css) &&
+      /\.prompt-fixed-details \{/.test(css) &&
+      /\.prompt-fixed-text \{/.test(css),
+    true
+  );
+
+  // The editable part survives a pasted full prompt.
+  const stripPrompt = new Function(
+    "promptMarkers",
+    `${extract("stripPromptFormat")} return stripPromptFormat;`
+  )({
+    preamble: "你在帮一个人整理他拍过的照片。",
+    anti_ai: "【写作要求：说人话】",
+    format: "【输出格式：必须严格遵守】",
+    legacy_format: "Return ONLY a JSON object, no markdown, with exactly these keys:",
+  });
+  const pasted =
+    "你在帮一个人整理他拍过的照片。\n\n【评价风格】\n像朋友。\n\n【评分标准】\n9-10 留下。\n\n" +
+    "【写作要求：说人话】\n规则\n\n【输出格式：必须严格遵守】\n{}";
+  check(
+    "a pasted full prompt keeps only the editable part",
+    stripPrompt(pasted),
+    "【评价风格】\n像朋友。\n\n【评分标准】\n9-10 留下。"
+  );
+  check(
+    "the editor saves through the new endpoint",
+    /async function saveCustomPrompt\(\)/.test(src) &&
+      /api\("\/api\/prompt-presets"/.test(src) &&
+      /async function deleteCustomPrompt\(\)/.test(src) &&
+      /method: "DELETE"/.test(src),
+    true
+  );
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`

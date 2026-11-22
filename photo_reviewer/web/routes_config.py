@@ -6,15 +6,22 @@ grouped by the part of the app they serve.
 
 from __future__ import annotations
 
-import os
 import logging
+import os
+import uuid
 from typing import Any
 
 from flask import jsonify, request
 
 from ..api_client import (
+    ANTI_AI_GUIDE,
+    ANTI_AI_MARKER,
+    JSON_FORMAT_MARKER,
+    JSON_FORMAT_SUFFIX,
+    LEGACY_JSON_FORMAT_MARKER,
+    PROMPT_PREAMBLE,
     PROMPT_PRESETS,
-    strip_json_format,
+    strip_fixed_sections,
 )
 
 from ..config import (
@@ -35,8 +42,12 @@ from .constants import (
 )
 
 from .helpers import (
+    MAX_PROMPT_CHARS,
+    MAX_CUSTOM_PRESETS,
     _save_settings_to_db,
+    custom_prompt_presets,
     hidden_folder_list,
+    save_custom_prompt_presets,
 )
 
 logger = logging.getLogger(__name__)
@@ -239,7 +250,9 @@ def register(app, cfg, database):
         if "model" in data:
             staged["model"] = str(data["model"]).strip() or cfg.model
         if "system_prompt" in data:
-            staged["system_prompt"] = strip_json_format(str(data["system_prompt"]))
+            staged["system_prompt"] = strip_fixed_sections(
+                str(data["system_prompt"])
+            )
         if "geocoding_provider" in data:
             raw_provider = str(data["geocoding_provider"]).strip().lower()
             if raw_provider not in GEOCODING_PROVIDERS:
@@ -259,4 +272,83 @@ def register(app, cfg, database):
 
     @app.get("/api/prompt-presets")
     def api_prompt_presets():
-        return jsonify({"presets": PROMPT_PRESETS, "default": "playful"})
+        """Built-in voices, saved prompts, and the fixed rules.
+
+        The editable half is the style and scoring criteria. The response also
+        carries the fixed anti-AI and output-format blocks so the settings
+        dialog can show them verbatim without a second request.
+        """
+        return jsonify(
+            {
+                "presets": PROMPT_PRESETS,
+                "default": "playful",
+                "custom": custom_prompt_presets(database),
+                "fixed": f"{ANTI_AI_GUIDE}\n\n{JSON_FORMAT_SUFFIX}",
+                "markers": {
+                    "anti_ai": ANTI_AI_MARKER,
+                    "format": JSON_FORMAT_MARKER,
+                    "legacy_format": LEGACY_JSON_FORMAT_MARKER,
+                    "preamble": PROMPT_PREAMBLE,
+                },
+            }
+        )
+
+    @app.post("/api/prompt-presets")
+    def api_save_prompt_preset():
+        """Save the editable part of a prompt under a name.
+
+        Fixed blocks are stripped first, so a pasted full prompt is reduced to
+        the part the reader is allowed to own. Saving with an existing name
+        updates it; ``id`` targets one entry when a rename is involved.
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        if not isinstance(data, dict):
+            return jsonify({"error": "请求内容不合法"}), 400
+        name = str(data.get("name") or "").strip()[:30]
+        if not name:
+            return jsonify({"error": "请给这套提示词起个名字"}), 400
+        text = strip_fixed_sections(str(data.get("text") or "")).strip()
+        if not text:
+            return jsonify({"error": "提示词内容不能为空"}), 400
+        if len(text) > MAX_PROMPT_CHARS:
+            return (
+                jsonify({"error": f"提示词太长（最多 {MAX_PROMPT_CHARS} 字）"}),
+                400,
+            )
+
+        presets = custom_prompt_presets(database)
+        preset_id = str(data.get("id") or "").strip()[:16]
+        existing = next(
+            (preset for preset in presets if preset_id and preset["id"] == preset_id),
+            None,
+        )
+        if existing is None:
+            existing = next(
+                (preset for preset in presets if preset["name"] == name), None
+            )
+        if existing is None:
+            if len(presets) >= MAX_CUSTOM_PRESETS:
+                return (
+                    jsonify(
+                        {"error": f"最多保存 {MAX_CUSTOM_PRESETS} 套自定义提示词"}
+                    ),
+                    400,
+                )
+            preset = {"id": uuid.uuid4().hex[:8], "name": name, "text": text}
+            presets.append(preset)
+        else:
+            existing["name"] = name
+            existing["text"] = text
+            preset = existing
+        save_custom_prompt_presets(database, presets)
+        return jsonify({"preset": preset, "custom": presets})
+
+    @app.delete("/api/prompt-presets/<preset_id>")
+    def api_delete_prompt_preset(preset_id: str):
+        presets = [
+            preset
+            for preset in custom_prompt_presets(database)
+            if preset["id"] != preset_id
+        ]
+        save_custom_prompt_presets(database, presets)
+        return jsonify({"custom": presets})

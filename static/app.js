@@ -221,6 +221,13 @@ function init() {
   document.querySelectorAll(".preset-btn").forEach((btn) => {
     btn.addEventListener("click", () => handlePromptPresetClick(btn.dataset.preset));
   });
+  $("savePromptPresetBtn").addEventListener("click", saveCustomPrompt);
+  $("deletePromptPresetBtn").addEventListener("click", deleteCustomPrompt);
+  $("promptPresetName").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    saveCustomPrompt();
+  });
 
   document.querySelectorAll("[data-close]").forEach((btn) => {
     btn.addEventListener("click", () => {

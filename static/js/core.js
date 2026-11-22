@@ -111,7 +111,20 @@ const state = {
 };
 
 let promptPresets = {};
-const PROMPT_FORMAT_MARKER = "Return ONLY a JSON object, no markdown, with exactly these keys:";
+//: Prompts the reader saved, and the fixed text shown read-only in settings.
+let customPromptPresets = [];
+let promptFixedText = "";
+//: Markers of the fixed prompt blocks. The server owns the strings; these are
+//: fallbacks for a page opened before the endpoint answers.
+let promptMarkers = {
+  preamble: "你在帮一个人整理他拍过的照片",
+  anti_ai: "【写作要求：说人话】",
+  format: "【输出格式：必须严格遵守】",
+  legacy_format: "Return ONLY a JSON object, no markdown, with exactly these keys:",
+};
+//: The custom preset the editor is currently based on, so saving updates it
+//: instead of creating a duplicate.
+let activeCustomPresetId = "";
 
 const ICONS = window.LuminaIcons;
 const $ = (id) => document.getElementById(id);

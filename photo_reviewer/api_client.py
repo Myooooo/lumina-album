@@ -32,23 +32,132 @@ DIMENSION_KEYS = ("technical", "memory", "uniqueness")
 #: A dimension older builds stored and the prompt no longer asks for.
 LEGACY_DIMENSION_KEYS = ("composition",)
 
-JSON_FORMAT_MARKER = "Return ONLY a JSON object, no markdown, with exactly these keys:"
+#: Start of the fixed "write like a person" rules. A user prompt is never
+#: trusted to carry these: they are appended to every request, so switching the
+#: style can never switch off the anti-AI rules.
+ANTI_AI_MARKER = "【写作要求：说人话】"
 
-JSON_FORMAT_SUFFIX = """Return ONLY a JSON object, no markdown, with exactly these keys:
+#: Start of the fixed output-format block. Also the marker used to reduce a
+#: pasted full prompt back to its editable part.
+JSON_FORMAT_MARKER = "【输出格式：必须严格遵守】"
+
+#: The marker older builds shipped. Still stripped from stored prompts and from
+#: a PHOTO_SYSTEM_PROMPT written before this version.
+LEGACY_JSON_FORMAT_MARKER = (
+    "Return ONLY a JSON object, no markdown, with exactly these keys:"
+)
+
+#: Short, fixed framing. The style/criteria below it are the part a user edits.
+PROMPT_PREAMBLE = """你在帮一个人整理他拍过的照片。你看到的是一张照片，可能还附带拍摄时间、地点或相机信息。
+按下面的【评价风格】和【评分标准】给这张照片打分，并起一个标题、写一句简评。
+标题和简评会印在照片下面，和照片一起被反复翻看。"""
+
+#: Fixed anti-AI rules. Kept out of the editable prompt on purpose: "de-AI-ify"
+#: is a product rule, not a style the reader can turn off.
+ANTI_AI_GUIDE = ANTI_AI_MARKER + """
+以下规则优先于上面的风格要求，标题和简评都必须遵守。
+
+1. 写具体的，不写抽象的。
+   不写“治愈”“温柔”“美好”“时光”“岁月”“人间烟火”这类空词。写画面里真实存在的一个细节：
+   一个动作、一件东西、一束光、一个表情、当时的声音或气味。
+2. 说感受，不做说明。
+   不要解释照片“展现了什么”“记录了怎样的瞬间”，也不要替人总结意义。
+3. 不堆形容词，不叠比喻。
+   一句里最多一个比喻；不用“仿佛/宛如/像是/好似”，不用“让人不禁”“令人动容”。
+4. 不升华，不抒情收尾。
+   不要“这一刻，时间仿佛静止”“愿岁月温柔以待”这类句子；说完就走。
+5. 像聊天，允许口语。
+   可以用“啊”“呢”“吧”“就”“还挺”，可以短句、半句、不完整；不要排比，不要对仗。
+6. 不编事实。
+   不写照片里看不见的人名、地点、日期、关系；不确定就不写。
+7. 标题和简评不要重复；标题不解释画面，简评不复述标题。
+8. 下面这些 AI 套词不要用：仿佛、宛如、好似、这一刻、让人不禁、治愈、温柔了岁月、时光、岁月、
+   人间烟火、诗和远方、定格、见证、诉说着、氛围感、松弛感。
+
+反例（不要这样写）：
+- “阳光洒在毛茸茸的鼻尖，这一刻的拥抱比春天还暖。”（比喻 + 升华 + 套话）
+- “画面中，一位老人静静地坐在长椅上，仿佛在回忆往事。”（说明 + 想象）
+- “海边的黄昏，治愈了所有的疲惫。”（空词 + 替人总结）
+
+正例（可以这样写）：
+- 标题“等风”，简评“它一直盯着海面，耳朵被风吹得往后翻。”
+- 标题“落灰”，简评“鞋边蹭了一道白，没人去擦。”"""
+
+#: Fixed output contract. The parser is strict about the five keys and their
+#: types, so the prompt states them once, unambiguously, at the very end.
+JSON_FORMAT_SUFFIX = JSON_FORMAT_MARKER + """
+只输出一个 JSON 对象。不要 Markdown、不要代码块、不要解释、不要任何前后缀文字。
+必须且只能包含以下 5 个键，键名、层级和类型都不能改：
 {
-  "score": <number 0-10, higher is better>,
-  "title": "<一个简短、有画面感的照片标题，10字以内>",
+  "score": <0 到 10 的数字，可带一位小数，不要加引号>,
+  "title": "<标题，不超过 10 个汉字，不要引号、书名号，不要以标点结尾>",
   "dimensions": {
-    "technical": <number 0-10>,
-    "memory": <number 0-10>,
-    "uniqueness": <number 0-10>
+    "technical": <0 到 10 的数字>,
+    "memory": <0 到 10 的数字>,
+    "uniqueness": <0 到 10 的数字>
   },
-  "tags": [<2-5个贴切的中文标签，以画面内容为准，例如：风景、人像、美食、宠物、城市、旅行、日常、夜景、清晨、黄昏、春日、夏日、海边、家人、朋友、纪实、黑白>],
-  "comment": "<一句简短、有人味儿且符合你风格的中文评论，20字以内，写感受不写说明>"
+  "tags": ["<中文标签>", "<中文标签>"],
+  "comment": "<简评，不超过 20 个汉字，不要换行、不要引号>"
 }
-"""
+要求：
+- 只输出这个 JSON 对象本身，第一个字符是 {，最后一个字符是 }。
+- tags 是 2-5 个简短中文词的数组，不带 #，不是句子，不能为空。
+- score 和 dimensions 的三项都是数字，不是字符串，取值 0-10。
+- title、tags、comment 用简体中文。"""
 
-STYLE_TEMPLATE = """你是「拾光相册」的{style}
+#: The editable half of the prompt: who is speaking, and what the scores mean.
+STYLE_TEMPLATE = """【评价风格】
+{style}
+
+【评分标准】
+- technical（技术）：清晰、曝光、色彩、构图。糊一点、暗一点不一定是坏事，要看它有没有毁掉这张照片的味道。
+- memory（回忆）：值不值得以后再翻到。有没有一个具体的人、事、物、表情或瞬间，让人愿意把它留下。
+- uniqueness（独特）：这个画面是不是只有这一次、这个角度、这个人才会有；少见、意外、有故事感都可以加分。
+- score（总分）：先回答“我会不会留下它”，再给分，不要直接拿三项平均。
+  9-10：会立刻留下，甚至想洗出来；
+  7-8：值得留着，偶尔会翻到；
+  5-6：还行，留着不亏，删了也不可惜；
+  0-4：可以直接删。"""
+
+#: Voice-only descriptions. The scoring block is shared by every preset, so a
+#: new voice does not have to repeat (or accidentally change) the criteria.
+STYLE_DESCRIPTIONS = {
+    "playful": (
+        "说话像朋友群里随手发的语音：反应快，爱打岔，偶尔冒一句欠揍的实话，但不刻薄。"
+    ),
+    "literary": (
+        "话不多，句子短，像在照片背面写一行小字。不抒情，不解释，只留下一个画面或一个动作。"
+    ),
+    "humorous": (
+        "专挑画面里好笑、别扭、意外的地方，一本正经地吐槽，不解释笑点，也不拿人开恶意玩笑。"
+    ),
+    "warm": (
+        "像家里人翻到旧照片时说的那句“你看那时候……”。语气软，但不腻，不替人感动。"
+    ),
+    "melancholy": (
+        "看到旧东西会停一下，话里带一点舍不得和走神，但忍着不煽情，也不把话说满。"
+    ),
+}
+
+
+def build_style_prompt(style: str) -> str:
+    """Render the editable prompt: a voice plus the scoring criteria.
+
+    Fixed rules (anti-AI and output format) are deliberately absent; they are
+    appended by :func:`build_system_prompt` on every request.
+    """
+    description = STYLE_DESCRIPTIONS.get(style, STYLE_DESCRIPTIONS["playful"])
+    return STYLE_TEMPLATE.format(style=description).strip()
+
+
+DEFAULT_STYLE_PROMPT = build_style_prompt("playful")
+
+PROMPT_PRESETS = {name: build_style_prompt(name) for name in STYLE_DESCRIPTIONS}
+
+#: The stock prompts earlier builds shipped. A stored prompt that still equals
+#: one of these is a cached stock choice, not a customisation, so startup can
+#: upgrade it to the current text instead of leaving a user on an old voice.
+_LEGACY_STYLE_TEMPLATE = """你是「拾光相册」的{style}
 你不是在写图片说明，而是在陪朋友一起翻旧相册，看到某张照片时，脱口而出的那句心里话。
 
 先仔细观察照片：光线、色彩、构图、人物、发生的事，然后打分、命名、写评论。
@@ -75,7 +184,7 @@ STYLE_TEMPLATE = """你是「拾光相册」的{style}
 - uniqueness：稀有度、故事感、特别之处。
 """
 
-STYLE_DESCRIPTIONS = {
+_LEGACY_STYLE_DESCRIPTIONS = {
     "playful": (
         "回忆整理师，活泼又带一点文艺气息。"
         "说话轻快，爱用感叹和设问，会开玩笑但不轻浮。"
@@ -98,40 +207,59 @@ STYLE_DESCRIPTIONS = {
     ),
 }
 
+LEGACY_STYLE_PROMPTS = {
+    name: _LEGACY_STYLE_TEMPLATE.format(style=description).strip()
+    for name, description in _LEGACY_STYLE_DESCRIPTIONS.items()
+}
 
-def build_style_prompt(style: str) -> str:
-    """Render a style-only prompt; only the style description changes.
 
-    The trailing newline of the template is trimmed, so a prompt that came
-    through `strip_json_format` (which rstrips) compares equal to the preset it
-    was derived from.
+def strip_fixed_sections(prompt: str | None) -> str:
+    """Reduce a prompt to its editable part.
+
+    Users can paste a whole prompt (including the fixed blocks, or one written
+    before this version); only the style and criteria survive. This is what
+    makes the fixed rules impossible to override by pasting.
     """
-    description = STYLE_DESCRIPTIONS.get(style, STYLE_DESCRIPTIONS["playful"])
-    return STYLE_TEMPLATE.format(style=description).strip()
-
-
-DEFAULT_STYLE_PROMPT = build_style_prompt("playful")
-
-SYSTEM_PROMPT = DEFAULT_STYLE_PROMPT + "\n\n" + JSON_FORMAT_SUFFIX
-
-PROMPT_PRESETS = {name: build_style_prompt(name) for name in STYLE_DESCRIPTIONS}
-
-
-def strip_json_format(prompt: str | None) -> str:
-    """Return only the style/persona part before the shared JSON-format block."""
     text = (prompt or "").strip()
-    marker = text.find(JSON_FORMAT_MARKER)
-    if marker != -1:
-        return text[:marker].rstrip()
+    if text.startswith(PROMPT_PREAMBLE):
+        text = text[len(PROMPT_PREAMBLE) :].lstrip("\n").strip()
+    for marker in (ANTI_AI_MARKER, JSON_FORMAT_MARKER, LEGACY_JSON_FORMAT_MARKER):
+        found = text.find(marker)
+        if found != -1:
+            text = text[:found].rstrip()
     return text
 
 
+def strip_json_format(prompt: str | None) -> str:
+    """Backward-compatible name for :func:`strip_fixed_sections`."""
+    return strip_fixed_sections(prompt)
+
+
+def migrate_legacy_style_prompt(prompt: str | None) -> str | None:
+    """Return the new preset when ``prompt`` is an unmodified old stock one.
+
+    Only an exact match is upgraded: a prompt the reader edited (even by a
+    character) is theirs and is left alone.
+    """
+    text = strip_fixed_sections(prompt)
+    for name, legacy in LEGACY_STYLE_PROMPTS.items():
+        if text == legacy:
+            return PROMPT_PRESETS[name]
+    return None
+
+
 def build_system_prompt(base_prompt: str | None = None) -> str:
-    """Build the complete system prompt with the canonical JSON format appended."""
-    style = strip_json_format(base_prompt).strip()
-    if not style:
-        style = DEFAULT_STYLE_PROMPT
-    return style + "\n\n" + JSON_FORMAT_SUFFIX
+    """Build the complete system prompt.
+
+    Order matters: the editable voice/criteria come first, then the fixed rules
+    (which say they win over the voice), then the output contract last. A caller
+    cannot opt out of the last two blocks.
+    """
+    style = strip_fixed_sections(base_prompt).strip() or DEFAULT_STYLE_PROMPT
+    return f"{PROMPT_PREAMBLE}\n\n{style}\n\n{ANTI_AI_GUIDE}\n\n{JSON_FORMAT_SUFFIX}"
+
+
+SYSTEM_PROMPT = build_system_prompt(DEFAULT_STYLE_PROMPT)
 
 
 def _normalize_base_url(url: str) -> str:
@@ -351,7 +479,7 @@ def analyze_image(
             continue
 
     raise RuntimeError(
-        f"模型返回的内容无法解析: {str(last_parse_error or '未知错误')[:300]}"
+        f"模型返回的内容不符合格式要求: {str(last_parse_error or '未知错误')[:300]}"
     ) from last_parse_error
 
 
@@ -526,26 +654,69 @@ def _normalize_dimensions(raw: Any) -> dict[str, float]:
 
 
 def _validate_result(result: dict[str, Any]) -> None:
+    """Normalise a model result, rejecting output that breaks the contract.
+
+    The prompt asks for exactly five keys. A missing key or a wrong container
+    type raises, which makes :func:`analyze_image` spend one of its retries
+    instead of writing a half-empty row. Numbers are accepted as numeric
+    strings (models sometimes quote them) but everything the UI reads is
+    normalised into the documented shape.
+
+    Text lengths and ranges are clamped here, not only asked for in the prompt:
+    a model that ignores "20 字以内" must not be able to push a paragraph into
+    the caption.
+    """
+    if not isinstance(result, dict):
+        raise RuntimeError("模型返回的不是 JSON 对象")
+    missing = [
+        key
+        for key in ("score", "title", "dimensions", "tags", "comment")
+        if key not in result
+    ]
+    if missing:
+        raise RuntimeError(f"模型返回缺少字段: {', '.join(missing)}")
+
     try:
-        score = float(result.get("score"))
-        tags = result.get("tags", [])
-        if tags is None:
-            tags = []
-        if isinstance(tags, str):
-            tags = [t.strip() for t in tags.split(",") if t.strip()]
-        elif not isinstance(tags, list):
-            tags = [str(tags)]
-        comment = str(result.get("comment") or result.get("reason") or "").strip()
+        score = float(result["score"])
     except (TypeError, ValueError) as exc:
-        raise RuntimeError(f"模型返回的 JSON 字段不合法: {result}") from exc
+        raise RuntimeError("score 不是数字") from exc
+
+    dimensions = result.get("dimensions")
+    if not isinstance(dimensions, dict):
+        raise RuntimeError("dimensions 不是对象")
+    for key in DIMENSION_KEYS:
+        if key not in dimensions:
+            raise RuntimeError(f"dimensions 缺少 {key}")
+        try:
+            float(dimensions[key])
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"dimensions.{key} 不是数字") from exc
+
+    raw_tags = result.get("tags")
+    if isinstance(raw_tags, str):
+        # A comma-separated string is the one deviation worth forgiving: the
+        # meaning is unambiguous and it is common on small local models.
+        tags = [item.strip() for item in re.split(r"[,，]", raw_tags) if item.strip()]
+    elif isinstance(raw_tags, list):
+        tags = [str(item).strip() for item in raw_tags if str(item).strip()]
+    else:
+        raise RuntimeError("tags 不是数组")
+    if not tags:
+        raise RuntimeError("tags 为空")
 
     title = str(result.get("title") or "").strip()
-    score = max(0.0, min(10.0, score))
-    result["score"] = score
+    if not title:
+        raise RuntimeError("title 为空")
+    comment = str(result.get("comment") or result.get("reason") or "").strip()
+    if not comment:
+        raise RuntimeError("comment 为空")
+
+    result["score"] = max(0.0, min(10.0, score))
     result["title"] = title[:40]
-    result["tags"] = [str(t).strip() for t in tags][:20]
-    result["reason"] = comment or "这一瞬，值得被好好收藏。"
-    result["dimensions"] = _normalize_dimensions(result.get("dimensions"))
+    result["tags"] = tags[:5]
+    result["reason"] = comment[:200]
+    result["comment"] = comment[:200]
+    result["dimensions"] = _normalize_dimensions(dimensions)
 
 
 #: How many candidate rows ``semantic_search`` puts in front of the model.
