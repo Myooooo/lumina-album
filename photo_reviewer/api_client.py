@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import re
 import time
@@ -15,7 +14,11 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .config import Config
-from .legacy_prompts import LEGACY_STYLE_PROMPTS, PREVIOUS_STYLE_PROMPTS
+from .legacy_prompts import (
+    LEGACY_STYLE_PROMPTS,
+    PREVIOUS_SHORT_STYLE_PROMPTS,
+    PREVIOUS_STYLE_PROMPTS,
+)
 
 
 class SemanticSearchError(RuntimeError):
@@ -57,15 +60,16 @@ WORDING_RULES = """{style}
 写一句照片背面的小字，不要描述画面里有什么。
 只写看到它时心里冒出来的一句话，20 个字以内。
 不要用“这一刻、仿佛、时间、温柔、治愈、岁月、人间烟火、美好、时光”这些词。
-不要用照片里的人、动物、东西、光线、影子当开头；先写你的感受。
 不编照片里没有的人名、地点、日期。
 
 只输出这句话，不要标题，不要解释。"""
 
-#: Openers cycled across calls. The model's favourite opening is 「原来」; left to
-#: itself it starts nearly every photo that way. A different opener per photo
-#: keeps an album from reading like one template repeated.
-WORDING_OPENERS = ("大概", "其实", "有些", "如果", "有时候", "原来")
+#: The wording call returns a one-key JSON object. The tiny shape anchors the
+#: answer and keeps labels/dates out, without the scoring fields that used to
+#: turn the prose into a caption.
+WORDING_FORMAT = """【输出格式】
+只输出一个 JSON 对象：{"comment": "<一句话>"}
+不要 Markdown，不要解释。"""
 
 #: Default scoring criteria. They are part of the editable prompt: a reader can
 #: change what a high score means, but not the JSON shape or the wording rules.
@@ -83,7 +87,11 @@ STYLE_TEMPLATE = (
 #: describe the picture.
 STYLE_DESCRIPTIONS = {
     "playful": "用打趣的口吻写，允许夸张、允许损一句，但不刻薄。",
-    "literary": "用安静、克制的口吻写，像写给自己看的。",
+    "literary": (
+        "用文艺摄影师的口吻写，像一本安静而有质感的摄影杂志。"
+        "句子干净、克制、有留白，像给照片配一行诗；写一个意象、一点情绪，或一句没头没尾的话。"
+        "不要复述画面里有什么，也不要解释意义。"
+    ),
     "humorous": "用一本正经的吐槽口吻写，不要解释笑点。",
     "warm": "用关心人的口吻写，像对家里人说话，别腻。",
     "melancholy": "用舍不得的口吻写，收着一点，不煽情。",
@@ -189,7 +197,11 @@ def migrate_legacy_style_prompt(prompt: str | None) -> str | None:
     match is upgraded; an edited prompt is the reader's and is left alone.
     """
     text = strip_fixed_sections(prompt)
-    for stock in (LEGACY_STYLE_PROMPTS, PREVIOUS_STYLE_PROMPTS):
+    for stock in (
+        LEGACY_STYLE_PROMPTS,
+        PREVIOUS_STYLE_PROMPTS,
+        PREVIOUS_SHORT_STYLE_PROMPTS,
+    ):
         for name, legacy in stock.items():
             if text == legacy:
                 return PROMPT_PRESETS[name]
@@ -389,43 +401,107 @@ def _clean_wording(content: Any) -> str:
         text = re.sub(r"^```[A-Za-z]*\s*", "", text)
         text = re.sub(r"\s*```$", "", text).strip()
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+    labels = (
+        "简评",
+        "评论",
+        "背面小字",
+        "背面的小字",
+        "背面写着",
+        "照片背面",
+        "照片说明",
+        "图片说明",
+        "心里话",
+        "心里冒出的话",
+        "小字",
+    )
     picked = ""
     for raw_line in lines:
-        line = raw_line.lstrip("*# ").strip()
+        line = raw_line.lstrip(">*# ").replace("**", "").strip()
+        if not line:
+            continue
+        if line.lower().startswith(("caption", "photo credit")):
+            continue
+        if line.startswith(("拍摄于", "摄于")):
+            continue
         if line.startswith(("标题：", "标题:")):
             continue
-        if line.startswith(("简评：", "简评:", "评论：", "评论:")):
-            picked = re.split(r"[:：]", line, maxsplit=1)[-1].strip()
-            break
-        if not picked:
+        # A label on its own line ("背面小字：") is not the sentence.
+        if line.rstrip("：:").strip() in labels:
+            continue
+        # A label and the sentence on the same line.
+        for label in labels:
+            if line.startswith(label):
+                parts = re.split(r"[:：]", line, maxsplit=1)
+                if len(parts) == 2:
+                    line = parts[1].strip()
+                break
+        # A date is invented metadata, not a comment.
+        if re.match(r"^\d{4}\s*年", line) or re.match(
+            r"^\d{1,4}\s*[-./]\s*\d{1,2}", line
+        ):
+            continue
+        line = line.strip().strip("“”\"'")
+        line = re.sub(r"^[*#>\s]+", "", line).strip()
+        if line:
             picked = line
-    picked = picked.strip().strip("“”\"'")
-    picked = re.sub(r"^[*#\s]+", "", picked).strip()
+            break
     picked = re.sub(r"\s+", " ", picked)
     if not picked or picked.startswith(("{", "[")):
         return ""
     return picked[:60]
 
 
-def _wording_opener(proxy_path: str) -> str:
-    """Pick the opening word for this photo, stable across re-runs."""
-    digest = hashlib.sha1(proxy_path.encode("utf-8", "replace")).digest()
-    return WORDING_OPENERS[digest[0] % len(WORDING_OPENERS)]
+def _looks_like_description(comment: str, config: Config) -> bool:
+    """Ask the model whether a line merely describes the picture.
+
+    A failed judge is treated as "not a description" so a flaky extra call
+    never fails the analysis.
+    """
+    payload = {
+        "model": config.model,
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    "判断下面这句话是在“描述画面里有什么”，还是在写“感受/意象”。\n"
+                    "只回答一个词：描述 或 感受。\n"
+                    f"句子：{comment}"
+                ),
+            }
+        ],
+        "temperature": 0.0,
+        "max_tokens": 8,
+    }
+    try:
+        resp = _post_chat_completion(payload, config, retries=0)
+        answer = str(resp.json()["choices"][0]["message"]["content"]).strip()
+    except Exception:
+        return False
+    return "描述" in answer and "感受" not in answer
 
 
 def _request_wording(
-    proxy_path: str, config: Config, metadata: str
+    proxy_path: str,
+    config: Config,
+    metadata: str,
+    corrective: str = "",
 ) -> str:
     """Ask for the one-line comment; the only call that writes prose."""
-    instruction = f"这次请用“{_wording_opener(proxy_path)}”开头，只输出一句话。"
+    if corrective:
+        instruction = (
+            f"上一句“{corrective}”只是在描述画面。"
+            "重写一句：不要罗列画面，写一个意象或感受。只输出一句话。"
+        )
+    else:
+        instruction = "只输出一句话。"
     if metadata:
         instruction = f"{instruction}\n{metadata}"
     payload = {
         "model": config.model,
         "messages": _image_messages(
-            build_wording_prompt(config.system_prompt), proxy_path, instruction
+            build_wording_prompt(config.system_prompt) + "\n\n" + WORDING_FORMAT, proxy_path, instruction
         ),
-        "temperature": 0.4,
+        "temperature": 0.5,
         "max_tokens": 160,
     }
     parse_retries = max(0, int(getattr(config, "model_retries", 2) or 2))
@@ -438,7 +514,15 @@ def _request_wording(
         )
         try:
             data = resp.json()
-            wording = _clean_wording(data["choices"][0]["message"]["content"])
+            content = data["choices"][0]["message"]["content"]
+            try:
+                parsed = _parse_model_json(content)
+                wording = str(parsed.get("comment") or parsed.get("简评") or "")
+            except (ValueError, TypeError, RuntimeError):
+                # A model that ignores the tiny JSON shape may still have
+                # written a usable sentence; the cleaner handles labels.
+                wording = content
+            wording = _clean_wording(wording)
             if wording:
                 return wording
             raise RuntimeError("模型没有写出简评")
@@ -505,6 +589,16 @@ def analyze_image(
     """
     metadata = _metadata_text(context)
     wording = _request_wording(proxy_path, config, metadata)
+    if _looks_like_description(wording, config):
+        try:
+            rewritten = _request_wording(
+                proxy_path, config, metadata, corrective=wording
+            )
+            if rewritten:
+                wording = rewritten
+        except RuntimeError:
+            # Keep the first line rather than failing the photo.
+            pass
     scoring = _request_scoring(proxy_path, config, metadata)
     result: dict[str, Any] = dict(scoring)
     result["comment"] = wording

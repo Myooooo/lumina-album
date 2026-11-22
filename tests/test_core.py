@@ -551,12 +551,17 @@ class ApiClientTests(unittest.TestCase):
     def test_an_unmodified_stock_prompt_is_upgraded(self) -> None:
         from photo_reviewer.api_client import (
             LEGACY_STYLE_PROMPTS,
+            PREVIOUS_SHORT_STYLE_PROMPTS,
             PREVIOUS_STYLE_PROMPTS,
             PROMPT_PRESETS,
             migrate_legacy_style_prompt,
         )
 
-        for stock in (LEGACY_STYLE_PROMPTS, PREVIOUS_STYLE_PROMPTS):
+        for stock in (
+            LEGACY_STYLE_PROMPTS,
+            PREVIOUS_STYLE_PROMPTS,
+            PREVIOUS_SHORT_STYLE_PROMPTS,
+        ):
             for name, legacy in stock.items():
                 self.assertEqual(migrate_legacy_style_prompt(legacy), PROMPT_PRESETS[name])
 
@@ -570,14 +575,27 @@ class ApiClientTests(unittest.TestCase):
         self.assertEqual(_clean_wording("简评：风很大。"), "风很大。")
         self.assertEqual(_clean_wording("标题：海边\n简评：风很大。"), "风很大。")
         self.assertEqual(_clean_wording("**简评：** 风很大。"), "风很大。")
+        self.assertEqual(_clean_wording("背面小字：\n风很大。"), "风很大。")
+        self.assertEqual(_clean_wording("背面的小字：\n2013年冬夜，她抱紧它。"), "")
+        self.assertEqual(_clean_wording("背面小字：风很大。"), "风很大。")
+        self.assertEqual(
+            _clean_wording("背面小字：\n2014年冬，客厅。\n心里话：\n抱紧一点。"),
+            "抱紧一点。",
+        )
+        self.assertEqual(
+            _clean_wording("背面小字：10.25 晴\n心里话：塔尖先触到光。"),
+            "塔尖先触到光。",
+        )
         self.assertEqual(_clean_wording("```\n风很大。\n```"), "风很大。")
         self.assertEqual(_clean_wording('{"comment": "风很大。"}'), "")
 
     def test_retry_on_malformed_json_then_success(self) -> None:
         wording = Mock(status_code=200)
         wording.json.return_value = {
-            "choices": [{"message": {"content": "风很大。"}}]
+            "choices": [{"message": {"content": '{"comment": "风很大。"}'}}]
         }
+        judge = Mock(status_code=200)
+        judge.json.return_value = {"choices": [{"message": {"content": "感受"}}]}
         bad = Mock(status_code=200)
         bad.json.return_value = {"choices": [{"message": {"content": "not-json"}}]}
         good = Mock(status_code=200)
@@ -589,14 +607,14 @@ class ApiClientTests(unittest.TestCase):
         with (
             patch(
                 "photo_reviewer.api_client.requests.post",
-                side_effect=[wording, bad, good],
+                side_effect=[wording, judge, bad, good],
             ) as post,
             patch("photo_reviewer.api_client.time.sleep") as sleep,
         ):
             result = analyze_image(self.image_path, self.cfg)
             self.assertEqual(result["score"], 7.5)
             self.assertEqual(result["comment"], "风很大。")
-            self.assertEqual(post.call_count, 3)
+            self.assertEqual(post.call_count, 4)
             self.assertEqual(sleep.call_args_list[0][0][0], 1.0)
 
     def test_semantic_search_failure_is_explicit(self) -> None:
@@ -1308,11 +1326,16 @@ class ServerApiTests(unittest.TestCase):
     def test_an_old_stock_prompt_is_upgraded_on_startup(self) -> None:
         from photo_reviewer.api_client import (
             LEGACY_STYLE_PROMPTS,
+            PREVIOUS_SHORT_STYLE_PROMPTS,
             PREVIOUS_STYLE_PROMPTS,
             PROMPT_PRESETS,
         )
 
-        for stock in (LEGACY_STYLE_PROMPTS, PREVIOUS_STYLE_PROMPTS):
+        for stock in (
+            LEGACY_STYLE_PROMPTS,
+            PREVIOUS_STYLE_PROMPTS,
+            PREVIOUS_SHORT_STYLE_PROMPTS,
+        ):
             self.db.save_settings({"system_prompt": stock["literary"]})
             fresh = create_app(self.cfg, self.db)
             cfg = fresh.test_client().get("/api/config").get_json()
