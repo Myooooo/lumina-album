@@ -2995,11 +2995,20 @@ select {
 .dir-row { display: flex; gap: 8px; margin: 14px 0; }
 .dir-row input {
   flex: 1;
-  padding: 9px 12px;
+  height: 36px;
+  padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.8);
   font-size: 13.5px;
+}
+
+/* The import source and target sit next to a 36px button; without the explicit
+   height a form-grid input comes out at 37px and the pair looks one pixel off. */
+#importSource,
+#importTarget {
+  height: 36px;
+  padding: 0 12px;
 }
 .dir-list {
   list-style: none;
@@ -3388,6 +3397,17 @@ select {
 }
 .form-grid .full-row { grid-column: 1 / -1; }
 
+/* Text fields share the 36px control line with every button. With the default
+   padding they came out 37px tall - a pixel proud of the button beside them
+   (the import source row showed it most clearly). Checkboxes, sliders and the
+   compact score/volume number boxes keep their own sizing. */
+.form-grid input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.volume-number):not(.score-number),
+.form-grid select {
+  height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 /* ---------- Settings dialog: tabbed ---------- */
 .settings-content { max-width: 720px; }
 
@@ -3707,11 +3727,13 @@ select {
   color: var(--text);
 }
 
-/* Match the input's height exactly: a 30px button beside a 36px field reads as
-   two different rows. */
+/* Match the input's height and radius exactly: a 30px, 8px-radius button
+   beside a 36px, 11px-radius field reads as two different rows. */
 .prompt-save-row .btn.small {
   height: 36px;
   padding: 0 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3720,6 +3742,15 @@ select {
 .prompt-save-row .btn.small .btn-icon svg {
   width: 15px;
   height: 15px;
+}
+
+/* The destructive action is quiet until pointed at, then red. */
+.prompt-delete-btn:hover,
+.prompt-delete-btn:focus-visible {
+  color: var(--danger);
+  border-color: rgba(194, 89, 83, 0.45);
+  background: rgba(194, 89, 83, 0.08);
+  box-shadow: 0 4px 14px rgba(194, 89, 83, 0.12);
 }
 
 .preset-btn.active,

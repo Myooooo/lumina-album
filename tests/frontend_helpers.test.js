@@ -1753,6 +1753,19 @@ section("prompt editor");
     true
   );
   check(
+    "save and delete buttons share the name field's radius",
+    /\.prompt-save-row \.btn\.small \{[\s\S]{0,140}border-radius: var\(--radius-md\)/.test(
+      css
+    ),
+    true
+  );
+  check(
+    "the delete button is short and turns red on hover",
+    /id="deletePromptPresetBtn"[^>]*>[\s\S]{0,90}删除<\/button>/.test(html) &&
+      /\.prompt-delete-btn:hover[\s\S]{0,120}color: var\(--danger\)/.test(css),
+    true
+  );
+  check(
     "saved prompts get their own icon",
     /customPrompt:/.test(
       fs.readFileSync(path.join(__dirname, "..", "static", "js", "icons.js"), "utf8")

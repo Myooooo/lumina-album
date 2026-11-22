@@ -360,6 +360,7 @@ async function main() {
     deletePrompt.classList.contains("hidden"),
     false
   );
+  check("the delete action reads 删除", deletePrompt.textContent.trim(), "删除");
   check("the menu closes after picking", customMenu.classList.contains("hidden"), true);
 
   // Editing the text keeps the saved prompt as the base being edited.
