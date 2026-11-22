@@ -651,7 +651,10 @@ function renderGallery(options = {}) {
     state.renderedCount = 0;
   }
   if (!state.photos.length) {
-    const totalInAlbum = Number(($("statTotal") && $("statTotal").textContent) || 0);
+    // The album's own size, not the stats row: when a folder has just been
+    // switched the row still shows the previous album for a frame, which made
+    // a brand-new (empty) folder claim it was only hiding behind filters.
+    const totalInAlbum = Number(state.albumTotal || 0);
     const hasFilterOrSearch =
       ($("searchInput") && $("searchInput").value.trim() !== "") ||
       ($("kindFilter") && $("kindFilter").value !== "") ||

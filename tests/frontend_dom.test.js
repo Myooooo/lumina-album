@@ -157,7 +157,15 @@ async function main() {
   window.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), body: options.body || "" });
     const key = String(url).split("?")[0];
-    const body = API[key] ?? {};
+    const decoded = decodeURIComponent(String(url));
+    let body = API[key] ?? {};
+    if (key === "/api/stats" && decoded.includes("E:\\empty")) {
+      body = { total: 0, analyzed: 0, favorite: 0, pending: 0, deleted: 0 };
+    } else if (key === "/api/photos" && decoded.includes("E:\\empty")) {
+      body = { photos: [], has_more: false };
+    } else if (key === "/api/photos" && decoded.includes("status=favorite")) {
+      body = { photos: [], has_more: false };
+    }
     return {
       ok: true,
       status: 200,
@@ -265,6 +273,37 @@ async function main() {
   check("Escape leaves the dialog underneath open", settings.classList.contains("hidden"), false);
   document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   check("a second Escape closes the next dialog", settings.classList.contains("hidden"), true);
+
+  // --- empty state ------------------------------------------------------
+  window.openAlbumFolder("E:\\empty");
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  const emptyText = document.getElementById("emptyStateText");
+  const emptyReset = document.getElementById("emptyResetFiltersBtn");
+  check(
+    "a brand-new folder says the album is empty",
+    emptyText.textContent.includes("这一册还是空白"),
+    true
+  );
+  check(
+    "an empty album offers no filter reset",
+    emptyReset.classList.contains("hidden"),
+    true
+  );
+
+  window.openAlbumFolder("E:\\album");
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  window.applyStatFilter("favorite");
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  check(
+    "a filter with no match says so",
+    emptyText.textContent.includes("没有寻访到"),
+    true
+  );
+  check(
+    "a filter with no match offers the reset",
+    emptyReset.classList.contains("hidden"),
+    false
+  );
 
   check("booting and exercising the page raised no errors", problems, []);
 

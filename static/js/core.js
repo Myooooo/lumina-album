@@ -15,6 +15,11 @@ const state = {
   //: settings panel's hidden list, and never remembered as the open album.
   hiddenFolders: [],
   folderHidden: false,
+  //: How many photos the open album holds, regardless of the active filters.
+  //: The empty state needs this to tell "this album has nothing" apart from
+  //: "these filters match nothing"; reading it off the stats row was a frame
+  //: behind while a folder switch was still loading.
+  albumTotal: 0,
   importSource: "",
   photos: [],
   selected: new Set(),
@@ -384,9 +389,15 @@ async function loadInitialFolder() {
  */
 async function applyDefaultStatusFilter() {
   let value = "analyzed";
-  if (state.folder) {
+  const folder = state.folder || "";
+  // Until this album's own numbers arrive it holds nothing as far as the
+  // empty state is concerned; the previous album's total must not leak in.
+  state.albumTotal = 0;
+  if (folder) {
     try {
-      const stats = await api(`/api/stats?folder=${encodeURIComponent(state.folder)}`);
+      const stats = await api(`/api/stats?folder=${encodeURIComponent(folder)}`);
+      if (folder !== (state.folder || "")) return;
+      state.albumTotal = Number(stats.total) || 0;
       if (!stats.analyzed && stats.total) value = "all";
     } catch (e) {
       console.warn("loadStats failed", e);
@@ -796,11 +807,19 @@ function dimensionValues(dims, score, onDark = false) {
   }).join("");
 }
 
+//: Guards against an older stats response landing after a folder switch.
+let statsRequestToken = 0;
+
 async function loadStats() {
+  const folder = state.folder || "";
+  const token = ++statsRequestToken;
   try {
-    const folder = state.folder;
     const q = folder ? `?folder=${encodeURIComponent(folder)}` : "";
     const stats = await api(`/api/stats${q}`);
+    // A folder switch leaves the previous album's request in flight; its
+    // numbers must not overwrite the new album's.
+    if (token !== statsRequestToken || folder !== (state.folder || "")) return;
+    state.albumTotal = Number(stats.total) || 0;
     $("statTotal").textContent = stats.total || 0;
     $("statAnalyzed").textContent = stats.analyzed || 0;
     $("statFavorite").textContent = stats.favorite || 0;

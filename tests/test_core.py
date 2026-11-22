@@ -7533,5 +7533,68 @@ class HiddenFolderTests(unittest.TestCase):
         return canonical_path(path)
 
 
+class OpenFolderApiTests(unittest.TestCase):
+    """/api/open-folder must reach the system opener instead of raising."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.folder = os.path.join(self.tmp.name, "album")
+        os.makedirs(self.folder)
+        self.cfg = Config(
+            data_dir=self.tmp.name, db_path=os.path.join(self.tmp.name, "library.db")
+        )
+        self.db = Database(self.cfg.db_path)
+        self.app = create_app(self.cfg, self.db)
+        self.client = self.app.test_client()
+
+    def tearDown(self) -> None:
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_open_folder_hands_the_path_to_the_system(self) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "photo_reviewer.web.routes_files._open_with_system"
+        ) as opener:
+            resp = self.client.post("/api/open-folder", json={"path": self.folder})
+        self.assertEqual(resp.status_code, 200)
+        opener.assert_called_once()
+        self.assertEqual(
+            os.path.normcase(opener.call_args.args[0]),
+            os.path.normcase(os.path.realpath(self.folder)),
+        )
+
+    def test_open_folder_rejects_a_missing_directory(self) -> None:
+        missing = os.path.join(self.tmp.name, "nope")
+        resp = self.client.post("/api/open-folder", json={"path": missing})
+        self.assertEqual(resp.status_code, 404)
+
+    def test_open_file_hands_the_photo_to_the_system(self) -> None:
+        from unittest.mock import patch
+
+        path = os.path.join(self.folder, "one.jpg")
+        Image.new("RGB", (16, 12), (90, 80, 70)).save(path, "JPEG")
+        self.db.upsert_photo(
+            {
+                "path": path,
+                "folder": self.folder,
+                "filename": "one.jpg",
+                "status": "analyzed",
+            }
+        )
+        photo_id = self.db.get_photo_by_path(path)["id"]
+        with patch(
+            "photo_reviewer.web.routes_files._open_with_system"
+        ) as opener:
+            resp = self.client.post("/api/open-file", json={"photo_id": photo_id})
+        self.assertEqual(resp.status_code, 200)
+        opener.assert_called_once()
+        self.assertEqual(
+            os.path.normcase(opener.call_args.args[0]),
+            os.path.normcase(os.path.realpath(path)),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1689,6 +1689,26 @@ section("hidden albums");
   );
 }
 
+/* ---------------------------------------------------------- empty states
+   The big mark at the top of an empty gallery is a display icon; the reset
+   button inside the same box must keep the ordinary button icon size. */
+section("empty states");
+{
+  const html = fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
+  check(
+    "the empty-state display icon is scoped to its own element",
+    /\.empty-state \.empty-icon svg \{/.test(css) &&
+      !/\.empty-state svg \{/.test(css),
+    true
+  );
+  check(
+    "the reset button uses the normal button icon",
+    /id="emptyResetFiltersBtn"[\s\S]{0,160}data-icon="reset"/.test(html),
+    true
+  );
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`

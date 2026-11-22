@@ -1680,7 +1680,9 @@ select {
   gap: 16px;
 }
 
-.empty-state svg {
+/* Only the leading mark is a display size; the reset button inside the empty
+   state keeps the normal 16px button icon instead of inheriting this. */
+.empty-state .empty-icon svg {
   width: 48px;
   height: 48px;
   color: var(--muted-light);
