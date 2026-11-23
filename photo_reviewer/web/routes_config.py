@@ -150,6 +150,12 @@ def register(app, cfg, database):
                 return jsonify({"error": "dup_threshold 必须是整数"}), 400
             staged["dup_threshold"] = max(0, min(value, 24))
 
+        if "theme" in data:
+            theme = str(data["theme"] or "").strip().lower()
+            if theme not in {"classic", "paper", "vintage"}:
+                return jsonify({"error": "不支持的主题名称"}), 400
+            staged["theme"] = theme
+
         if not staged:
             return jsonify({"error": "没有可保存的字段"}), 400
         database.save_ui_state(staged)

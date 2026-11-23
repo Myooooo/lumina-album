@@ -5,9 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>拾光相册 / Lumina</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="stylesheet" href="/static/fonts/fonts.css" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body data-view="album">
+<body data-view="album" data-theme="classic">
   <header class="topbar">
     <div class="view-switcher-row">
       <div class="brand">
@@ -24,7 +25,44 @@
         <button id="duplicatesBtn" class="view-tab" role="tab" aria-selected="false"
                 title="找出看起来相似的回忆"><span class="btn-icon" data-icon="rawLayers"></span>相似回忆</button>
       </div>
-      <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
+      <div class="view-switcher-actions">
+        <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
+        <div class="theme-menu-wrap" id="themeMenuWrap">
+          <button id="themeToggleBtn" class="btn theme-toggle-btn" type="button"
+                  aria-haspopup="listbox" aria-expanded="false" aria-controls="themeMenu"
+                  title="切换界面主题">
+            <span class="btn-icon" id="themeToggleIcon" data-icon="themeClassic"></span>
+            <span id="themeToggleLabel">经典画册</span>
+            <span class="theme-toggle-caret" data-icon="chevronDown"></span>
+          </button>
+          <div id="themeMenu" class="theme-menu hidden" role="listbox" aria-label="选择界面主题">
+            <button type="button" class="theme-menu-item active" role="option" data-theme-choice="classic" aria-selected="true">
+              <span class="theme-menu-icon" data-icon="themeClassic"></span>
+              <span class="theme-menu-text">
+                <span class="theme-menu-title">经典画册</span>
+                <span class="theme-menu-sub">暖光通透 · 拍立得画廊</span>
+              </span>
+              <span class="theme-menu-check" data-icon="check"></span>
+            </button>
+            <button type="button" class="theme-menu-item" role="option" data-theme-choice="paper" aria-selected="false">
+              <span class="theme-menu-icon" data-icon="themePaper"></span>
+              <span class="theme-menu-text">
+                <span class="theme-menu-title">纸质手账</span>
+                <span class="theme-menu-sub">棉纸横线 · 和纸胶带拼贴</span>
+              </span>
+              <span class="theme-menu-check" data-icon="check"></span>
+            </button>
+            <button type="button" class="theme-menu-item" role="option" data-theme-choice="vintage" aria-selected="false">
+              <span class="theme-menu-icon" data-icon="themeVintage"></span>
+              <span class="theme-menu-text">
+                <span class="theme-menu-title">复古胶片</span>
+                <span class="theme-menu-sub">暗房冲印 · 35mm 胶卷日期戳</span>
+              </span>
+              <span class="theme-menu-check" data-icon="check"></span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="folder-row">
       <div class="folder-input-wrapper">
@@ -304,22 +342,24 @@
     <div class="modal-content export-content">
       <button class="modal-close" data-close="exportModal"><span class="btn-icon" data-icon="close"></span></button>
       <h2><span class="modal-title-icon" data-icon="file"></span>导出回忆</h2>
-      <p class="export-lede" id="exportLede">把这次选中的照片收进一份可以带走的回忆里。</p>
-      <div class="export-choices">
-        <button id="exportHtmlBtn" class="export-choice" type="button">
-          <span class="export-choice-icon" data-icon="file"></span>
-          <span class="export-choice-body">
-            <span class="export-choice-title">存成网页</span>
-            <span class="export-choice-hint">单个 HTML 文件，图片全部打包在里面。适合长期保存、打印，也能直接发给朋友。</span>
-          </span>
-        </button>
-        <button id="exportPngBtn" class="export-choice" type="button">
-          <span class="export-choice-icon" data-icon="image"></span>
-          <span class="export-choice-body">
-            <span class="export-choice-title">存成长图</span>
-            <span class="export-choice-hint">一张竖版长图，适合直接发到社交平台，不用对方打开任何文件。</span>
-          </span>
-        </button>
+      <div class="modal-body">
+        <p class="export-lede" id="exportLede">把这次选中的照片收进一份可以带走的回忆里。</p>
+        <div class="export-choices">
+          <button id="exportHtmlBtn" class="export-choice" type="button">
+            <span class="export-choice-icon" data-icon="file"></span>
+            <span class="export-choice-body">
+              <span class="export-choice-title">存成网页</span>
+              <span class="export-choice-hint">单个 HTML 文件，图片全部打包在里面。适合长期保存、打印，也能直接发给朋友。</span>
+            </span>
+          </button>
+          <button id="exportPngBtn" class="export-choice" type="button">
+            <span class="export-choice-icon" data-icon="image"></span>
+            <span class="export-choice-body">
+              <span class="export-choice-title">存成长图</span>
+              <span class="export-choice-hint">一张竖版长图，适合直接发到社交平台，不用对方打开任何文件。</span>
+            </span>
+          </button>
+        </div>
       </div>
       <div class="modal-actions">
         <button class="btn" data-close="exportModal">先不导出</button>
@@ -395,43 +435,45 @@
     <div class="modal-content">
       <button class="modal-close" data-close="importModal"><span class="btn-icon" data-icon="close"></span></button>
       <h2><span class="modal-title-icon" data-icon="import"></span>从 SD 卡导入</h2>
-      <div class="form-grid">
-        <label class="full-row">SD 卡或来源文件夹
-          <div class="dir-row">
-            <input id="importSource" type="text" placeholder="例如 E:\DCIM" />
-            <button id="importPickSourceBtn" class="btn" type="button"><span class="btn-icon" data-icon="sdCard"></span>选择</button>
-          </div>
-        </label>
-        <label class="full-row">导入到（当前的回忆文件夹）
-          <input id="importTarget" type="text" readonly />
-        </label>
-        <label>导入模式
-          <select id="importMode">
-            <option value="incremental" selected>增量导入（只拷贝新增文件）</option>
-            <option value="full">全量导入（覆盖同名文件）</option>
-          </select>
-        </label>
-        <label>RAW 文件
-          <select id="importRawPolicy">
-            <option value="both" selected>JPG+RAW</option>
-            <option value="image">仅 JPG</option>
-            <option value="raw">仅 RAW</option>
-          </select>
-        </label>
-        <label>拷贝之后
-          <select id="importAfter">
-            <option value="copy">仅拷贝文件</option>
-            <option value="index" selected>拷贝并建立索引（不调用模型）</option>
-            <option value="organize">拷贝并整理（索引 + 模型分析）</option>
-          </select>
-        </label>
-        <label class="import-check full-row">
-          <input type="checkbox" id="importResetAnalysis" checked />
-          全量导入覆盖文件时，清除该照片的旧评分与标签
-        </label>
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="full-row">SD 卡或来源文件夹
+            <div class="dir-row">
+              <input id="importSource" type="text" placeholder="例如 E:\DCIM" />
+              <button id="importPickSourceBtn" class="btn" type="button"><span class="btn-icon" data-icon="sdCard"></span>选择</button>
+            </div>
+          </label>
+          <label class="full-row">导入到（当前的回忆文件夹）
+            <input id="importTarget" type="text" readonly />
+          </label>
+          <label>导入模式
+            <select id="importMode">
+              <option value="incremental" selected>增量导入（只拷贝新增文件）</option>
+              <option value="full">全量导入（覆盖同名文件）</option>
+            </select>
+          </label>
+          <label>RAW 文件
+            <select id="importRawPolicy">
+              <option value="both" selected>JPG+RAW</option>
+              <option value="image">仅 JPG</option>
+              <option value="raw">仅 RAW</option>
+            </select>
+          </label>
+          <label>拷贝之后
+            <select id="importAfter">
+              <option value="copy">仅拷贝文件</option>
+              <option value="index" selected>拷贝并建立索引（不调用模型）</option>
+              <option value="organize">拷贝并整理（索引 + 模型分析）</option>
+            </select>
+          </label>
+          <label class="import-check full-row">
+            <input type="checkbox" id="importResetAnalysis" checked />
+            全量导入覆盖文件时，清除该照片的旧评分与标签
+          </label>
+        </div>
+        <p class="import-note">本地已有、SD 卡上没有的照片不会被删除或修改。目录结构按 SD 卡原样保留。</p>
+        <div id="importPreview" class="import-preview hidden"></div>
       </div>
-      <p class="import-note">本地已有、SD 卡上没有的照片不会被删除或修改。目录结构按 SD 卡原样保留。</p>
-      <div id="importPreview" class="import-preview hidden"></div>
       <div class="modal-actions">
         <button id="importPlanBtn" class="btn"><span class="btn-icon" data-icon="scan"></span>预演</button>
         <button id="importRunBtn" class="btn primary"><span class="btn-icon" data-icon="import"></span>开始导入</button>
@@ -572,6 +614,31 @@
               <input id="setLiveVolume" class="volume-range" type="range" min="0" max="100" step="1" value="0" />
               <input id="setLiveVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
             </div>
+          </div>
+
+          <h3 class="settings-subtitle">界面主题</h3>
+          <div class="theme-picker" id="settingsThemePicker" role="radiogroup" aria-label="选择界面主题">
+            <button type="button" class="theme-option active" data-theme-choice="classic" aria-checked="true">
+              <span class="theme-option-swatch swatch-classic" aria-hidden="true"><span class="theme-option-icon" data-icon="themeClassic"></span></span>
+              <span class="theme-option-body">
+                <span class="theme-option-title">经典画册</span>
+                <span class="theme-option-desc">暖光通透摄影画册，居中拍立得与毛玻璃页眉。</span>
+              </span>
+            </button>
+            <button type="button" class="theme-option" data-theme-choice="paper" aria-checked="false">
+              <span class="theme-option-swatch swatch-paper" aria-hidden="true"><span class="theme-option-icon" data-icon="themePaper"></span></span>
+              <span class="theme-option-body">
+                <span class="theme-option-title">纸质手账 · Paper</span>
+                <span class="theme-option-desc">横线棉纸肌理、撕边和纸胶带与编辑排版卡片。</span>
+              </span>
+            </button>
+            <button type="button" class="theme-option" data-theme-choice="vintage" aria-checked="false">
+              <span class="theme-option-swatch swatch-vintage" aria-hidden="true"><span class="theme-option-icon" data-icon="themeVintage"></span></span>
+              <span class="theme-option-body">
+                <span class="theme-option-title">复古胶片 · Vintage</span>
+                <span class="theme-option-desc">暗房黑褐冲印、35mm 胶卷齿孔与石英橙红日期戳。</span>
+              </span>
+            </button>
           </div>
         </section>
 
@@ -773,18 +840,20 @@
     <div class="modal-content">
       <button class="modal-close" data-close="cardSyncModal"><span class="btn-icon" data-icon="close"></span></button>
       <h2><span class="modal-title-icon" data-icon="sdCard"></span>同步到 SD 卡</h2>
-      <div class="card-sync-head">
-        <div class="card-sync-path"><span class="btn-icon" data-icon="sdCard"></span><span id="cardSyncSource">—</span></div>
-        <div class="card-sync-actions">
-          <button id="cardSyncOpenBtn" class="btn small" type="button"><span class="btn-icon" data-icon="folderOpen"></span>打开卡片</button>
-          <button id="cardSyncRefreshBtn" class="btn small" type="button"><span class="btn-icon" data-icon="refresh"></span>重新检查</button>
+      <div class="modal-body">
+        <div class="card-sync-head">
+          <div class="card-sync-path"><span class="btn-icon" data-icon="sdCard"></span><span id="cardSyncSource">—</span></div>
+          <div class="card-sync-actions">
+            <button id="cardSyncOpenBtn" class="btn small" type="button"><span class="btn-icon" data-icon="folderOpen"></span>打开卡片</button>
+            <button id="cardSyncRefreshBtn" class="btn small" type="button"><span class="btn-icon" data-icon="refresh"></span>重新检查</button>
+          </div>
         </div>
+        <div id="cardSyncPreview" class="import-preview hidden"></div>
+        <label class="import-check full-row" id="cardSyncRawRow">
+          <input type="checkbox" id="cardSyncIncludeRaw" checked />
+          同时处理 RAW 文件（连同名原始文件一起删除或恢复）
+        </label>
       </div>
-      <div id="cardSyncPreview" class="import-preview hidden"></div>
-      <label class="import-check full-row" id="cardSyncRawRow">
-        <input type="checkbox" id="cardSyncIncludeRaw" checked />
-        同时处理 RAW 文件（连同名原始文件一起删除或恢复）
-      </label>
       <div class="modal-actions">
         <button id="cardSyncForgetBtn" class="btn small" type="button" title="不再把当前目录与这张卡关联"><span class="btn-icon" data-icon="linkOff"></span>解除关联</button>
         <button id="cardSyncCancelBtn" class="btn" type="button"><span class="btn-icon" data-icon="close"></span>稍后再说</button>

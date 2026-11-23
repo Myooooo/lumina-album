@@ -1,0 +1,86 @@
+/* ==========================================================================
+   Lumina Album - Local-First Stationery Typography (@font-face)
+   100% offline-friendly: tries system-installed open-source fonts via local()
+   first, then loads self-hosted .woff2 files placed in /static/fonts/.
+   Run `bash static/fonts/download_fonts.sh` to fetch the open-source .woff2
+   files (LXGW WenKai Lite, Cormorant Garamond, IBM Plex Mono).
+   ========================================================================== */
+
+/* Editorial Latin Serif (Brand subtitle, dates, chapter accents) */
+@font-face {
+  font-family: "Lumina Editorial Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("Cormorant Garamond Regular"),
+    local("Cormorant Garamond"),
+    url("/static/fonts/cormorant-garamond-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lumina Editorial Serif";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src:
+    local("Cormorant Garamond SemiBold"),
+    local("Cormorant Garamond Bold"),
+    url("/static/fonts/cormorant-garamond-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lumina Editorial Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("Cormorant Garamond Italic"),
+    url("/static/fonts/cormorant-garamond-400-italic.woff2") format("woff2");
+}
+
+/* Warm Stationery Handwriting / Book Script (Captions, quotes, empty states) */
+@font-face {
+  font-family: "Lumina WenKai";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("LXGW WenKai Lite"),
+    local("LXGW WenKai"),
+    local("霞鹜文楷"),
+    url("/static/fonts/lxgw-wenkai-lite-400.woff2") format("woff2"),
+    url("/static/fonts/lxgw-wenkai-lite-400.ttf") format("truetype");
+}
+
+/* Archival Typewriter Monospace (EXIF specs, scores, postmark dates) */
+@font-face {
+  font-family: "Lumina Archival Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("IBM Plex Mono"),
+    local("IBM Plex Mono Regular"),
+    url("/static/fonts/ibm-plex-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lumina Archival Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    local("IBM Plex Mono Medium"),
+    url("/static/fonts/ibm-plex-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Lumina Archival Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src:
+    local("IBM Plex Mono SemiBold"),
+    url("/static/fonts/ibm-plex-mono-600.woff2") format("woff2");
+}

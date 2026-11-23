@@ -320,6 +320,43 @@ async function loadYears() {
 }
 
 /**
+ * Format a compact editorial date ("2024.11.08") for a card's meta row.
+ * Prefers capture time when available, falling back to analyzed_at.
+ */
+function cardDateText(photo) {
+  const raw =
+    (photo.exif && photo.exif.datetime_original) ||
+    photo.taken_at ||
+    photo.analyzed_at ||
+    "";
+  const match = /^(\d{4})[-:/](\d{2})[-:/](\d{2})/.exec(String(raw).trim());
+  return match ? `${match[1]}.${match[2]}.${match[3]}` : "";
+}
+
+const VINTAGE_FILM_STOCKS = [
+  "KODAK PORTRA 400",
+  "FUJIFILM SUPERIA 400",
+  "KODAK GOLD 200",
+  "CINESTILL 800T",
+  "ILFORD HP5 PLUS 400",
+];
+
+function vintageFilmCode(photo) {
+  const id = Math.abs(Number(photo.id) || 0);
+  const stock = VINTAGE_FILM_STOCKS[id % VINTAGE_FILM_STOCKS.length];
+  const frame = String((id % 36) + 1).padStart(2, "0");
+  return { stock, frame: `${frame}A` };
+}
+
+function vintageDateStamp(photo) {
+  const dot = cardDateText(photo);
+  if (!dot) return "";
+  const parts = dot.split(".");
+  if (parts.length !== 3) return "";
+  return `'${parts[0].slice(-2)} ${parts[1]} ${parts[2]}`;
+}
+
+/**
  * Build the markup for one card.
  *
  * Split out of `renderGallery` so a row that changed (a favourite toggled, a
@@ -345,6 +382,11 @@ function cardHtml(photo) {
           </div>`
     : "";
 
+  const dateStr = cardDateText(photo);
+  const titleText = (photo.title || "").trim();
+  const hasMetaRow = Boolean(photo.location || dateStr);
+  const isHighScore = hasScore && Number(photo.score) >= 8.5;
+
   let deleteActions = "";
   if (isDeleted) {
     // A trashed photo is not analysed again; offering the button would only
@@ -367,20 +409,31 @@ function cardHtml(photo) {
   // down both edges, and a play mark on the frame. It keeps the same box, the
   // same entrance animation and the same hover lift, so the grid still reads as
   // one collection - just a different material.
+  const film = vintageFilmCode(photo);
+  const quartzDate = vintageDateStamp(photo);
   return `
-    <div class="polaroid-inner">
+    <div class="polaroid-inner"${isHighScore ? ' data-high-score="1"' : ""}>
       <div class="polaroid-front">
-        ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape"></div>'}
+        ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape" aria-hidden="true"></div>'}
+        ${isVideo ? "" : `<div class="vintage-film-header" aria-hidden="true"><span class="vintage-film-stock">${film.stock}</span><span class="vintage-film-frame">▸ ${film.frame}</span></div>`}
         <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
         ${rawBadge}
         ${liveBadgeHtml(photo)}
         <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" />${
           isVideo ? videoDurationBadge(photo) : ""
-        }</div>
+        }${quartzDate && !isVideo ? `<span class="vintage-date-stamp" aria-hidden="true">${quartzDate}</span>` : ""}</div>
         <div class="polaroid-body">
-          ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
-          ${photo.reason ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(photo.reason)}</div>` : ""}
-          <div class="back-tags">${tagsHtml || ""}</div>
+          ${
+            hasMetaRow
+              ? `<div class="card-meta-row">
+                  ${photo.location ? `<div class="photo-location"><span class="classic-icon" aria-hidden="true">${ICONS.pin}</span><span>${escapeHtml(photo.location)}</span></div>` : '<span class="photo-location-spacer"></span>'}
+                  ${dateStr ? `<span class="card-date">${escapeHtml(dateStr)}</span>` : ""}
+                </div>`
+              : ""
+          }
+          ${titleText ? `<h3 class="photo-title">${escapeHtml(titleText)}</h3>` : ""}
+          ${photo.reason ? `<div class="photo-comment"><span class="classic-icon" aria-hidden="true">${ICONS.quote}</span>${escapeHtml(photo.reason)}</div>` : ""}
+          ${tagsHtml ? `<div class="back-tags">${tagsHtml}</div>` : ""}
           ${scorePills}
           <div class="card-actions">
             <label class="card-check" title="选择">
@@ -415,26 +468,42 @@ function memoryPolaroidHtml(photo, options = {}) {
         .map((tag) => `<span class="tag">${escapeHtml(String(tag))}</span>`)
         .join("")}</div>`
     : "";
-  const score =
-    photo.score !== null && photo.score !== undefined
-      ? `<span class="score-pill total">${Number(photo.score).toFixed(1)}</span>`
-      : "";
-  const comment = (photo.reason || photo.title || "").trim();
+  const hasScore = photo.score !== null && photo.score !== undefined;
+  const score = hasScore
+    ? `<span class="score-pill total">总分 ${Number(photo.score).toFixed(1)}</span>`
+    : "";
+  const dateStr = cardDateText(photo);
+  const titleText = (photo.title || "").trim();
+  const comment = (photo.reason || "").trim();
+  const hasMetaRow = Boolean(photo.location || dateStr);
+  const isHighScore = hasScore && Number(photo.score) >= 8.5;
+  const film = vintageFilmCode(photo);
+  const quartzDate = vintageDateStamp(photo);
   return `
     <div class="polaroid-card${isVideo ? " is-video" : ""}${deactivate ? " is-static" : ""}"
          data-id="${photo.id}">
-      <div class="polaroid-inner">
+      <div class="polaroid-inner"${isHighScore ? ' data-high-score="1"' : ""}>
         <div class="polaroid-front">
-          ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape"></div>'}
+          ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape" aria-hidden="true"></div>'}
+          ${isVideo ? "" : `<div class="vintage-film-header" aria-hidden="true"><span class="vintage-film-stock">${film.stock}</span><span class="vintage-film-frame">▸ ${film.frame}</span></div>`}
           <div class="polaroid-photo-frame">
             <img class="polaroid-photo" data-src="${thumbnailUrl(photo)}"
                  alt="${escapeHtml(photo.filename || "")}" loading="lazy" decoding="async" />
+            ${quartzDate && !isVideo ? `<span class="vintage-date-stamp" aria-hidden="true">${quartzDate}</span>` : ""}
           </div>
           <div class="polaroid-body">
-            ${photo.location ? `<div class="photo-location">${ICONS.pin} <span>${escapeHtml(photo.location)}</span></div>` : ""}
-            ${comment ? `<div class="photo-comment">${ICONS.quote} ${escapeHtml(comment)}</div>` : ""}
+            ${
+              hasMetaRow
+                ? `<div class="card-meta-row">
+                    ${photo.location ? `<div class="photo-location"><span class="classic-icon" aria-hidden="true">${ICONS.pin}</span><span>${escapeHtml(photo.location)}</span></div>` : '<span class="photo-location-spacer"></span>'}
+                    ${dateStr ? `<span class="card-date">${escapeHtml(dateStr)}</span>` : ""}
+                  </div>`
+                : ""
+            }
+            ${titleText ? `<h3 class="photo-title">${escapeHtml(titleText)}</h3>` : ""}
+            ${comment ? `<div class="photo-comment"><span class="classic-icon" aria-hidden="true">${ICONS.quote}</span>${escapeHtml(comment)}</div>` : ""}
             ${tagsHtml}
-            ${score ? `<div class="card-pills">${score}</div>` : ""}
+            ${score ? `<div class="card-actions card-actions-readonly"><div class="score-pills">${score}</div></div>` : ""}
           </div>
         </div>
       </div>

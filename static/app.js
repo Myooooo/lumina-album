@@ -44,6 +44,7 @@ function init() {
     toggleFolderHistory();
   });
   $("settingsBtn").addEventListener("click", openSettings);
+  initTheme();
   $("searchBtn").addEventListener("click", loadPhotos);
   $("resetFiltersBtn").addEventListener("click", resetFilters);
   if ($("emptyResetFiltersBtn")) {
@@ -520,6 +521,7 @@ function footprintCardHtml(place, index) {
     ? `<img class="footprint-img" src="/api/thumbnail/${cover.id}?v=${encodeURIComponent(cover.thumb_version || "")}"
             alt="${escapeHtml(place.city)}" loading="lazy" decoding="async" />`
     : '<span class="footprint-noimg"></span>';
+  const postmarkYear = years.length ? String(years[years.length - 1]) : "LUMINA";
   return `
     <button class="footprint-card" type="button" data-city="${escapeHtml(place.city)}"
             data-index="${index}"
@@ -528,6 +530,7 @@ function footprintCardHtml(place, index) {
       <span class="footprint-body">
         <span class="footprint-city">${escapeHtml(place.city)}</span>
         <span class="footprint-meta">${place.count} 张${span ? ` · ${span}` : ""}</span>
+        <span class="footprint-postmark" aria-hidden="true">${escapeHtml(postmarkYear)}</span>
       </span>
     </button>`;
 }
@@ -807,6 +810,7 @@ function memoryYearHtml(bucket, index) {
   return `
     <section class="memory-year" style="animation-delay:${Math.min(index, 10) * 0.05}s">
       <header class="memory-year-head">
+        <span class="memory-year-stamp" aria-hidden="true">${escapeHtml(String(bucket.year))}</span>
         <span class="memory-year-title">${yearsAgoText(bucket.years_ago)}</span>
         <span class="memory-year-meta">${bucket.year} · ${bucket.count} 张</span>
       </header>

@@ -31,6 +31,8 @@ const state = {
   previewContext: null,
   //: Which of the four views is on screen.
   view: "album",
+  //: Active visual theme: "classic" (原版画册) or "paper" (纸质手账).
+  theme: "classic",
   //: True once the first view has been painted. The very first showView() has
   //: nothing to animate away from, so it activates immediately rather than
   //: waiting out the exit duration behind an empty screen.
@@ -270,6 +272,9 @@ async function loadUiState() {
     // to re-decide every time the page opens.
     if (Number.isFinite(Number(saved.dup_threshold))) {
       dupState.threshold = Math.max(0, Math.min(Number(saved.dup_threshold), 24));
+    }
+    if (saved.theme === "classic" || saved.theme === "paper" || saved.theme === "vintage") {
+      applyTheme(saved.theme, { persist: false });
     }
   } catch (e) {
     // A brand-new database has no state yet; an empty one is a fine default.
@@ -879,5 +884,126 @@ function renderSkeleton() {
       </div>
     </div>
   `).join("");
+}
+
+/* ==========================================================================
+   Theme Switcher ("classic" 经典画册 / "paper" 纸质手账 / "vintage" 复古胶片)
+   Stored both in localStorage (for instant zero-flash paint) and in server
+   ui_state (so the choice follows the album across browsers).
+   ========================================================================== */
+
+const THEME_META = {
+  classic: { label: "经典画册", icon: "themeClassic" },
+  paper: { label: "纸质手账", icon: "themePaper" },
+  vintage: { label: "复古胶片", icon: "themeVintage" },
+};
+
+function closeThemeMenu() {
+  const menu = $("themeMenu");
+  const btn = $("themeToggleBtn");
+  if (menu) menu.classList.add("hidden");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+}
+
+function toggleThemeMenu() {
+  const menu = $("themeMenu");
+  const btn = $("themeToggleBtn");
+  if (!menu || !btn) return;
+  const opening = menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !opening);
+  btn.setAttribute("aria-expanded", opening ? "true" : "false");
+}
+
+function applyTheme(theme, options = {}) {
+  const { persist = true, notify = false } = options;
+  const next = THEME_META[theme] ? theme : "classic";
+  const meta = THEME_META[next];
+  state.theme = next;
+  if (document.body) {
+    document.body.dataset.theme = next;
+  }
+  const label = $("themeToggleLabel");
+  if (label) label.textContent = meta.label;
+  const iconEl = $("themeToggleIcon");
+  if (iconEl && ICONS && ICONS[meta.icon]) {
+    iconEl.innerHTML = ICONS[meta.icon];
+  }
+  const toggleBtn = $("themeToggleBtn");
+  if (toggleBtn) {
+    toggleBtn.title = `当前主题：${meta.label}（点击切换）`;
+  }
+  document.querySelectorAll("#themeMenu .theme-menu-item").forEach((item) => {
+    const active = item.dataset.themeChoice === next;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  document.querySelectorAll("#settingsThemePicker .theme-option").forEach((btn) => {
+    const active = btn.dataset.themeChoice === next;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-checked", active ? "true" : "false");
+  });
+  try {
+    window.localStorage.setItem("lumina_theme", next);
+  } catch (e) {}
+  if (persist) {
+    saveUiState({ theme: next });
+  }
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      if (typeof syncTopbarHeight === "function") syncTopbarHeight();
+      if (typeof VIEWS !== "undefined" && typeof moveViewInk === "function") {
+        const activeView = VIEWS.find((v) => v.name === state.view) || VIEWS[0];
+        if (activeView) moveViewInk(activeView.button);
+      }
+    });
+  }
+  if (notify) {
+    showToast(`已切换为「${meta.label}」主题`, "info");
+  }
+}
+
+function initTheme() {
+  let initial = "classic";
+  try {
+    const cached = window.localStorage.getItem("lumina_theme");
+    if (THEME_META[cached]) initial = cached;
+  } catch (e) {}
+  applyTheme(initial, { persist: false });
+
+  const toggleBtn = $("themeToggleBtn");
+  if (toggleBtn) {
+    toggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleThemeMenu();
+    });
+  }
+  const menu = $("themeMenu");
+  if (menu) {
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest(".theme-menu-item");
+      if (!item || !item.dataset.themeChoice) return;
+      closeThemeMenu();
+      if (item.dataset.themeChoice !== state.theme) {
+        applyTheme(item.dataset.themeChoice, { persist: true, notify: true });
+      }
+    });
+  }
+  document.addEventListener("click", (e) => {
+    const wrap = $("themeMenuWrap");
+    if (wrap && !wrap.contains(e.target)) closeThemeMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeThemeMenu();
+  });
+  const picker = $("settingsThemePicker");
+  if (picker) {
+    picker.addEventListener("click", (e) => {
+      const btn = e.target.closest(".theme-option");
+      if (!btn || !btn.dataset.themeChoice) return;
+      if (btn.dataset.themeChoice !== state.theme) {
+        applyTheme(btn.dataset.themeChoice, { persist: true, notify: true });
+      }
+    });
+  }
 }
 
