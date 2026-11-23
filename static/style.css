@@ -40,7 +40,7 @@
   --border-strong: rgba(125, 95, 65, 0.24);
   --radius-sm: 8px;
   --radius-md: 11px;
-  --radius-xl: 24px;
+  --radius-xl: 18px;
   
   --shadow-soft: 0 4px 20px rgba(50, 34, 18, 0.05), 0 1px 3px rgba(50, 34, 18, 0.03);
   --shadow-card: 0 10px 30px rgba(50, 34, 18, 0.08), 0 2px 8px rgba(50, 34, 18, 0.04);
@@ -931,7 +931,7 @@ svg {
   background: rgba(255, 254, 251, 0.98);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: calc(var(--radius-sm) + 5px);
   box-shadow: var(--shadow-modal);
   padding: 5px;
 }
@@ -1146,16 +1146,15 @@ select {
 .polaroid-card.is-video:nth-child(4n) { --rot: 0.45deg; }
 
 .polaroid-card.is-video .polaroid-inner {
-  background: #14120f;
-  border: 1px solid #2b2620;
-  border-radius: 2px;
-  box-shadow: 0 10px 26px rgba(18, 14, 10, 0.32);
+  background: linear-gradient(180deg, #1b1714 0%, #14110e 100%);
+  border: 1px solid rgba(226, 204, 178, 0.14);
+  border-radius: 5px;
+  box-shadow: 0 12px 28px rgba(18, 14, 10, 0.34), inset 0 1px 0 rgba(255, 245, 230, 0.07);
   /* Wide enough for the sprocket column on each side; the picture sits between
      them, so the holes never land on the frame. */
-  padding: 12px 26px 16px;
+  padding: 12px 26px 15px;
   overflow: hidden;
 }
-
 
 /* The sprocket holes: two columns of *rounded rectangles* down the black
    border, one on each side of the picture - the way a 35 mm strip reads.
@@ -1167,45 +1166,46 @@ select {
 .film-strip {
   position: absolute;
   /* top / sides / bottom of the card padding + border, negated. */
-  inset: -13px -27px -17px;
+  inset: -13px -27px -16px;
   pointer-events: none;
   z-index: 3;
-  opacity: .8;
+  opacity: 0.85;
   background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='3' fill='%23f7efe4' fill-opacity='0.55'/></svg>"),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='3' fill='%23f7efe4' fill-opacity='0.55'/></svg>");
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='2.5' fill='%23f7efe4' fill-opacity='0.42'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='2.5' fill='%23f7efe4' fill-opacity='0.42'/></svg>");
   background-size: 9px 20px, 9px 20px;
   background-repeat: repeat-y, repeat-y;
-  background-position: 7px 0, calc(100% - 7px) 0;
+  background-position: 8px 0, calc(100% - 8px) 0;
 }
 
 .polaroid-card.is-video .polaroid-photo-frame {
   background: #0c0a08;
-  box-shadow: inset 0 0 0 1px rgba(216, 201, 180, 0.16);
-  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px rgba(226, 204, 178, 0.16);
+  border-radius: 2px;
 }
 
 .polaroid-card.is-video .polaroid-body {
-  color: #d9cfc2;
+  color: #dfd5c8;
 }
 
 .polaroid-card.is-video .photo-location,
 .polaroid-card.is-video .photo-comment {
-  color: #b9ab9c;
+  color: #c2b4a5;
 }
 
 .polaroid-card.is-video .photo-location svg,
 .polaroid-card.is-video .photo-comment svg {
-  color: #8a7c6d;
+  color: #9e8d7b;
 }
 
 .polaroid-card.is-video .tag {
-  background: rgba(216, 201, 180, 0.14);
-  color: #d5c7b6;
+  background: rgba(226, 204, 178, 0.12);
+  border: 1px solid rgba(226, 204, 178, 0.14);
+  color: #dbcdbd;
 }
 
 .polaroid-card.is-video .card-actions {
-  border-top-color: rgba(216, 201, 180, 0.12) !important;
+  border-top-color: rgba(226, 204, 178, 0.14) !important;
 }
 
 .polaroid-card.is-video .card-check input {
@@ -1214,42 +1214,50 @@ select {
 
 .polaroid-card.is-video .btn.small {
   background: rgba(247, 239, 228, 0.08);
-  border-color: rgba(216, 201, 180, 0.16);
-  color: #cfc1b2;
+  border-color: rgba(226, 204, 178, 0.16);
+  color: #d5c7b8;
 }
 
 .polaroid-card.is-video .btn.small:hover {
   background: rgba(247, 239, 228, 0.16);
-  color: #f3ece2;
+  color: #f6efe6;
 }
 
 .polaroid-card.is-video .btn.small.danger {
-  color: #e2908b;
-  border-color: rgba(217, 83, 79, 0.32);
+  color: #e69590;
+  border-color: rgba(217, 83, 79, 0.34);
 }
 
 .polaroid-card.is-video .btn.small.danger:hover {
-  background: rgba(217, 83, 79, 0.22);
-  color: #ffd9d6;
+  background: rgba(217, 83, 79, 0.24);
+  color: #ffe0dd;
 }
 
 .polaroid-card.is-video .favorite-btn {
-  background: rgba(20, 18, 15, 0.62);
-  border-color: rgba(216, 201, 180, 0.22);
-  color: #cfc1b2;
+  top: 10px;
+  right: 10px;
+  background: rgba(18, 15, 12, 0.68);
+  border-color: rgba(226, 204, 178, 0.24);
+  color: #d5c7b8;
 }
 
 .polaroid-card.is-video .favorite-btn:hover,
 .polaroid-card.is-video .favorite-btn.active {
-  background: rgba(247, 239, 228, 0.15);
-  color: #f2b8b4;
+  background: rgba(232, 93, 79, 0.22);
+  border-color: rgba(232, 93, 79, 0.5);
+  color: #ff8b84;
+}
+
+.polaroid-card.is-video .favorite-btn.active svg {
+  color: #ff8b84;
+  fill: #ff8b84;
 }
 
 /* Duration pill: bottom-right of the frame, the twin of the RAW badge. */
 .video-badge {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  right: 10px;
+  bottom: 10px;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1258,13 +1266,13 @@ select {
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1;
-  padding: 4px 8px 4px 6px;
+  padding: 5px 9px 5px 7px;
   border-radius: 999px;
   color: #fdf8f1;
-  background: rgba(14, 12, 10, 0.66);
+  background: rgba(14, 12, 10, 0.72);
   border: 1px solid rgba(247, 239, 228, 0.22);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
   z-index: 3;
 }
@@ -1817,6 +1825,7 @@ select {
 
 .selection-bar .btn {
   border: none;
+  border-radius: 999px;
   color: #ffffff;
   background: rgba(255, 255, 255, 0.14);
 }
@@ -2568,8 +2577,8 @@ select {
   background: transparent;
   border: none;
   color: #ffffff;
-  padding: 6px 10px;
-  border-radius: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
   font-size: 13px;
   cursor: pointer;
   display: flex;
@@ -3174,9 +3183,9 @@ select {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: calc(var(--radius-sm) + 5px);
   box-shadow: var(--shadow-modal);
-  padding: 6px;
+  padding: 5px;
   transform-origin: top right;
   animation: historyDrop 180ms var(--ease-out) both;
 }
@@ -3692,7 +3701,7 @@ select {
   padding: 6px;
   background: rgba(255, 254, 251, 0.98);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: calc(var(--radius-sm) + 5px);
   box-shadow: var(--shadow-modal);
 }
 
@@ -4792,7 +4801,7 @@ body:not([data-view="album"]) .topbar {
   padding: 18px 20px 20px;
   margin-bottom: 18px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 16px;
   background: rgba(255, 254, 251, 0.78);
   box-shadow: var(--shadow-soft);
   animation: dupGroupIn var(--dur-panel) var(--ease-out) backwards;
@@ -4959,7 +4968,7 @@ body:not([data-view="album"]) .topbar {
   height: 200px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
   cursor: zoom-in;
   background:
@@ -5074,6 +5083,7 @@ body:not([data-view="album"]) .topbar {
 
 .duplicates-actions .btn.danger {
   border: none;
+  border-radius: 999px;
   background: rgba(217, 83, 79, 0.88);
   color: #ffffff;
 }
@@ -5337,7 +5347,7 @@ body:not([data-view="album"]) .topbar {
   height: 40px;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: rgba(174, 118, 78, 0.1);
   color: var(--primary);
 }
@@ -5717,7 +5727,8 @@ body:not([data-view="album"]) .topbar {
   max-width: 97vw;
   width: 97vw;
   max-height: 96vh;
-  padding: 12px 16px 10px;
+  padding: 14px 16px 12px;
+  border-radius: var(--radius-xl);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -5751,16 +5762,18 @@ body:not([data-view="album"]) .topbar {
 }
 
 .preview-stage,
-.preview-body img {
+.preview-body img,
+.preview-video {
   max-width: 100%;
-  max-height: calc(96vh - 78px);
+  max-height: calc(96vh - 82px);
+  border-radius: var(--radius-sm);
 }
 
 .preview-info {
   flex: 0 0 336px;
   max-width: 356px;
   min-width: 280px;
-  max-height: calc(96vh - 78px);
+  max-height: calc(96vh - 82px);
   overflow-y: auto;
   padding: 4px 10px 6px 14px;
   gap: 12px;
@@ -5772,8 +5785,13 @@ body:not([data-view="album"]) .topbar {
 
 .preview-actions {
   margin-top: 10px;
-  padding-top: 8px;
+  padding-top: 10px;
   flex-shrink: 0;
+}
+
+/* Concentric with .preview-content outer radius (18px) + bottom/right padding */
+.preview-actions .btn {
+  border-radius: var(--radius-sm);
 }
 
 .preview-side-btn {
@@ -5860,7 +5878,7 @@ body:not([data-view="album"]) .topbar {
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
+  border-radius: calc(var(--radius-sm) + 5px);
   box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
@@ -5998,7 +6016,7 @@ body:not([data-view="album"]) .topbar {
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: calc(var(--radius-md) + 2px);
   background: rgba(255, 255, 255, 0.72);
   text-align: left;
   cursor: pointer;
@@ -6024,7 +6042,7 @@ body:not([data-view="album"]) .topbar {
 .theme-option-swatch {
   width: 100%;
   height: 40px;
-  border-radius: 6px;
+  border-radius: calc(var(--radius-sm) - 2px);
   border: 1px solid var(--border-strong);
   position: relative;
   overflow: hidden;
@@ -7563,4 +7581,227 @@ body.theme-transitioning .stat {
     transition: none !important;
   }
 }
+
+/* ==========================================================================
+   Theme-Specific Video Cards & Concentric Radius Harmony (Paper & Vintage)
+   ========================================================================== */
+
+/* --- Paper · Stationery: Archival Sepia-Charcoal Contact Strip --- */
+body[data-theme="paper"] .polaroid-card.is-video .polaroid-inner {
+  background: linear-gradient(180deg, #241e1a 0%, #1c1714 100%);
+  border: 1px solid rgba(116, 94, 72, 0.45);
+  border-radius: 3px;
+  padding: 12px 26px 14px;
+  box-shadow: 0 8px 22px rgba(34, 24, 14, 0.24), inset 0 1px 0 rgba(255, 245, 230, 0.08);
+}
+
+body[data-theme="paper"] .polaroid-card.is-video:hover .polaroid-inner {
+  border-color: rgba(156, 124, 92, 0.58);
+  box-shadow: 0 16px 34px rgba(34, 24, 14, 0.34);
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .film-strip {
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='2' fill='%23efe3cf' fill-opacity='0.44'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='2' fill='%23efe3cf' fill-opacity='0.44'/></svg>");
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .polaroid-photo-frame {
+  aspect-ratio: 4 / 3;
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px rgba(239, 227, 207, 0.16);
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .favorite-btn {
+  top: 10px;
+  right: 10px;
+  background: rgba(24, 20, 16, 0.72);
+  border-color: rgba(239, 227, 207, 0.24);
+  color: #dfd3c3;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .favorite-btn.active {
+  background: rgba(184, 74, 57, 0.26);
+  border-color: rgba(224, 114, 94, 0.55);
+  color: #ff9a8a;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .favorite-btn.active svg {
+  color: #ff9a8a;
+  fill: #ff9a8a;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .video-badge {
+  border-radius: 3px;
+  background: rgba(20, 16, 13, 0.78);
+  border-color: rgba(239, 227, 207, 0.26);
+  color: #faf2e6;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .photo-location {
+  color: #b7a896;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .card-actions {
+  border-top-color: rgba(239, 227, 207, 0.18) !important;
+}
+
+/* Paper concentric radii across lightbox, docks & duplicate groups */
+body[data-theme="paper"] .preview-content {
+  border-radius: 8px;
+  padding: 12px 14px 10px;
+}
+
+body[data-theme="paper"] .preview-media-col {
+  border-radius: 4px;
+}
+
+body[data-theme="paper"] .preview-stage,
+body[data-theme="paper"] .preview-body img,
+body[data-theme="paper"] .preview-video {
+  border-radius: 2px;
+}
+
+body[data-theme="paper"] .preview-actions .btn,
+body[data-theme="paper"] .selection-bar .btn,
+body[data-theme="paper"] .duplicates-actions .btn {
+  border-radius: var(--radius-sm);
+}
+
+body[data-theme="paper"] .dup-group {
+  border-radius: 6px;
+}
+
+body[data-theme="paper"] .dup-card {
+  border-radius: 4px;
+}
+
+body[data-theme="paper"] .dup-shot {
+  border-radius: 2px;
+}
+
+/* --- Vintage Analog: Darkroom 35mm Cine Reel Video Cards --- */
+body[data-theme="vintage"] .polaroid-card.is-video .polaroid-inner {
+  background: linear-gradient(180deg, #17120e 0%, #0f0b09 100%);
+  border: 1px solid rgba(217, 130, 59, 0.28);
+  border-radius: 4px;
+  padding: 12px 26px 14px;
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.56), inset 0 1px 0 rgba(242, 170, 102, 0.08);
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video:hover .polaroid-inner {
+  border-color: rgba(242, 170, 102, 0.52);
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(217, 130, 59, 0.22);
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .film-strip {
+  inset: -13px -27px -15px;
+  opacity: 0.9;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='2' fill='%23d89347' fill-opacity='0.34' stroke='%23d89347' stroke-opacity='0.22' stroke-width='0.6'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='9' height='20'><rect x='0' y='5' width='9' height='10' rx='2' fill='%23d89347' fill-opacity='0.34' stroke='%23d89347' stroke-opacity='0.22' stroke-width='0.6'/></svg>");
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .polaroid-photo-frame {
+  aspect-ratio: 4 / 3;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(217, 130, 59, 0.22);
+}
+
+/* Fix video card overlay positions (no top .vintage-film-header on video cards) */
+body[data-theme="vintage"] .polaroid-card.is-video .favorite-btn {
+  top: 10px;
+  right: 10px;
+  background: rgba(16, 12, 9, 0.76);
+  border-color: rgba(217, 130, 59, 0.34);
+  color: #d6c5b2;
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .favorite-btn.active {
+  background: rgba(232, 93, 63, 0.24);
+  border-color: rgba(255, 122, 89, 0.6);
+  color: #ff7a59;
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .raw-badge-card {
+  top: 10px;
+  left: 10px;
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .live-badge {
+  top: 12px;
+  left: 12px;
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .video-badge {
+  border-radius: 3px;
+  background: rgba(14, 10, 7, 0.84);
+  border: 1px solid rgba(255, 118, 56, 0.38);
+  color: #ff8a47;
+  text-shadow: 0 0 6px rgba(255, 92, 28, 0.65);
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .video-badge svg {
+  color: #ff8a47;
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .photo-title {
+  color: #f6ede0;
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .photo-comment {
+  color: #cab9a6;
+}
+
+/* Vintage concentric radii across topbar switcher, lightbox, docks & duplicates */
+body[data-theme="vintage"] .view-switcher {
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+body[data-theme="vintage"] .view-ink,
+body[data-theme="vintage"] .view-tab {
+  top: 3px;
+  bottom: 3px;
+  border-radius: calc(var(--radius-md) - 2px);
+}
+
+body[data-theme="vintage"] .selection-bar,
+body[data-theme="vintage"] .duplicates-actions {
+  border-radius: var(--radius-md);
+}
+
+body[data-theme="vintage"] .selection-bar .btn,
+body[data-theme="vintage"] .duplicates-actions .btn,
+body[data-theme="vintage"] .preview-actions .btn {
+  border-radius: var(--radius-sm);
+}
+
+body[data-theme="vintage"] .preview-content {
+  border-radius: 10px;
+  padding: 12px 14px 10px;
+}
+
+body[data-theme="vintage"] .preview-media-col {
+  border-radius: 5px;
+}
+
+body[data-theme="vintage"] .preview-stage,
+body[data-theme="vintage"] .preview-body img,
+body[data-theme="vintage"] .preview-video {
+  border-radius: 3px;
+}
+
+body[data-theme="vintage"] .dup-group {
+  border-radius: 6px;
+}
+
+body[data-theme="vintage"] .dup-card {
+  border-radius: 4px;
+}
+
+body[data-theme="vintage"] .dup-shot {
+  border-radius: 2px;
+}
+
 
