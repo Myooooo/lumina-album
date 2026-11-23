@@ -129,9 +129,7 @@ body {
   background-image:
     radial-gradient(circle at 12% 18%, rgba(255, 245, 230, 0.8), transparent 45%),
     radial-gradient(circle at 88% 8%, rgba(240, 225, 205, 0.6), transparent 40%),
-    radial-gradient(circle at 50% 85%, rgba(245, 235, 220, 0.5), transparent 50%),
     linear-gradient(165deg, var(--bg) 0%, var(--bg-deep) 100%);
-  background-attachment: fixed;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -628,8 +626,7 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 253, 249, 0.78);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 253, 249, 0.82);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 6px 14px;
@@ -1005,11 +1002,12 @@ select {
      the same photo printed at two sizes in two views. */
   width: 100%;
   break-inside: avoid;
+  contain: layout style;
   margin: 0;
   cursor: pointer;
   --rot: -0.6deg;
   transform: rotate(var(--rot));
-  transition: transform var(--dur-panel) var(--ease-out), z-index .1s, box-shadow var(--dur-panel) var(--ease-out);
+  transition: transform var(--dur-panel) var(--ease-out);
   position: relative;
   animation: cardPop var(--dur-panel) var(--ease-out) backwards;
 }
@@ -1091,7 +1089,6 @@ select {
   border-right: 1px dashed rgba(160, 130, 90, 0.28);
   box-shadow: 0 2px 6px rgba(50, 34, 18, 0.06);
   z-index: 5;
-  backdrop-filter: blur(3px);
 }
 
 /* The square the photo sits in.
@@ -1269,10 +1266,8 @@ select {
   padding: 5px 9px 5px 7px;
   border-radius: 999px;
   color: #fdf8f1;
-  background: rgba(14, 12, 10, 0.72);
+  background: rgba(14, 12, 10, 0.8);
   border: 1px solid rgba(247, 239, 228, 0.22);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   pointer-events: none;
   z-index: 3;
 }
@@ -1293,11 +1288,9 @@ select {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(255, 254, 251, 0.66);
+  background: rgba(255, 254, 251, 0.88);
   border: 1px solid rgba(174, 118, 78, 0.3);
   box-shadow: 0 2px 8px rgba(50, 34, 18, 0.14);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
   z-index: 7;
   animation: liveBadgeIn 200ms var(--ease-out) both;
@@ -1333,8 +1326,7 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.9);
   border: 1px solid var(--border);
   border-radius: 50%;
   color: var(--muted);
@@ -1388,7 +1380,6 @@ select {
   background: rgba(255, 250, 243, 0.94);
   color: var(--primary-dark);
   box-shadow: 0 2px 8px rgba(50, 34, 18, 0.12);
-  backdrop-filter: blur(6px);
   max-width: calc(100% - 60px);
   overflow: hidden;
   white-space: nowrap;
@@ -5013,8 +5004,6 @@ body:not([data-view="album"]) .topbar {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
 }
 
 .dup-meta {
@@ -5612,8 +5601,6 @@ body:not([data-view="album"]) .topbar {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: center;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
 }
 
 .footprint-body {
@@ -7804,22 +7791,24 @@ body[data-theme="vintage"] .dup-shot {
 }
 
 /* ==========================================================================
-   Refined 3-Theme Differentiation Pass
-   1) Classic: Apple-inspired Modern Frosted Glass (distinct from Paper)
-   2) Paper:   Dot-Grid Stationery Notebook, 3-Tone Washi Tape & Offset Ink
-   3) Vintage: Charcoal-Obsidian 35mm Dual-Sprocket Darkroom Contact Sheet
+   Refined 3-Theme Differentiation & 10,000+ Photo Performance Architecture
+   - Zero per-card / nested backdrop-filter (eliminates 400+ GPU blur passes)
+   - Real backdrop-filter reserved strictly for 2 sticky bars & open overlays
+   1) Classic: High-FPS Apple Frosted Glass Gallery (specular glass surfaces)
+   2) Paper:   Authentic Dot-Grid Paper Fiber, Letterpress Buttons & Typewriter
+   3) Vintage: Authentic Charcoal-Obsidian #121110 Darkroom & #eb9234 Amber
    ========================================================================== */
 
-/* --- 1. Classic: Modern Apple Frosted Glass Gallery --- */
+/* --- 1. Classic: High-FPS Apple Modern Frosted Glass Gallery --- */
 body[data-theme="classic"] {
   --font-classic-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
   font-family: var(--font-classic-sans);
-  background-color: #f5f2ec;
+  background-color: #f4f1eb;
   background-image:
-    radial-gradient(circle at 12% 10%, rgba(255, 255, 255, 0.92), transparent 46%),
-    radial-gradient(circle at 86% 12%, rgba(235, 224, 210, 0.72), transparent 44%),
-    radial-gradient(circle at 52% 90%, rgba(226, 232, 240, 0.42), transparent 52%),
-    linear-gradient(165deg, #f7f4ee 0%, #ede7dd 100%);
+    radial-gradient(circle at 14% 8%, rgba(255, 255, 255, 0.9), transparent 44%),
+    radial-gradient(circle at 86% 12%, rgba(235, 224, 210, 0.65), transparent 42%),
+    linear-gradient(165deg, #f6f3ed 0%, #ede7dd 100%);
+  background-attachment: scroll;
 }
 
 body[data-theme="classic"] .brand h1 {
@@ -7847,16 +7836,16 @@ body[data-theme="classic"] .footprint-city {
   font-weight: 600;
 }
 
+/* Controls inside .topbar / .album-sticky-bar inherit their parent's single
+   frosted layer — no nested backdrop-filter passes! */
 body[data-theme="classic"] .view-switcher {
-  background: rgba(255, 255, 255, 0.52);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  border: 1px solid rgba(255, 255, 255, 0.76);
-  box-shadow: 0 2px 10px rgba(38, 31, 25, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  box-shadow: 0 2px 8px rgba(38, 31, 25, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
 body[data-theme="classic"] .view-ink {
-  background: rgba(255, 255, 255, 0.94);
+  background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 2px 10px rgba(38, 31, 25, 0.1), inset 0 1px 0 #ffffff;
 }
 
@@ -7867,28 +7856,26 @@ body[data-theme="classic"] .folder-row input[type="text"],
 body[data-theme="classic"] .folder-row input:not([type="checkbox"]),
 body[data-theme="classic"] .custom-select-trigger,
 body[data-theme="classic"] .search-capsule {
-  background: rgba(255, 255, 255, 0.68);
-  backdrop-filter: blur(14px) saturate(1.35);
-  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  background: rgba(255, 255, 255, 0.78);
   border-color: rgba(125, 95, 65, 0.14);
-  box-shadow: 0 1px 3px rgba(38, 31, 25, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  box-shadow: 0 1px 2px rgba(38, 31, 25, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
 body[data-theme="classic"] .btn:hover,
 body[data-theme="classic"] .force-label:hover,
 body[data-theme="classic"] .stat:hover {
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.94);
   border-color: rgba(125, 95, 65, 0.22);
-  box-shadow: 0 6px 18px rgba(38, 31, 25, 0.08), inset 0 1px 0 #ffffff;
+  box-shadow: 0 4px 14px rgba(38, 31, 25, 0.08), inset 0 1px 0 #ffffff;
 }
 
 body[data-theme="classic"] .stat.active {
-  background: rgba(255, 255, 255, 0.92);
+  background: #ffffff;
   border-color: rgba(174, 118, 78, 0.45);
-  box-shadow: 0 0 0 2px rgba(174, 118, 78, 0.16), 0 6px 16px rgba(38, 31, 25, 0.06);
+  box-shadow: 0 0 0 2px rgba(174, 118, 78, 0.16), 0 4px 12px rgba(38, 31, 25, 0.06);
 }
 
-/* Straightened, precision Apple Frosted Glass photo cards (no washi tape) */
+/* GPU-Fast Apple Specular Glass Cards (zero backdrop-filter per card!) */
 body[data-theme="classic"] .polaroid-card,
 body[data-theme="classic"] .polaroid-card:nth-child(4n+1),
 body[data-theme="classic"] .polaroid-card:nth-child(4n+2),
@@ -7902,24 +7889,22 @@ body[data-theme="classic"] .tape {
 }
 
 body[data-theme="classic"] .polaroid-card:not(.is-video) .polaroid-inner {
-  background: rgba(255, 254, 252, 0.72);
-  backdrop-filter: blur(22px) saturate(1.45);
-  -webkit-backdrop-filter: blur(22px) saturate(1.45);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.92) 0%, rgba(252, 249, 244, 0.84) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.88);
   border-radius: 16px;
   padding: 10px 10px 14px;
   box-shadow:
-    0 8px 24px rgba(38, 31, 25, 0.06),
-    0 1px 3px rgba(38, 31, 25, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    0 6px 20px rgba(38, 31, 25, 0.055),
+    0 1px 2px rgba(38, 31, 25, 0.04),
+    inset 0 1px 0 #ffffff;
 }
 
 body[data-theme="classic"] .polaroid-card:not(.is-video):hover .polaroid-inner {
-  background: rgba(255, 254, 252, 0.86);
-  border-color: rgba(255, 255, 255, 0.96);
+  background: linear-gradient(155deg, #ffffff 0%, rgba(255, 253, 250, 0.94) 100%);
+  border-color: #ffffff;
   box-shadow:
-    0 18px 42px rgba(38, 31, 25, 0.12),
-    0 4px 12px rgba(38, 31, 25, 0.05),
+    0 16px 36px rgba(38, 31, 25, 0.11),
+    0 3px 10px rgba(38, 31, 25, 0.05),
     inset 0 1px 0 #ffffff;
 }
 
@@ -8000,23 +7985,24 @@ body[data-theme="classic"] .card-actions {
   padding-right: 4px;
 }
 
+/* Real frosted glass strictly on single open modal / lightbox surfaces */
 body[data-theme="classic"] .modal-content,
 body[data-theme="classic"] .preview-content {
-  background: rgba(255, 253, 250, 0.84);
-  backdrop-filter: blur(28px) saturate(1.45);
-  -webkit-backdrop-filter: blur(28px) saturate(1.45);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 253, 250, 0.86);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.84);
   box-shadow:
     0 32px 80px rgba(28, 22, 16, 0.22),
     0 8px 24px rgba(28, 22, 16, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
 }
 
 body[data-theme="classic"] .preview-quote-card {
   font-family: var(--font-classic-sans);
   font-size: 14px;
   line-height: 1.68;
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.72);
   border: 1px solid rgba(125, 95, 65, 0.12);
   border-left: 3px solid var(--primary);
   border-radius: 10px;
@@ -8026,11 +8012,9 @@ body[data-theme="classic"] .footprint-card,
 body[data-theme="classic"] .dup-group,
 body[data-theme="classic"] .dup-card,
 body[data-theme="classic"] .empty-state-card {
-  background: rgba(255, 254, 252, 0.72);
-  backdrop-filter: blur(18px) saturate(1.4);
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  border-color: rgba(255, 255, 255, 0.78);
-  box-shadow: 0 8px 24px rgba(38, 31, 25, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.9) 0%, rgba(252, 249, 244, 0.82) 100%);
+  border-color: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 6px 20px rgba(38, 31, 25, 0.055), inset 0 1px 0 #ffffff;
 }
 
 body[data-theme="classic"] .footprint-card {
@@ -8041,32 +8025,115 @@ body[data-theme="classic"] .footprint-shot {
   border-radius: 10px;
 }
 
-/* --- 2. Paper · Stationery: Dot-Grid Canvas, 3-Tone Washi Tape & Letterpress --- */
+/* --- 2. Paper · Stationery: Authentic Dot-Grid Paper, Ink Offset & Typewriter --- */
 body[data-theme="paper"] {
+  --bg: #f7f2e6;
+  --bg-deep: #efe8d8;
+  --panel-solid: #fffefb;
+  --text: #362e26;
+  --text-secondary: #5d5144;
+  --muted: #7a6b5b;
+  --primary: #c77d58;
+  --primary-dark: #9e6b4f;
+  --primary-light: #f3e9dc;
+  --border: #d5cab5;
+  --border-strong: #bfb39c;
+  --frost-bg: rgba(247, 242, 230, 0.95);
+  --radius-sm: 3px;
+  --radius-md: 3px;
+  --radius-xl: 4px;
+  font-family: var(--font-mono), "Songti SC", "Noto Serif SC", serif;
   background-color: #f7f2e6;
-  background-image:
-    radial-gradient(#d3c9b4 1px, transparent 1px),
-    radial-gradient(circle at 16% 14%, rgba(255, 252, 244, 0.7), transparent 48%),
-    linear-gradient(180deg, #f8f3e8 0%, #f3ecdd 100%);
-  background-size: 22px 22px, 100% 100%, 100% 100%;
+  background-image: radial-gradient(#d3c9b4 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-attachment: scroll;
   color: #362e26;
 }
 
+/* Visible warm tactile cotton paper fiber grain overlay */
+body[data-theme="paper"]::before {
+  opacity: 0.18;
+  z-index: 90;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+body[data-theme="paper"] .topbar,
+body[data-theme="paper"] .album-sticky-bar {
+  background: rgba(247, 242, 230, 0.96);
+  background-image: none;
+  border-bottom: 1px dashed #bfb39c;
+  box-shadow: 0 4px 16px rgba(54, 42, 26, 0.05);
+}
+
 body[data-theme="paper"] .brand h1 {
+  font-family: var(--font-serif);
   font-style: italic;
   font-weight: 700;
   color: #2c241d;
 }
 
-body[data-theme="paper"] .btn {
+body[data-theme="paper"] .brand h1 .sub {
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: #9e6b4f;
+  border-left-color: #bfb39c;
+}
+
+body[data-theme="paper"] .view-switcher,
+body[data-theme="paper"] .settings-tabs {
+  background: #fffdf7;
+  border: 1px dashed #bfb39c;
+  border-radius: 3px;
+  box-shadow: 3px 3px 0 rgba(138, 121, 93, 0.14);
+}
+
+body[data-theme="paper"] .view-ink,
+body[data-theme="paper"] .settings-tab-ink {
+  background: #362e26;
+  border: 1px solid #362e26;
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 rgba(199, 125, 88, 0.45);
+}
+
+body[data-theme="paper"] .view-tab,
+body[data-theme="paper"] .settings-tab {
+  font-family: var(--font-mono), "PingFang SC", "Noto Sans SC", monospace;
+  font-size: 12.5px;
+  color: #5d5144;
+}
+
+body[data-theme="paper"] .view-tab.is-active,
+body[data-theme="paper"] .view-tab.is-active svg,
+body[data-theme="paper"] .settings-tab.active,
+body[data-theme="paper"] .settings-tab.active svg {
+  color: #fbf7ee;
+}
+
+body[data-theme="paper"] .btn,
+body[data-theme="paper"] .force-label,
+body[data-theme="paper"] .stat,
+body[data-theme="paper"] .folder-row input[type="text"],
+body[data-theme="paper"] .folder-row input:not([type="checkbox"]),
+body[data-theme="paper"] .custom-select-trigger,
+body[data-theme="paper"] .search-capsule {
   background: #fffdf8;
   border: 1px solid #d5cab5;
+  border-radius: 3px;
+  font-family: var(--font-mono), "PingFang SC", "Noto Sans SC", monospace;
+  font-size: 12.5px;
+  color: #5d5144;
   box-shadow: 2px 2px 0 rgba(70, 55, 35, 0.08);
 }
 
-body[data-theme="paper"] .btn:hover {
+body[data-theme="paper"] .btn:hover,
+body[data-theme="paper"] .force-label:hover,
+body[data-theme="paper"] .stat:hover {
   background: #ffffff;
   border-color: #bfb39c;
+  color: #2c241d;
   box-shadow: 3px 3px 0 rgba(70, 55, 35, 0.12);
 }
 
@@ -8075,12 +8142,12 @@ body[data-theme="paper"] .stat.active {
   background: #362e26;
   border-color: #362e26;
   color: #fbf7ee;
-  box-shadow: 3px 3px 0 rgba(199, 125, 88, 0.42);
+  box-shadow: 3px 3px 0 rgba(199, 125, 88, 0.45);
 }
 
 body[data-theme="paper"] .btn.primary:hover {
-  background: #27201a;
-  border-color: #27201a;
+  background: #28211b;
+  border-color: #28211b;
   color: #fffdf8;
 }
 
@@ -8090,13 +8157,28 @@ body[data-theme="paper"] .stat.active svg {
   color: #fbf7ee;
 }
 
-body[data-theme="paper"] .polaroid-card:nth-child(odd) { --rot: -1.15deg; }
+body[data-theme="paper"] .search-capsule .search-mode-segment .custom-select-trigger {
+  background: #f5efe2;
+  border-right: 1px dashed #d5cab5;
+  box-shadow: none;
+}
+
+body[data-theme="paper"] .search-capsule .search-submit-btn {
+  background: #362e26;
+  color: #fbf7ee;
+  border: none;
+  box-shadow: none;
+}
+
+body[data-theme="paper"] .polaroid-card:nth-child(odd) { --rot: -1.2deg; }
 body[data-theme="paper"] .polaroid-card:nth-child(even) { --rot: 1.05deg; }
 body[data-theme="paper"] .polaroid-card:nth-child(3n) { --rot: -0.55deg; }
 
 body[data-theme="paper"] .polaroid-card:not(.is-video) .polaroid-inner {
   background: #fffefb;
   border: 1px solid rgba(120, 102, 78, 0.2);
+  border-radius: 2px;
+  padding: 13px 13px 18px;
   box-shadow:
     0 2px 4px rgba(54, 42, 26, 0.06),
     0 12px 26px rgba(54, 42, 26, 0.09);
@@ -8108,9 +8190,9 @@ body[data-theme="paper"] .polaroid-card:not(.is-video):hover .polaroid-inner {
 
 /* 3-Tone Semi-Translucent Washi Tape (Sand / Sage / Terracotta Rose) */
 body[data-theme="paper"] .tape {
-  top: -14px;
-  width: 86px;
-  height: 23px;
+  top: -13px;
+  width: 88px;
+  height: 24px;
   border-left: 2px dotted rgba(255, 255, 255, 0.62);
   border-right: 2px dotted rgba(255, 255, 255, 0.62);
   clip-path: none;
@@ -8120,7 +8202,7 @@ body[data-theme="paper"] .tape {
 
 body[data-theme="paper"] .polaroid-card:nth-child(2n) .tape {
   background: rgba(154, 173, 147, 0.64);
-  transform: translateX(-50%) rotate(2.3deg);
+  transform: translateX(-50%) rotate(2.4deg);
 }
 
 body[data-theme="paper"] .polaroid-card:nth-child(3n) .tape {
@@ -8128,18 +8210,62 @@ body[data-theme="paper"] .polaroid-card:nth-child(3n) .tape {
   transform: translateX(-50%) rotate(-1.2deg);
 }
 
+body[data-theme="paper"] .polaroid-card:not(.is-video) .favorite-btn {
+  top: 10px;
+  right: 10px;
+  border: 1px dashed #cbbda5;
+  border-radius: 3px;
+  background: rgba(255, 253, 247, 0.92);
+  color: #6b5b4b;
+  box-shadow: 2px 2px 0 rgba(54, 42, 26, 0.1);
+}
+
+body[data-theme="paper"] .photo-title {
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 700;
+  color: #2f261e;
+}
+
+body[data-theme="paper"] .photo-comment {
+  font-family: var(--font-hand);
+  font-size: 15.5px;
+  line-height: 1.72;
+  color: #7c5c43;
+}
+
+body[data-theme="paper"] .photo-location,
+body[data-theme="paper"] .card-date {
+  font-family: var(--font-mono), "PingFang SC", monospace;
+  font-style: normal;
+  font-size: 11px;
+  color: #7a6b5b;
+}
+
+body[data-theme="paper"] .card-actions {
+  border-top: 1px dashed #d8ccb8;
+}
+
 body[data-theme="paper"] .polaroid-photo {
-  filter: sepia(0.06) contrast(0.98) brightness(1.01);
+  filter: sepia(0.08) contrast(0.98) brightness(1.01);
   transition: opacity var(--dur-panel) var(--ease-out),
               transform 480ms var(--ease-out),
               filter 360ms var(--ease-out);
 }
 
-/* --- 3. Vintage Analog: Charcoal-Obsidian 35mm Dual-Sprocket Darkroom --- */
+body[data-theme="paper"] .modal-content,
+body[data-theme="paper"] .preview-content {
+  background: #fffefb;
+  border: 1px solid #d5cab5;
+  border-radius: 4px;
+  box-shadow: 0 24px 60px rgba(42, 30, 18, 0.3), 4px 4px 0 rgba(138, 121, 93, 0.18);
+}
+
+/* --- 3. Vintage Analog: Authentic #121110 Charcoal Darkroom & #eb9234 Amber --- */
 body[data-theme="vintage"] {
   --bg: #121110;
   --bg-deep: #0b0a09;
-  --panel: rgba(27, 25, 23, 0.92);
+  --panel: rgba(23, 21, 19, 0.94);
   --panel-solid: #1b1917;
   --text: #e9e2d6;
   --text-secondary: #c8bfb0;
@@ -8149,23 +8275,105 @@ body[data-theme="vintage"] {
   --primary-dark: #f4b165;
   --primary-light: rgba(235, 146, 52, 0.16);
   --primary-glow: rgba(235, 146, 52, 0.3);
-  --border: rgba(255, 255, 255, 0.12);
-  --border-strong: rgba(235, 146, 52, 0.34);
-  --frost-bg: rgba(18, 17, 16, 0.9);
+  --heart: #ff6a2b;
+  --danger: #e2634c;
+  --border: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(235, 146, 52, 0.42);
+  --frost-bg: rgba(18, 17, 16, 0.94);
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-xl: 4px;
+  font-family: var(--font-mono), "PingFang SC", "Noto Sans SC", monospace;
   background-color: #121110;
-  background-image:
-    radial-gradient(ellipse at 20% 15%, rgba(235, 146, 52, 0.08), transparent 48%),
-    linear-gradient(180deg, #141311 0%, #0e0d0c 100%);
+  background-image: none;
+  background-attachment: scroll;
+  color: #e9e2d6;
+}
+
+/* Authentic darkroom film grain overlay */
+body[data-theme="vintage"]::before {
+  opacity: 0.16;
+  z-index: 90;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+body[data-theme="vintage"] .topbar,
+body[data-theme="vintage"] .album-sticky-bar {
+  background: rgba(18, 17, 16, 0.94);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 body[data-theme="vintage"] .brand h1 {
   font-family: var(--font-mono), var(--font-serif);
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: #f4eee4;
 }
 
 body[data-theme="vintage"] .brand h1 .sub {
   color: #eb9234;
+  letter-spacing: 0.2em;
+}
+
+body[data-theme="vintage"] .view-switcher,
+body[data-theme="vintage"] .settings-tabs {
+  background: #1a1816;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+}
+
+body[data-theme="vintage"] .view-ink,
+body[data-theme="vintage"] .settings-tab-ink {
+  background: #eb9234;
+  border: none;
+  border-radius: 2px;
+  box-shadow: 0 0 12px rgba(235, 146, 52, 0.35);
+}
+
+body[data-theme="vintage"] .view-tab,
+body[data-theme="vintage"] .settings-tab {
+  font-family: var(--font-mono), "PingFang SC", monospace;
+  font-size: 12.5px;
+  color: #a89f91;
+}
+
+body[data-theme="vintage"] .view-tab.is-active,
+body[data-theme="vintage"] .view-tab.is-active svg,
+body[data-theme="vintage"] .settings-tab.active,
+body[data-theme="vintage"] .settings-tab.active svg {
+  color: #141210;
+  font-weight: 700;
+}
+
+/* Unify ALL darkroom controls & panels to #1a1816 / #171513 charcoal */
+body[data-theme="vintage"] .btn,
+body[data-theme="vintage"] .force-label,
+body[data-theme="vintage"] .stat,
+body[data-theme="vintage"] .folder-row input[type="text"],
+body[data-theme="vintage"] .folder-row input:not([type="checkbox"]),
+body[data-theme="vintage"] .filter-group select,
+body[data-theme="vintage"] .filter-group input,
+body[data-theme="vintage"] .custom-select-trigger,
+body[data-theme="vintage"] .search-capsule,
+body[data-theme="vintage"] .form-grid input,
+body[data-theme="vintage"] .form-grid textarea,
+body[data-theme="vintage"] .form-grid select,
+body[data-theme="vintage"] .dir-row input,
+body[data-theme="vintage"] .prompt-save-row input[type="text"] {
+  background: #1a1816;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+  color: #c8bfb0;
+  font-family: var(--font-mono), "PingFang SC", monospace;
+}
+
+body[data-theme="vintage"] .btn:hover,
+body[data-theme="vintage"] .force-label:hover,
+body[data-theme="vintage"] .stat:hover {
+  background: #221f1c;
+  border-color: #eb9234;
+  color: #f4eee4;
 }
 
 body[data-theme="vintage"] .btn.primary,
@@ -8173,7 +8381,7 @@ body[data-theme="vintage"] .stat.active {
   background: #eb9234;
   border-color: #eb9234;
   color: #141210;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 body[data-theme="vintage"] .btn.primary:hover {
@@ -8188,6 +8396,43 @@ body[data-theme="vintage"] .stat.active svg {
   color: #141210;
 }
 
+body[data-theme="vintage"] .search-capsule .search-submit-btn {
+  background: #eb9234;
+  color: #141210;
+  font-weight: 700;
+}
+
+body[data-theme="vintage"] .theme-menu,
+body[data-theme="vintage"] .custom-select-menu,
+body[data-theme="vintage"] .folder-history,
+body[data-theme="vintage"] .prompt-custom-menu-panel,
+body[data-theme="vintage"] .modal-content,
+body[data-theme="vintage"] .spec-badge,
+body[data-theme="vintage"] .dimension-section,
+body[data-theme="vintage"] .settings-danger-row,
+body[data-theme="vintage"] .prompt-editor,
+body[data-theme="vintage"] .export-choice,
+body[data-theme="vintage"] .theme-option,
+body[data-theme="vintage"] .import-preview,
+body[data-theme="vintage"] .dir-list,
+body[data-theme="vintage"] .hidden-folders-list,
+body[data-theme="vintage"] .confirm-check,
+body[data-theme="vintage"] .duplicates-toolbar,
+body[data-theme="vintage"] .dup-group,
+body[data-theme="vintage"] .dup-card,
+body[data-theme="vintage"] .footprint-card,
+body[data-theme="vintage"] .empty-state-card,
+body[data-theme="vintage"] .footprints-empty,
+body[data-theme="vintage"] .memories-empty,
+body[data-theme="vintage"] .duplicates-empty,
+body[data-theme="vintage"] .toast,
+body[data-theme="vintage"] .back-to-top,
+body[data-theme="vintage"] .preview-side-btn {
+  background: #171513;
+  border-color: #2b2723;
+  color: #e9e2d6;
+}
+
 body[data-theme="vintage"] .polaroid-card,
 body[data-theme="vintage"] .polaroid-card:nth-child(4n+1),
 body[data-theme="vintage"] .polaroid-card:nth-child(4n+2),
@@ -8197,16 +8442,16 @@ body[data-theme="vintage"] .polaroid-card:nth-child(4n) {
 }
 
 body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-inner {
-  background: #171513;
+  background: #1b1917;
   border: 1px solid #2b2723;
   border-radius: 3px;
   padding: 0;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.48);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 
 body[data-theme="vintage"] .polaroid-card:not(.is-video):hover .polaroid-inner {
   border-color: rgba(235, 146, 52, 0.55);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.68), 0 0 0 1px rgba(235, 146, 52, 0.22);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.65);
 }
 
 /* Top & Bottom 35mm Film Strips with Recessed Sprocket Holes */
@@ -8265,13 +8510,13 @@ body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-photo-frame::
   content: "";
   position: absolute;
   inset: 0;
-  box-shadow: inset 0 0 38px rgba(0, 0, 0, 0.52);
+  box-shadow: inset 0 0 38px rgba(0, 0, 0, 0.55);
   pointer-events: none;
   z-index: 2;
 }
 
 body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-photo {
-  filter: sepia(0.16) contrast(1.08) saturate(0.9) brightness(0.96);
+  filter: sepia(0.18) contrast(1.1) saturate(0.88) brightness(0.95);
   transition: opacity var(--dur-panel) var(--ease-out),
               transform 520ms var(--ease-out),
               filter 420ms var(--ease-out);
@@ -8280,6 +8525,21 @@ body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-photo {
 body[data-theme="vintage"] .polaroid-card:not(.is-video) .favorite-btn {
   top: 34px;
   right: 18px;
+  border-radius: 2px;
+  border: 1px solid #35302a;
+  background: rgba(13, 12, 11, 0.82);
+  color: #b5aa9a;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .favorite-btn.active {
+  border-color: #ff6a2b;
+  background: rgba(255, 106, 43, 0.16);
+  color: #ff6a2b;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .favorite-btn.active svg {
+  color: #ff6a2b;
+  fill: #ff6a2b;
 }
 
 body[data-theme="vintage"] .polaroid-card:not(.is-video) .raw-badge-card {
@@ -8297,13 +8557,39 @@ body[data-theme="vintage"] .polaroid-card:not(.is-video) .raw-badge-card + .live
 }
 
 body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-body {
-  padding: 12px 14px 14px;
+  padding: 13px 15px 15px;
   background: #171513;
+}
+
+body[data-theme="vintage"] .photo-title {
+  font-family: var(--font-mono), "PingFang SC", monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: #f2ece1;
+}
+
+body[data-theme="vintage"] .photo-location {
+  font-family: var(--font-mono), "PingFang SC", monospace;
+  font-size: 11px;
+  color: #d9822b;
+}
+
+body[data-theme="vintage"] .photo-comment {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  color: #9e9486;
+  line-height: 1.65;
+}
+
+body[data-theme="vintage"] .score-pill.total {
+  background: rgba(235, 146, 52, 0.18);
+  border-color: rgba(235, 146, 52, 0.45);
+  color: #eb9234;
 }
 
 body[data-theme="vintage"] .preview-content {
   background: #171513;
-  border: 1px solid rgba(235, 146, 52, 0.42);
+  border: 1px solid #eb9234;
 }
 
 /* --- Intuitive Pointer-Gated Hover Choreography Across All 3 Themes --- */
@@ -8326,7 +8612,7 @@ body[data-theme="vintage"] .preview-content {
   }
   body[data-theme="vintage"] .polaroid-card:not(.is-video):hover .polaroid-photo {
     transform: scale(1.03);
-    filter: sepia(0.04) contrast(1.1) saturate(1.02) brightness(1);
+    filter: sepia(0.06) contrast(1.12) saturate(1.02) brightness(1);
   }
 }
 
