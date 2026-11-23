@@ -415,13 +415,14 @@ function cardHtml(photo) {
     <div class="polaroid-inner"${isHighScore ? ' data-high-score="1"' : ""}>
       <div class="polaroid-front">
         ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape" aria-hidden="true"></div>'}
-        ${isVideo ? "" : `<div class="vintage-film-header" aria-hidden="true"><span class="vintage-film-stock">${film.stock}</span><span class="vintage-film-frame">▸ ${film.frame}</span></div>`}
+        ${isVideo ? "" : `<div class="vintage-film-header" aria-hidden="true"><span class="vintage-film-stock">${film.stock}</span><span class="vintage-sprockets"><i></i><i></i><i></i><i></i><i></i></span><span class="vintage-film-frame">▸ ${film.frame}</span></div>`}
         <button class="favorite-btn ${photo.favorite ? "active" : ""}" title="${photo.favorite ? "取消珍藏" : "珍藏"}">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</button>
         ${rawBadge}
         ${liveBadgeHtml(photo)}
         <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" />${
           isVideo ? videoDurationBadge(photo) : ""
         }${quartzDate && !isVideo ? `<span class="vintage-date-stamp" aria-hidden="true">${quartzDate}</span>` : ""}</div>
+        ${isVideo ? "" : `<div class="vintage-film-footer" aria-hidden="true"><span>EXP ${film.frame.replace("A", "")}/36</span><span class="vintage-sprockets"><i></i><i></i><i></i><i></i><i></i></span><span>SAFETY FILM</span></div>`}
         <div class="polaroid-body">
           ${
             hasMetaRow
@@ -485,12 +486,13 @@ function memoryPolaroidHtml(photo, options = {}) {
       <div class="polaroid-inner"${isHighScore ? ' data-high-score="1"' : ""}>
         <div class="polaroid-front">
           ${isVideo ? '<div class="film-strip" aria-hidden="true"></div>' : '<div class="tape" aria-hidden="true"></div>'}
-          ${isVideo ? "" : `<div class="vintage-film-header" aria-hidden="true"><span class="vintage-film-stock">${film.stock}</span><span class="vintage-film-frame">▸ ${film.frame}</span></div>`}
+          ${isVideo ? "" : `<div class="vintage-film-header" aria-hidden="true"><span class="vintage-film-stock">${film.stock}</span><span class="vintage-sprockets"><i></i><i></i><i></i><i></i><i></i></span><span class="vintage-film-frame">▸ ${film.frame}</span></div>`}
           <div class="polaroid-photo-frame">
             <img class="polaroid-photo" data-src="${thumbnailUrl(photo)}"
                  alt="${escapeHtml(photo.filename || "")}" loading="lazy" decoding="async" />
             ${quartzDate && !isVideo ? `<span class="vintage-date-stamp" aria-hidden="true">${quartzDate}</span>` : ""}
           </div>
+          ${isVideo ? "" : `<div class="vintage-film-footer" aria-hidden="true"><span>EXP ${film.frame.replace("A", "")}/36</span><span class="vintage-sprockets"><i></i><i></i><i></i><i></i><i></i></span><span>SAFETY FILM</span></div>`}
           <div class="polaroid-body">
             ${
               hasMetaRow

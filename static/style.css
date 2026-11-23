@@ -6063,35 +6063,33 @@ body:not([data-view="album"]) .topbar {
 }
 
 .swatch-classic {
-  background: linear-gradient(145deg, #fbf7f0 0%, #ede3d3 100%);
-  color: #885835;
+  background:
+    radial-gradient(circle at 22% 20%, rgba(255, 255, 255, 0.92), transparent 55%),
+    linear-gradient(145deg, #f4f1eb 0%, #e7dfd4 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: #5a4635;
 }
 
 .swatch-paper {
-  background-color: #faf6ee;
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent 7px,
-    rgba(154, 136, 114, 0.25) 7px,
-    rgba(154, 136, 114, 0.25) 8px
-  );
-  color: #6b5a49;
+  background-color: #f7f2e6;
+  background-image: radial-gradient(#c8bca5 1px, transparent 1px);
+  background-size: 7px 7px;
+  color: #5d4f40;
 }
 .swatch-paper::before {
   content: "";
   position: absolute;
   top: 4px;
   left: 50%;
-  width: 22px;
+  width: 24px;
   height: 6px;
   transform: translateX(-50%) rotate(-3deg);
-  background: rgba(169, 187, 174, 0.78);
+  background: rgba(217, 179, 130, 0.75);
 }
 
 .swatch-vintage {
-  background: radial-gradient(circle at 50% 45%, #2a211a 0%, #140f0c 100%);
-  color: #e69143;
+  background: radial-gradient(circle at 50% 45%, #24211e 0%, #121110 100%);
+  color: #eb9234;
 }
 .swatch-vintage::after {
   content: "'24 11 08";
@@ -6132,6 +6130,7 @@ body:not([data-theme="paper"]) .memory-year-stamp {
 }
 
 body:not([data-theme="vintage"]) .vintage-film-header,
+body:not([data-theme="vintage"]) .vintage-film-footer,
 body:not([data-theme="vintage"]) .vintage-date-stamp {
   display: none;
 }
@@ -7802,6 +7801,541 @@ body[data-theme="vintage"] .dup-card {
 
 body[data-theme="vintage"] .dup-shot {
   border-radius: 2px;
+}
+
+/* ==========================================================================
+   Refined 3-Theme Differentiation Pass
+   1) Classic: Apple-inspired Modern Frosted Glass (distinct from Paper)
+   2) Paper:   Dot-Grid Stationery Notebook, 3-Tone Washi Tape & Offset Ink
+   3) Vintage: Charcoal-Obsidian 35mm Dual-Sprocket Darkroom Contact Sheet
+   ========================================================================== */
+
+/* --- 1. Classic: Modern Apple Frosted Glass Gallery --- */
+body[data-theme="classic"] {
+  --font-classic-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+  font-family: var(--font-classic-sans);
+  background-color: #f5f2ec;
+  background-image:
+    radial-gradient(circle at 12% 10%, rgba(255, 255, 255, 0.92), transparent 46%),
+    radial-gradient(circle at 86% 12%, rgba(235, 224, 210, 0.72), transparent 44%),
+    radial-gradient(circle at 52% 90%, rgba(226, 232, 240, 0.42), transparent 52%),
+    linear-gradient(165deg, #f7f4ee 0%, #ede7dd 100%);
+}
+
+body[data-theme="classic"] .brand h1 {
+  font-family: var(--font-classic-sans);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+body[data-theme="classic"] .brand h1 .sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+body[data-theme="classic"] .page-view h2,
+body[data-theme="classic"] .modal-content h2,
+body[data-theme="classic"] .preview-header-block h3,
+body[data-theme="classic"] .empty-state-title,
+body[data-theme="classic"] .memory-year-title,
+body[data-theme="classic"] .footprint-city {
+  font-family: var(--font-classic-sans);
+  letter-spacing: -0.018em;
+  font-weight: 600;
+}
+
+body[data-theme="classic"] .view-switcher {
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  box-shadow: 0 2px 10px rgba(38, 31, 25, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+body[data-theme="classic"] .view-ink {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 10px rgba(38, 31, 25, 0.1), inset 0 1px 0 #ffffff;
+}
+
+body[data-theme="classic"] .btn,
+body[data-theme="classic"] .force-label,
+body[data-theme="classic"] .stat,
+body[data-theme="classic"] .folder-row input[type="text"],
+body[data-theme="classic"] .folder-row input:not([type="checkbox"]),
+body[data-theme="classic"] .custom-select-trigger,
+body[data-theme="classic"] .search-capsule {
+  background: rgba(255, 255, 255, 0.68);
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  border-color: rgba(125, 95, 65, 0.14);
+  box-shadow: 0 1px 3px rgba(38, 31, 25, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+body[data-theme="classic"] .btn:hover,
+body[data-theme="classic"] .force-label:hover,
+body[data-theme="classic"] .stat:hover {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(125, 95, 65, 0.22);
+  box-shadow: 0 6px 18px rgba(38, 31, 25, 0.08), inset 0 1px 0 #ffffff;
+}
+
+body[data-theme="classic"] .stat.active {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(174, 118, 78, 0.45);
+  box-shadow: 0 0 0 2px rgba(174, 118, 78, 0.16), 0 6px 16px rgba(38, 31, 25, 0.06);
+}
+
+/* Straightened, precision Apple Frosted Glass photo cards (no washi tape) */
+body[data-theme="classic"] .polaroid-card,
+body[data-theme="classic"] .polaroid-card:nth-child(4n+1),
+body[data-theme="classic"] .polaroid-card:nth-child(4n+2),
+body[data-theme="classic"] .polaroid-card:nth-child(4n+3),
+body[data-theme="classic"] .polaroid-card:nth-child(4n) {
+  --rot: 0deg;
+}
+
+body[data-theme="classic"] .tape {
+  display: none;
+}
+
+body[data-theme="classic"] .polaroid-card:not(.is-video) .polaroid-inner {
+  background: rgba(255, 254, 252, 0.72);
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 16px;
+  padding: 10px 10px 14px;
+  box-shadow:
+    0 8px 24px rgba(38, 31, 25, 0.06),
+    0 1px 3px rgba(38, 31, 25, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+body[data-theme="classic"] .polaroid-card:not(.is-video):hover .polaroid-inner {
+  background: rgba(255, 254, 252, 0.86);
+  border-color: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 18px 42px rgba(38, 31, 25, 0.12),
+    0 4px 12px rgba(38, 31, 25, 0.05),
+    inset 0 1px 0 #ffffff;
+}
+
+body[data-theme="classic"] .polaroid-card:not(.is-video) .polaroid-photo-frame {
+  aspect-ratio: 4 / 3;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(38, 31, 25, 0.06);
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .polaroid-inner {
+  border-radius: 16px;
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .polaroid-photo-frame {
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+}
+
+body[data-theme="classic"] .photo-title {
+  display: -webkit-box;
+  margin: 2px 4px 4px;
+  font-family: var(--font-classic-sans);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  text-align: left;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .photo-title {
+  color: #f5efe7;
+}
+
+body[data-theme="classic"] .card-meta-row {
+  justify-content: flex-start;
+  padding: 0 4px;
+}
+
+body[data-theme="classic"] .photo-location {
+  justify-content: flex-start;
+  text-align: left;
+  font-size: 11.5px;
+}
+
+body[data-theme="classic"] .photo-comment {
+  font-family: var(--font-classic-sans);
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--text-secondary);
+  text-align: left;
+  margin: 4px 4px 10px;
+  letter-spacing: 0;
+  -webkit-line-clamp: 2;
+}
+
+body[data-theme="classic"] .classic-icon {
+  display: none;
+}
+
+body[data-theme="classic"] .back-tags,
+body[data-theme="classic"] .score-pills {
+  justify-content: flex-start;
+  padding: 0 4px;
+}
+
+body[data-theme="classic"] .tag {
+  background: rgba(125, 95, 65, 0.07);
+  border: 1px solid rgba(125, 95, 65, 0.09);
+  color: var(--text-secondary);
+}
+
+body[data-theme="classic"] .card-actions {
+  border-top: 1px solid rgba(125, 95, 65, 0.1);
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+body[data-theme="classic"] .modal-content,
+body[data-theme="classic"] .preview-content {
+  background: rgba(255, 253, 250, 0.84);
+  backdrop-filter: blur(28px) saturate(1.45);
+  -webkit-backdrop-filter: blur(28px) saturate(1.45);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow:
+    0 32px 80px rgba(28, 22, 16, 0.22),
+    0 8px 24px rgba(28, 22, 16, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+body[data-theme="classic"] .preview-quote-card {
+  font-family: var(--font-classic-sans);
+  font-size: 14px;
+  line-height: 1.68;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(125, 95, 65, 0.12);
+  border-left: 3px solid var(--primary);
+  border-radius: 10px;
+}
+
+body[data-theme="classic"] .footprint-card,
+body[data-theme="classic"] .dup-group,
+body[data-theme="classic"] .dup-card,
+body[data-theme="classic"] .empty-state-card {
+  background: rgba(255, 254, 252, 0.72);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border-color: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 24px rgba(38, 31, 25, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+body[data-theme="classic"] .footprint-card {
+  border-radius: 16px;
+}
+
+body[data-theme="classic"] .footprint-shot {
+  border-radius: 10px;
+}
+
+/* --- 2. Paper · Stationery: Dot-Grid Canvas, 3-Tone Washi Tape & Letterpress --- */
+body[data-theme="paper"] {
+  background-color: #f7f2e6;
+  background-image:
+    radial-gradient(#d3c9b4 1px, transparent 1px),
+    radial-gradient(circle at 16% 14%, rgba(255, 252, 244, 0.7), transparent 48%),
+    linear-gradient(180deg, #f8f3e8 0%, #f3ecdd 100%);
+  background-size: 22px 22px, 100% 100%, 100% 100%;
+  color: #362e26;
+}
+
+body[data-theme="paper"] .brand h1 {
+  font-style: italic;
+  font-weight: 700;
+  color: #2c241d;
+}
+
+body[data-theme="paper"] .btn {
+  background: #fffdf8;
+  border: 1px solid #d5cab5;
+  box-shadow: 2px 2px 0 rgba(70, 55, 35, 0.08);
+}
+
+body[data-theme="paper"] .btn:hover {
+  background: #ffffff;
+  border-color: #bfb39c;
+  box-shadow: 3px 3px 0 rgba(70, 55, 35, 0.12);
+}
+
+body[data-theme="paper"] .btn.primary,
+body[data-theme="paper"] .stat.active {
+  background: #362e26;
+  border-color: #362e26;
+  color: #fbf7ee;
+  box-shadow: 3px 3px 0 rgba(199, 125, 88, 0.42);
+}
+
+body[data-theme="paper"] .btn.primary:hover {
+  background: #27201a;
+  border-color: #27201a;
+  color: #fffdf8;
+}
+
+body[data-theme="paper"] .stat.active .stat-label,
+body[data-theme="paper"] .stat.active .stat-num,
+body[data-theme="paper"] .stat.active svg {
+  color: #fbf7ee;
+}
+
+body[data-theme="paper"] .polaroid-card:nth-child(odd) { --rot: -1.15deg; }
+body[data-theme="paper"] .polaroid-card:nth-child(even) { --rot: 1.05deg; }
+body[data-theme="paper"] .polaroid-card:nth-child(3n) { --rot: -0.55deg; }
+
+body[data-theme="paper"] .polaroid-card:not(.is-video) .polaroid-inner {
+  background: #fffefb;
+  border: 1px solid rgba(120, 102, 78, 0.2);
+  box-shadow:
+    0 2px 4px rgba(54, 42, 26, 0.06),
+    0 12px 26px rgba(54, 42, 26, 0.09);
+}
+
+body[data-theme="paper"] .polaroid-card:not(.is-video):hover .polaroid-inner {
+  box-shadow: 0 18px 36px rgba(54, 42, 26, 0.16);
+}
+
+/* 3-Tone Semi-Translucent Washi Tape (Sand / Sage / Terracotta Rose) */
+body[data-theme="paper"] .tape {
+  top: -14px;
+  width: 86px;
+  height: 23px;
+  border-left: 2px dotted rgba(255, 255, 255, 0.62);
+  border-right: 2px dotted rgba(255, 255, 255, 0.62);
+  clip-path: none;
+  background: rgba(217, 179, 130, 0.68);
+  transform: translateX(-50%) rotate(-2deg);
+}
+
+body[data-theme="paper"] .polaroid-card:nth-child(2n) .tape {
+  background: rgba(154, 173, 147, 0.64);
+  transform: translateX(-50%) rotate(2.3deg);
+}
+
+body[data-theme="paper"] .polaroid-card:nth-child(3n) .tape {
+  background: rgba(212, 148, 138, 0.58);
+  transform: translateX(-50%) rotate(-1.2deg);
+}
+
+body[data-theme="paper"] .polaroid-photo {
+  filter: sepia(0.06) contrast(0.98) brightness(1.01);
+  transition: opacity var(--dur-panel) var(--ease-out),
+              transform 480ms var(--ease-out),
+              filter 360ms var(--ease-out);
+}
+
+/* --- 3. Vintage Analog: Charcoal-Obsidian 35mm Dual-Sprocket Darkroom --- */
+body[data-theme="vintage"] {
+  --bg: #121110;
+  --bg-deep: #0b0a09;
+  --panel: rgba(27, 25, 23, 0.92);
+  --panel-solid: #1b1917;
+  --text: #e9e2d6;
+  --text-secondary: #c8bfb0;
+  --muted: #9e9486;
+  --muted-light: #6e665c;
+  --primary: #eb9234;
+  --primary-dark: #f4b165;
+  --primary-light: rgba(235, 146, 52, 0.16);
+  --primary-glow: rgba(235, 146, 52, 0.3);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(235, 146, 52, 0.34);
+  --frost-bg: rgba(18, 17, 16, 0.9);
+  background-color: #121110;
+  background-image:
+    radial-gradient(ellipse at 20% 15%, rgba(235, 146, 52, 0.08), transparent 48%),
+    linear-gradient(180deg, #141311 0%, #0e0d0c 100%);
+}
+
+body[data-theme="vintage"] .brand h1 {
+  font-family: var(--font-mono), var(--font-serif);
+  letter-spacing: -0.01em;
+  color: #f4eee4;
+}
+
+body[data-theme="vintage"] .brand h1 .sub {
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .btn.primary,
+body[data-theme="vintage"] .stat.active {
+  background: #eb9234;
+  border-color: #eb9234;
+  color: #141210;
+  font-weight: 600;
+}
+
+body[data-theme="vintage"] .btn.primary:hover {
+  background: #f5a44d;
+  border-color: #f5a44d;
+  color: #141210;
+}
+
+body[data-theme="vintage"] .stat.active .stat-label,
+body[data-theme="vintage"] .stat.active .stat-num,
+body[data-theme="vintage"] .stat.active svg {
+  color: #141210;
+}
+
+body[data-theme="vintage"] .polaroid-card,
+body[data-theme="vintage"] .polaroid-card:nth-child(4n+1),
+body[data-theme="vintage"] .polaroid-card:nth-child(4n+2),
+body[data-theme="vintage"] .polaroid-card:nth-child(4n+3),
+body[data-theme="vintage"] .polaroid-card:nth-child(4n) {
+  --rot: 0deg;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-inner {
+  background: #171513;
+  border: 1px solid #2b2723;
+  border-radius: 3px;
+  padding: 0;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.48);
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video):hover .polaroid-inner {
+  border-color: rgba(235, 146, 52, 0.55);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.68), 0 0 0 1px rgba(235, 146, 52, 0.22);
+}
+
+/* Top & Bottom 35mm Film Strips with Recessed Sprocket Holes */
+body[data-theme="vintage"] .vintage-film-header,
+body[data-theme="vintage"] .vintage-film-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 12px;
+  background: #0d0c0b;
+  background-image: none;
+  color: #d9822b;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+body[data-theme="vintage"] .vintage-film-header {
+  border-bottom: 1px solid #24211d;
+}
+
+body[data-theme="vintage"] .vintage-film-footer {
+  border-top: 1px solid #24211d;
+  padding: 5px 12px;
+}
+
+body[data-theme="vintage"] .vintage-sprockets {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+body[data-theme="vintage"] .vintage-sprockets i {
+  display: inline-block;
+  width: 9px;
+  height: 6.5px;
+  border-radius: 1.5px;
+  background: #2b2824;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-photo-frame {
+  aspect-ratio: 3 / 2;
+  background: #090908;
+  border-left: 10px solid #0d0c0b;
+  border-right: 10px solid #0d0c0b;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-photo-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 38px rgba(0, 0, 0, 0.52);
+  pointer-events: none;
+  z-index: 2;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-photo {
+  filter: sepia(0.16) contrast(1.08) saturate(0.9) brightness(0.96);
+  transition: opacity var(--dur-panel) var(--ease-out),
+              transform 520ms var(--ease-out),
+              filter 420ms var(--ease-out);
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .favorite-btn {
+  top: 34px;
+  right: 18px;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .raw-badge-card {
+  top: 34px;
+  left: 18px;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .live-badge {
+  top: 36px;
+  left: 18px;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .raw-badge-card + .live-badge {
+  top: 66px;
+}
+
+body[data-theme="vintage"] .polaroid-card:not(.is-video) .polaroid-body {
+  padding: 12px 14px 14px;
+  background: #171513;
+}
+
+body[data-theme="vintage"] .preview-content {
+  background: #171513;
+  border: 1px solid rgba(235, 146, 52, 0.42);
+}
+
+/* --- Intuitive Pointer-Gated Hover Choreography Across All 3 Themes --- */
+@media (hover: hover) and (pointer: fine) {
+  body[data-theme="classic"] .polaroid-card:hover {
+    transform: translateY(-4px);
+  }
+  body[data-theme="classic"] .polaroid-card:hover .polaroid-photo {
+    transform: scale(1.035);
+  }
+  body[data-theme="paper"] .polaroid-card:hover {
+    transform: rotate(0deg) translateY(-6px) scale(1.012);
+  }
+  body[data-theme="paper"] .polaroid-card:hover .polaroid-photo {
+    transform: scale(1.025);
+    filter: sepia(0) contrast(1) brightness(1);
+  }
+  body[data-theme="vintage"] .polaroid-card:hover {
+    transform: translateY(-4px);
+  }
+  body[data-theme="vintage"] .polaroid-card:not(.is-video):hover .polaroid-photo {
+    transform: scale(1.03);
+    filter: sepia(0.04) contrast(1.1) saturate(1.02) brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-theme="classic"] .polaroid-card:hover .polaroid-photo,
+  body[data-theme="paper"] .polaroid-card:hover .polaroid-photo,
+  body[data-theme="vintage"] .polaroid-card:hover .polaroid-photo {
+    transform: none !important;
+  }
 }
 
 
