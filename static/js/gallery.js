@@ -732,15 +732,20 @@ function renderGallery(options = {}) {
       ($("yearFilter") && $("yearFilter").value !== "") ||
       ($("statusFilter") && $("statusFilter").value !== "all" && totalInAlbum > 0);
     const textEl = $("emptyStateText");
+    const iconEl = $("emptyStateIcon");
     const resetBtn = $("emptyResetFiltersBtn");
     if (textEl) {
       if (hasFilterOrSearch && totalInAlbum > 0) {
+        if (iconEl && ICONS && ICONS.search) iconEl.innerHTML = ICONS.search;
         textEl.innerHTML =
-          "没有寻访到相符的回忆。<br>不妨放宽筛选条件，或换一个词再试一次。";
+          '<span class="empty-state-title">没有寻访到相符的回忆</span>' +
+          '<span class="empty-state-desc">不妨放宽筛选条件，或换一个关键词再试一次。</span>';
         if (resetBtn) resetBtn.classList.remove("hidden");
       } else {
+        if (iconEl && ICONS && ICONS.collection) iconEl.innerHTML = ICONS.collection;
         textEl.innerHTML =
-          "这一册还是空白。<br>在上方选定存放照片的文件夹，点「开始整理」翻开第一页。";
+          '<span class="empty-state-title">这一册还是空白</span>' +
+          '<span class="empty-state-desc">在上方选定存放照片的文件夹，点「开始整理」翻开第一页。</span>';
         if (resetBtn) resetBtn.classList.add("hidden");
       }
     }
@@ -759,7 +764,9 @@ function renderGallery(options = {}) {
     if (options.animate === false) {
       card.style.animation = "none";
     } else {
-      card.style.animationDelay = `${(idx % 16) * 0.025}s`;
+      // Cap entrance stagger to the first 8 visible cards (max ~190ms) so
+      // long pages never feel delayed, per Emil Kowalski choreography rules.
+      card.style.animationDelay = `${Math.min(offset, 8) * 0.024}s`;
     }
     card.dataset.id = photo.id;
     card.innerHTML = cardHtml(photo);

@@ -1,9 +1,7 @@
 /* ==========================================================================
-   Lumina Album - Local-First Stationery Typography (@font-face)
-   100% offline-friendly: tries system-installed open-source fonts via local()
-   first, then loads self-hosted .woff2 files placed in /static/fonts/.
-   Run `bash static/fonts/download_fonts.sh` to fetch the open-source .woff2
-   files (LXGW WenKai Lite, Cormorant Garamond, IBM Plex Mono).
+   Lumina Album - Local-First Editorial Typography (@font-face)
+   100% offline-friendly: checks system-installed fonts via local() first,
+   then loads self-hosted font files placed in /static/fonts/.
    ========================================================================== */
 
 /* Editorial Latin Serif (Brand subtitle, dates, chapter accents) */
@@ -39,7 +37,7 @@
     url("/static/fonts/cormorant-garamond-400-italic.woff2") format("woff2");
 }
 
-/* Warm Stationery Handwriting / Book Script (Captions, quotes, empty states) */
+/* Warm Stationery Book Script (Captions, quotes, journal notes) */
 @font-face {
   font-family: "Lumina WenKai";
   font-style: normal;
@@ -48,12 +46,13 @@
   src:
     local("LXGW WenKai Lite"),
     local("LXGW WenKai"),
+    local("霞鹜文楷轻便版"),
     local("霞鹜文楷"),
-    url("/static/fonts/lxgw-wenkai-lite-400.woff2") format("woff2"),
-    url("/static/fonts/lxgw-wenkai-lite-400.ttf") format("truetype");
+    url("/static/fonts/lxgw-wenkai-lite-400.ttf") format("truetype"),
+    url("/static/fonts/lxgw-wenkai-lite-400.woff2") format("woff2");
 }
 
-/* Archival Typewriter Monospace (EXIF specs, scores, postmark dates) */
+/* Archival Typewriter Monospace (EXIF specs, scores, postmark & film dates) */
 @font-face {
   font-family: "Lumina Archival Mono";
   font-style: normal;

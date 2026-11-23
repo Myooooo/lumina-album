@@ -197,6 +197,8 @@ svg {
 }
 
 .folder-row {
+  position: relative;
+  z-index: 10;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -1290,7 +1292,7 @@ select {
   -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
   z-index: 7;
-  animation: liveBadgeIn .4s cubic-bezier(.34, 1.28, .64, 1) both;
+  animation: liveBadgeIn 200ms var(--ease-out) both;
 }
 
 /* The Live Photo mark is drawn in icons.js (a dotted orbit around a ring and a
@@ -1303,7 +1305,7 @@ select {
 }
 
 @keyframes liveBadgeIn {
-  from { opacity: 0; transform: scale(.6); }
+  from { opacity: 0; transform: scale(0.92); }
   to   { opacity: 1; transform: scale(1); }
 }
 
@@ -1668,32 +1670,79 @@ select {
   to { background-position: -80% 0; }
 }
 
-/* ---------- Empty State ---------- */
+/* ---------- Empty State (Editorial Folio Plate) ---------- */
 .empty-state {
   text-align: center;
   color: var(--muted);
-  padding: 100px 20px;
-  font-size: 18px;
+  padding: 72px 20px 104px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  animation: fadeSlideIn var(--dur-panel) var(--ease-out) both;
+}
+
+.empty-state-card {
+  width: 100%;
+  max-width: 440px;
+  padding: 36px 32px 32px;
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 253, 249, 0.72);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.85);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
+}
+
+.empty-state .empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light);
+  border: 1px solid var(--border);
+  color: var(--primary-dark);
 }
 
 /* Only the leading mark is a display size; the reset button inside the empty
    state keeps the normal 16px button icon instead of inheriting this. */
 .empty-state .empty-icon svg {
-  width: 48px;
-  height: 48px;
-  color: var(--muted-light);
+  width: 22px;
+  height: 22px;
+  color: currentColor;
 }
 
 .empty-state p {
-  font-family: var(--font-hand);
-  font-size: 20px;
-  line-height: var(--leading-body);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   text-wrap: pretty;
-  color: var(--text-secondary);
+}
+
+.empty-state-title {
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.empty-state-desc {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--muted);
+  max-width: 34ch;
+}
+
+.empty-state-card .btn {
+  margin-top: 6px;
 }
 
 /* ---------- Floating Selection Bar ---------- */
@@ -1794,7 +1843,7 @@ select {
   justify-content: center;
   z-index: 100;
   padding: 24px;
-  animation: modalBackdrop .3s ease both;
+  animation: modalBackdrop 200ms var(--ease-out) both;
 }
 
 /* The detail dialog is always above whatever opened it.
@@ -1832,12 +1881,12 @@ select {
   content: "";
   position: absolute;
   top: 0;
-  left: 36px;
-  right: 36px;
-  height: 3px;
+  left: 44px;
+  right: 44px;
+  height: 1.5px;
   border-radius: 0 0 99px 99px;
-  background: linear-gradient(90deg, transparent, #d8a17c, var(--primary), #d8a17c, transparent);
-  opacity: 0.85;
+  background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  opacity: 0.45;
 }
 
 .modal-content h2 {
@@ -1971,7 +2020,7 @@ select {
   object-fit: contain;
   background: #14120f;
   box-shadow: var(--shadow-card);
-  animation: previewVideoIn .36s ease both;
+  animation: previewVideoIn 240ms var(--ease-out) both;
 }
 
 /* ---------- Generating a preview ----------
@@ -2976,19 +3025,19 @@ select {
 
 /* Image slide animations */
 .preview-switch-left {
-  animation: previewSwitchLeft var(--dur-panel) var(--ease-in-out) both;
+  animation: previewSwitchLeft 220ms var(--ease-out) both;
 }
 .preview-switch-right {
-  animation: previewSwitchRight var(--dur-panel) var(--ease-in-out) both;
+  animation: previewSwitchRight 220ms var(--ease-out) both;
 }
 
 @keyframes previewSwitchLeft {
-  from { opacity: 0; transform: translateX(-30px) scale(0.98); }
-  to { opacity: 1; transform: translateX(0) scale(1); }
+  from { opacity: 0; transform: translateX(-16px) scale(0.985); filter: blur(1.5px); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
 }
 @keyframes previewSwitchRight {
-  from { opacity: 0; transform: translateX(30px) scale(0.98); }
-  to { opacity: 1; transform: translateX(0) scale(1); }
+  from { opacity: 0; transform: translateX(16px) scale(0.985); filter: blur(1.5px); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
 }
 
 /* ---------- Folder Browser Modal ---------- */
@@ -3129,24 +3178,26 @@ select {
   box-shadow: var(--shadow-modal);
   padding: 6px;
   transform-origin: top right;
-  animation: historyDrop var(--dur-ui) var(--ease-out) both;
+  animation: historyDrop 180ms var(--ease-out) both;
 }
 
 .folder-history.closing {
-  animation: historyLift var(--dur-fast) var(--ease-out) both;
+  animation: historyLift 140ms var(--ease-out) both;
   pointer-events: none;
 }
 
 @keyframes historyDrop {
-  from { opacity: 0; transform: translateY(-8px) scaleY(.94); }
-  to   { opacity: 1; transform: translateY(0) scaleY(1); }
+  from { opacity: 0; transform: translateY(-5px) scale(0.975); filter: blur(1px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
 
 @keyframes historyLift {
-  from { opacity: 1; transform: translateY(0) scaleY(1); }
-  to   { opacity: 0; transform: translateY(-6px) scaleY(.96); }
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(-4px) scale(0.98); }
 }
 
+/* High-frequency dropdown rows appear immediately with their container —
+   no nested per-item stagger (Emil Kowalski choreography rule). */
 .folder-history-item {
   padding: 9px 14px;
   border-radius: var(--radius-sm);
@@ -3162,19 +3213,6 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: historyItemIn var(--dur-ui) var(--ease-out) both;
-}
-
-.folder-history-item:nth-child(1) { animation-delay: .01s; }
-.folder-history-item:nth-child(2) { animation-delay: .03s; }
-.folder-history-item:nth-child(3) { animation-delay: .05s; }
-.folder-history-item:nth-child(4) { animation-delay: .07s; }
-.folder-history-item:nth-child(5) { animation-delay: .09s; }
-.folder-history-item:nth-child(n+6) { animation-delay: .11s; }
-
-@keyframes historyItemIn {
-  from { opacity: 0; transform: translateX(-6px); }
-  to   { opacity: 1; transform: translateX(0); }
 }
 
 .folder-history-item svg { width: 14px; height: 14px; color: var(--muted); flex-shrink: 0; }
@@ -3293,11 +3331,11 @@ select {
   line-height: 17px;
   text-align: center;
   font-weight: 600;
-  animation: dotPop .3s var(--ease-soft);
+  animation: dotPop 180ms var(--ease-out) both;
 }
 
 @keyframes dotPop {
-  from { transform: scale(0.4); opacity: 0; }
+  from { transform: scale(0.88); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
 
@@ -3939,7 +3977,7 @@ select {
   color: var(--text);
   font-size: 13.5px;
   line-height: 1.5;
-  animation: toastIn .35s var(--ease-soft) both;
+  animation: toastIn 220ms var(--ease-out) both;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3949,15 +3987,15 @@ select {
 .toast.error { border-left-color: var(--danger); }
 .toast.info { border-left-color: var(--primary); }
 .toast.warning { border-left-color: var(--maybe); }
-.toast.removing { animation: toastOut .18s var(--ease-out) both; }
+.toast.removing { animation: toastOut 150ms var(--ease-out) both; }
 
 @keyframes toastIn {
-  from { opacity: 0; transform: translateX(30px) scale(0.95); }
-  to { opacity: 1; transform: translateX(0) scale(1); }
+  from { opacity: 0; transform: translateX(18px) scale(0.97); filter: blur(1px); }
+  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
 }
 @keyframes toastOut {
   from { opacity: 1; transform: translateX(0) scale(1); }
-  to { opacity: 0; transform: translateX(22px) scale(0.96); }
+  to { opacity: 0; transform: translateX(14px) scale(0.975); }
 }
 
 /* ---------- Confirm & Loading Modals ---------- */
@@ -4072,12 +4110,12 @@ select {
 /* Menus grow from their trigger's edge, so the vertical scale is anchored at
    the top rather than the middle. */
 @keyframes dropdownIn {
-  from { opacity: 0; transform: translateY(-4px) scaleY(0.97); }
-  to { opacity: 1; transform: translateY(0) scaleY(1); }
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); filter: blur(1.5px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 }
 @keyframes dropdownOut {
-  from { opacity: 1; transform: translateY(0) scaleY(1); }
-  to { opacity: 0; transform: translateY(-3px) scaleY(0.98); }
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-3px) scale(0.98); }
 }
 
 /* ---------- Exit animations ---------- */
@@ -4137,9 +4175,9 @@ select {
   cursor: pointer;
   z-index: 120;
   box-shadow: 0 10px 28px rgba(38, 25, 12, 0.18);
-  transition: transform .28s var(--ease-out), box-shadow .28s ease,
-              color .2s ease, background-color .2s ease;
-  animation: backToTopIn .34s cubic-bezier(.34, 1.28, .64, 1) both;
+  transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out),
+              color 160ms var(--ease-out), background-color 160ms var(--ease-out);
+  animation: backToTopIn 220ms var(--ease-out) both;
 }
 
 .back-to-top .btn-icon {
@@ -4147,7 +4185,7 @@ select {
   width: 20px;
   height: 20px;
   transform: translateY(1px);
-  transition: transform .28s var(--ease-out);
+  transition: transform 220ms var(--ease-out);
 }
 
 .back-to-top .btn-icon svg { width: 20px; height: 20px; }
@@ -4159,8 +4197,8 @@ select {
   border-radius: 50%;
   border: 1px solid var(--primary);
   opacity: 0;
-  transform: scale(.82);
-  transition: opacity .28s ease, transform .28s var(--ease-out);
+  transform: scale(0.88);
+  transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out);
   pointer-events: none;
 }
 
@@ -4171,27 +4209,27 @@ select {
 }
 
 .back-to-top:hover .btn-icon { transform: translateY(-1px); }
-.back-to-top:hover .back-to-top-ring { opacity: .55; transform: scale(1.12); }
+.back-to-top:hover .back-to-top-ring { opacity: .55; transform: scale(1.1); }
 
 .back-to-top:active {
-  transform: translateY(-1px) scale(.96);
+  transform: translateY(-1px) scale(.97);
   box-shadow: 0 8px 20px rgba(38, 25, 12, 0.2);
 }
 
-/* Leaving: the same gesture in reverse, so it never blinks out. */
+/* Leaving: shorter than entering so it feels crisp and responsive. */
 .back-to-top.leaving {
-  animation: backToTopOut .26s ease both;
+  animation: backToTopOut 150ms var(--ease-out) both;
   pointer-events: none;
 }
 
 @keyframes backToTopIn {
-  from { opacity: 0; transform: translateY(14px) scale(.86); }
+  from { opacity: 0; transform: translateY(10px) scale(0.92); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes backToTopOut {
   from { opacity: 1; transform: translateY(0) scale(1); }
-  to   { opacity: 0; transform: translateY(10px) scale(.9); }
+  to   { opacity: 0; transform: translateY(8px) scale(0.94); }
 }
 
 /* While the smooth scroll is running the button has done its job: it fades a
@@ -4441,6 +4479,7 @@ select {
 
 .view-switcher-row {
   position: relative;
+  z-index: 60;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -5814,8 +5853,8 @@ body:not([data-view="album"]) .topbar {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 65;
-  min-width: 224px;
+  z-index: 120;
+  min-width: 228px;
   padding: 6px;
   background: rgba(255, 254, 251, 0.98);
   backdrop-filter: blur(18px);
@@ -5826,8 +5865,18 @@ body:not([data-view="album"]) .topbar {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  animation: dropdownIn var(--dur-fast) var(--ease-out) both;
+  animation: dropdownIn 160ms var(--ease-out) both;
   transform-origin: top right;
+}
+
+.theme-menu.closing {
+  animation: dropdownOut 140ms var(--ease-out) both;
+  pointer-events: none;
+}
+
+.prompt-custom-menu-panel {
+  transform-origin: top right;
+  animation: dropdownIn 160ms var(--ease-out) both;
 }
 
 .theme-menu-item {
@@ -7333,3 +7382,185 @@ body[data-theme="vintage"] ::-webkit-scrollbar-thumb {
   background: #46372b;
   border-color: #16110e;
 }
+
+/* ==========================================================================
+   Immersion Polish Across Themes (Empty States, Skeletons, Darkroom Details)
+   ========================================================================== */
+body[data-theme="paper"] .empty-state-card {
+  background: var(--paper-cotton);
+  border: 1px dashed rgba(138, 114, 88, 0.36);
+  border-radius: 4px;
+  box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255, 255, 255, 0.96);
+  position: relative;
+}
+
+body[data-theme="paper"] .empty-state-card::before {
+  content: "";
+  position: absolute;
+  top: -11px;
+  left: 50%;
+  width: 68px;
+  height: 20px;
+  transform: translateX(-50%) rotate(-1.5deg);
+  background: rgba(224, 205, 174, 0.72);
+  clip-path: polygon(
+    3% 0%, 97% 0%,
+    100% 18%, 97% 36%, 100% 54%, 97% 72%, 100% 100%,
+    3% 100%,
+    0% 72%, 3% 54%, 0% 36%, 3% 18%
+  );
+  pointer-events: none;
+}
+
+body[data-theme="paper"] .empty-state .empty-icon {
+  background: var(--paper-ivory);
+  border-color: rgba(138, 114, 88, 0.28);
+  color: var(--ink-ochre);
+}
+
+body[data-theme="vintage"] .empty-state-card {
+  background: rgba(30, 24, 19, 0.88);
+  border: 1px dashed rgba(214, 184, 148, 0.24);
+  border-radius: 4px;
+  box-shadow: var(--shadow-card);
+}
+
+body[data-theme="vintage"] .empty-state .empty-icon,
+body[data-theme="vintage"] .footprints-empty-icon,
+body[data-theme="vintage"] .memories-empty-icon,
+body[data-theme="vintage"] .duplicates-empty-icon {
+  background: rgba(217, 130, 59, 0.14);
+  border: 1px solid rgba(217, 130, 59, 0.3);
+  color: #f2aa66;
+}
+
+body[data-theme="vintage"] .empty-state-title {
+  color: #f4eadc;
+}
+
+body[data-theme="vintage"] .empty-state-desc,
+body[data-theme="vintage"] .footprints-empty-hint,
+body[data-theme="vintage"] .memories-empty-hint,
+body[data-theme="vintage"] .duplicates-empty-hint {
+  color: var(--muted);
+}
+
+/* Darkroom Skeletons & Modals: eliminate bright cream flashes in Vintage mode */
+body[data-theme="vintage"] .skeleton-photo {
+  background: linear-gradient(100deg, #241c16 20%, #30261e 40%, #241c16 60%);
+  background-size: 240% 100%;
+}
+
+body[data-theme="vintage"] .skeleton-line {
+  background: #2c231c;
+}
+
+body[data-theme="vintage"] .folder-hidden-badge {
+  background: rgba(217, 130, 59, 0.18);
+  border-color: rgba(217, 130, 59, 0.36);
+  color: #f2aa66;
+}
+
+body[data-theme="vintage"] .spinner {
+  border-color: rgba(217, 130, 59, 0.22);
+  border-top-color: #f2aa66;
+}
+
+body[data-theme="vintage"] input::placeholder,
+body[data-theme="vintage"] textarea::placeholder {
+  color: var(--muted-light);
+}
+
+/* Secondary view empty states share the same quiet editorial poise */
+.footprints-empty,
+.memories-empty,
+.duplicates-empty {
+  max-width: 440px;
+  margin: 48px auto;
+  min-height: 220px;
+  padding: 36px 32px;
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 253, 249, 0.62);
+}
+
+body[data-theme="paper"] .footprints-empty,
+body[data-theme="paper"] .memories-empty,
+body[data-theme="paper"] .duplicates-empty {
+  background: var(--paper-cotton);
+  border-radius: 4px;
+}
+
+body[data-theme="vintage"] .footprints-empty,
+body[data-theme="vintage"] .memories-empty,
+body[data-theme="vintage"] .duplicates-empty {
+  background: rgba(30, 24, 19, 0.85);
+  border-color: rgba(214, 184, 148, 0.22);
+  border-radius: 4px;
+}
+
+/* ==========================================================================
+   Smooth Theme Switching (View Transitions API + Targeted CSS Fallback)
+   Zero `transition: all`; zero `ease-in`; respects prefers-reduced-motion.
+   ========================================================================== */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 280ms;
+  animation-timing-function: var(--ease-out);
+}
+
+::view-transition-old(root) {
+  animation-name: themeFadeOut;
+}
+
+::view-transition-new(root) {
+  animation-name: themeFadeIn;
+}
+
+@keyframes themeFadeOut {
+  from { opacity: 1; filter: blur(0); }
+  to   { opacity: 0; filter: blur(1.5px); }
+}
+
+@keyframes themeFadeIn {
+  from { opacity: 0; filter: blur(1.5px); }
+  to   { opacity: 1; filter: blur(0); }
+}
+
+body.theme-transitioning,
+body.theme-transitioning .topbar,
+body.theme-transitioning .album-sticky-bar,
+body.theme-transitioning .view-switcher,
+body.theme-transitioning .view-ink,
+body.theme-transitioning .polaroid-inner,
+body.theme-transitioning .modal-content,
+body.theme-transitioning .empty-state-card,
+body.theme-transitioning .btn,
+body.theme-transitioning .stat {
+  transition:
+    background-color 260ms var(--ease-out),
+    color 240ms var(--ease-out),
+    border-color 240ms var(--ease-out),
+    box-shadow 260ms var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+  body.theme-transitioning,
+  body.theme-transitioning .topbar,
+  body.theme-transitioning .album-sticky-bar,
+  body.theme-transitioning .polaroid-inner,
+  body.theme-transitioning .modal-content,
+  body.theme-transitioning .empty-state-card,
+  .theme-menu,
+  .theme-menu.closing,
+  .prompt-custom-menu-panel,
+  .empty-state {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
