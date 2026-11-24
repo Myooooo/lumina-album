@@ -6179,18 +6179,7 @@ body[data-theme="paper"] {
   --font-mono: "Lumina Archival Mono", "IBM Plex Mono", "SF Mono", "JetBrains Mono", "Consolas", Menlo, monospace;
 
   background-color: var(--bg);
-  background-image:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 29px,
-      var(--paper-rule) 29px,
-      var(--paper-rule) 30px
-    ),
-    radial-gradient(circle at 14% 16%, rgba(255, 250, 240, 0.72), transparent 48%),
-    radial-gradient(circle at 86% 10%, rgba(235, 223, 204, 0.42), transparent 44%),
-    linear-gradient(180deg, #faf6ee 0%, #f5efe4 100%);
-  background-attachment: fixed;
+  background-attachment: scroll;
 }
 
 body[data-theme="paper"]::before {
@@ -6964,12 +6953,8 @@ body[data-theme="vintage"] {
   --shadow-hover: 0 20px 44px rgba(0, 0, 0, 0.62);
   --shadow-modal: 0 28px 72px rgba(0, 0, 0, 0.72);
 
-  background-color: #16110e;
-  background-image:
-    radial-gradient(ellipse at 20% 15%, rgba(86, 56, 32, 0.22), transparent 52%),
-    radial-gradient(ellipse at 82% 85%, rgba(74, 46, 26, 0.18), transparent 50%),
-    linear-gradient(175deg, #19130f 0%, #100c09 100%);
-  background-attachment: fixed;
+  background-color: #121110;
+  background-attachment: scroll;
   color: var(--text);
 }
 
