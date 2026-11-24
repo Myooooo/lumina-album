@@ -9245,6 +9245,202 @@ body[data-theme="vintage"] .dup-group-compare:hover {
   color: var(--text);
 }
 
+/* ==========================================================================
+   Phase 3: Timeline Scrubber, Marquee Drag-Select & Shortcuts Cheat-Sheet
+   ========================================================================== */
+
+.timeline-scrubber {
+  position: fixed;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 54vh;
+  max-height: 440px;
+  min-height: 180px;
+  z-index: 55;
+  display: flex;
+  align-items: stretch;
+  user-select: none;
+  touch-action: none;
+}
+
+.timeline-rail {
+  position: relative;
+  width: 24px;
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 4px;
+  border-radius: 99px;
+  cursor: ns-resize;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.timeline-rail:hover {
+  background: rgba(125, 95, 65, 0.1);
+}
+
+.timeline-ticks {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  width: 100%;
+  pointer-events: none;
+}
+
+.timeline-tick {
+  position: relative;
+  display: block;
+  width: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--muted-light);
+  opacity: 0.72;
+}
+
+.timeline-tick.is-year {
+  width: 12px;
+  background: var(--primary);
+  opacity: 0.95;
+}
+
+.timeline-tick.is-year i {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+  pointer-events: none;
+}
+
+.timeline-rail:hover .timeline-tick.is-year i {
+  opacity: 1;
+}
+
+.timeline-pill {
+  position: absolute;
+  right: 34px;
+  transform: translateY(-50%);
+  padding: 4px 11px;
+  border-radius: 99px;
+  background: var(--text);
+  color: #fffdf8;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+
+body[data-theme="paper"] .timeline-pill {
+  background: #362e26;
+  color: #fbf7ee;
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 rgba(199, 125, 88, 0.45);
+}
+
+body[data-theme="vintage"] .timeline-pill {
+  background: #eb9234;
+  color: #141210;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .timeline-rail:hover {
+  background: rgba(235, 146, 52, 0.14);
+}
+
+@media (max-width: 720px) {
+  .timeline-scrubber {
+    display: none;
+  }
+}
+
+/* Marquee Drag Selection Box */
+.marquee-box {
+  position: fixed;
+  z-index: 85;
+  pointer-events: none;
+  border: 1.5px solid var(--primary);
+  background: rgba(174, 118, 78, 0.14);
+  border-radius: var(--radius-sm);
+}
+
+body[data-theme="paper"] .marquee-box {
+  border: 1.5px dashed #362e26;
+  background: rgba(199, 125, 88, 0.14);
+}
+
+body[data-theme="vintage"] .marquee-box {
+  border: 1.5px solid #eb9234;
+  background: rgba(235, 146, 52, 0.14);
+}
+
+/* Shortcuts Cheat-Sheet Modal */
+.shortcuts-content {
+  max-width: 680px;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 6px 0;
+}
+
+@media (max-width: 640px) {
+  .shortcuts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.shortcuts-group h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark);
+  margin: 0 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.shortcut-row kbd {
+  display: inline-block;
+  min-width: 24px;
+  padding: 2px 7px;
+  text-align: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--panel-solid);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  box-shadow: 0 1px 0 var(--border);
+}
+
+body[data-theme="vintage"] .shortcut-row kbd {
+  background: #1a1816;
+  border-color: rgba(235, 146, 52, 0.4);
+  color: #eb9234;
+}
+
+
 
 
 

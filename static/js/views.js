@@ -132,6 +132,7 @@ function showView(name) {
       panel.classList.toggle("hidden", view.name !== target.name);
     }
     syncTopbarHeight();
+    if (typeof updateTimelineScrubber === "function") updateTimelineScrubber();
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   };
 
@@ -298,16 +299,46 @@ function initGalleryEvents() {
     openPreview(id);
   });
 
+  let lastCheckedId = null;
+  let lastCheckShift = false;
+  gallery.addEventListener("click", (e) => {
+    if (e.target.closest(".card-check")) {
+      lastCheckShift = !!e.shiftKey;
+    }
+  }, true);
+
   gallery.addEventListener("change", (e) => {
     const checkbox = e.target.closest(".card-check input");
     if (!checkbox) return;
     const card = checkbox.closest(".polaroid-card");
     const id = Number(card && card.dataset.id);
     if (!Number.isFinite(id)) return;
-    if (checkbox.checked) state.selected.add(id);
-    else state.selected.delete(id);
+    const checked = checkbox.checked;
+
+    if (lastCheckShift && lastCheckedId !== null && lastCheckedId !== id) {
+      const order = visiblePhotoOrder();
+      const a = order.indexOf(lastCheckedId);
+      const b = order.indexOf(id);
+      if (a >= 0 && b >= 0) {
+        const [start, end] = a < b ? [a, b] : [b, a];
+        for (let i = start; i <= end; i += 1) {
+          const targetId = order[i];
+          if (checked) state.selected.add(targetId);
+          else state.selected.delete(targetId);
+          const targetBox = gallery.querySelector(`.polaroid-card[data-id="${targetId}"] .card-check input`);
+          if (targetBox) targetBox.checked = checked;
+        }
+      }
+    } else {
+      if (checked) state.selected.add(id);
+      else state.selected.delete(id);
+    }
+    lastCheckedId = id;
+    lastCheckShift = false;
     updateSelectionBar();
   });
+
+  initMarqueeSelection(gallery);
 
   // `load`/`error` do not bubble, so they are caught on the way down.
   //

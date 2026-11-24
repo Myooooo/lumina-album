@@ -828,6 +828,49 @@
 
   <div id="toastContainer" class="toast-container"></div>
 
+  <!-- Right-edge Timeline Scrubber for large albums -->
+  <aside id="timelineScrubber" class="timeline-scrubber hidden" aria-label="时间轴快速定位">
+    <div class="timeline-rail" id="timelineRail">
+      <div class="timeline-ticks" id="timelineTicks"></div>
+    </div>
+    <div class="timeline-pill hidden" id="timelinePill" aria-hidden="true"></div>
+  </aside>
+
+  <!-- Marquee drag-selection rectangle -->
+  <div id="marqueeBox" class="marquee-box hidden" aria-hidden="true"></div>
+
+  <!-- Keyboard Shortcuts Cheat-Sheet Modal -->
+  <div id="shortcutsModal" class="modal hidden">
+    <div class="modal-content shortcuts-content">
+      <button class="modal-close" data-close="shortcutsModal" title="关闭 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="keyboard"></span>键盘快捷键</h2>
+      <div class="modal-body">
+        <div class="shortcuts-grid">
+          <section class="shortcuts-group">
+            <h3>画廊浏览与选片</h3>
+            <div class="shortcut-row"><span>聚焦搜索框</span><kbd>/</kbd></div>
+            <div class="shortcut-row"><span>切换 舒适 / 紧凑 / 纯图墙</span><span><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd></span></div>
+            <div class="shortcut-row"><span>连续区间选片</span><span><kbd>Shift</kbd> + 点击复选框</span></div>
+            <div class="shortcut-row"><span>拖拽框选多张</span><span>空白处按住鼠标拖动</span></div>
+            <div class="shortcut-row"><span>打开 / 关闭快捷键面板</span><kbd>?</kbd></div>
+          </section>
+          <section class="shortcuts-group">
+            <h3>照片详情灯箱</h3>
+            <div class="shortcut-row"><span>上一张 / 下一张</span><span><kbd>←</kbd> / <kbd>→</kbd> 或 <kbd>K</kbd> / <kbd>J</kbd></span></div>
+            <div class="shortcut-row"><span>珍藏 / 取消珍藏</span><kbd>F</kbd></div>
+            <div class="shortcut-row"><span>暂时收起</span><kbd>D</kbd></div>
+            <div class="shortcut-row"><span>编辑回忆信息</span><kbd>E</kbd></div>
+            <div class="shortcut-row"><span>全屏放大查看</span><kbd>Space</kbd></div>
+            <div class="shortcut-row"><span>关闭当前弹窗</span><kbd>Esc</kbd></div>
+          </section>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary" data-close="shortcutsModal">知道了</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Back to top: appears once the gallery has been scrolled -->
   <button id="backToTopBtn" class="back-to-top hidden" type="button" title="回到顶部" aria-label="回到顶部">
     <span class="back-to-top-ring" aria-hidden="true"></span>

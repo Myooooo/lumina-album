@@ -296,11 +296,12 @@ function init() {
     }
   });
 
-  // Keyboard Shortcuts: ← / → / Esc / F / E
+  // Keyboard Shortcuts: Global (?, /, 1/2/3) + Lightbox (←/→/J/K/F/D/E/Space/Esc)
   document.addEventListener("keydown", (e) => {
     const fsModal = $("fullscreenModal");
     if (fsModal && !fsModal.classList.contains("hidden")) {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" || e.code === "Space") {
+        e.preventDefault();
         closeFullscreenViewer();
       } else if (e.key === "+" || e.key === "=") {
         zoomFullscreen(1.25);
@@ -312,23 +313,64 @@ function init() {
       return;
     }
 
-    if ($("previewModal").classList.contains("hidden")) return;
-    if (["input", "textarea", "select"].includes((e.target.tagName || "").toLowerCase())) return;
+    const tag = (e.target && e.target.tagName || "").toLowerCase();
+    if (["input", "textarea", "select"].includes(tag) || (e.target && e.target.isContentEditable)) {
+      return;
+    }
 
-    if (e.key === "ArrowLeft") {
+    // Toggle shortcuts cheat-sheet with `?`
+    if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
-      navigatePreview(-1);
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      navigatePreview(1);
-    } else if (e.key === "Escape") {
-      closeModal("previewModal");
-    } else if (e.key === "f" || e.key === "F") {
-      e.preventDefault();
-      toggleCurrentPreviewFavorite();
-    } else if (e.key === "e" || e.key === "E") {
-      e.preventDefault();
-      openEditPreview();
+      const modal = $("shortcutsModal");
+      if (modal && !modal.classList.contains("hidden")) {
+        closeModal("shortcutsModal");
+      } else if (modal) {
+        showModal(modal);
+        pushModal(modal);
+      }
+      return;
+    }
+
+    const previewOpen = !$("previewModal").classList.contains("hidden");
+    if (previewOpen) {
+      if (e.key === "ArrowLeft" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        navigatePreview(-1);
+      } else if (e.key === "ArrowRight" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        navigatePreview(1);
+      } else if (e.key === "Escape") {
+        closeModal("previewModal");
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        toggleCurrentPreviewFavorite();
+      } else if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        openEditPreview();
+      } else if (e.key === "d" || e.key === "D") {
+        e.preventDefault();
+        const photo = photoById(state.currentPreviewId);
+        if (photo && photo.status !== "deleted") deletePhotos([photo.id]);
+      } else if (e.code === "Space") {
+        e.preventDefault();
+        openFullscreenViewer();
+      }
+      return;
+    }
+
+    if (isOverlayOpen() || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "/") {
+      const searchInput = $("searchInput");
+      if (searchInput && state.view === "album") {
+        e.preventDefault();
+        searchInput.focus();
+        searchInput.select();
+      }
+    } else if (state.view === "album" && (e.key === "1" || e.key === "2" || e.key === "3")) {
+      const map = { "1": "comfortable", "2": "compact", "3": "wall" };
+      if (typeof applyDensity === "function") {
+        applyDensity(map[e.key], { persist: true, notify: true });
+      }
     }
   });
 
@@ -362,6 +404,7 @@ function init() {
     if (!document.hidden) refreshCardStatus();
   });
   initBackToTop();
+  initTimelineScrubber();
   // The views are wired only once the album is known, so no view can ask for
   // "all albums" by accident.
   albumReady.finally(() => {
@@ -371,6 +414,173 @@ function init() {
   initMemories();
   initExport();
   initDuplicates();
+}
+
+/* ==========================================================================
+   Right-Edge Timeline Scrubber & Gallery Marquee Drag-Selection
+   ========================================================================== */
+
+const timelineState = {
+  buckets: [],
+  dragging: false,
+};
+
+function updateTimelineScrubber() {
+  const scrubber = $("timelineScrubber");
+  const ticksEl = $("timelineTicks");
+  if (!scrubber || !ticksEl) return;
+  const sortVal = $("sortFilter") ? $("sortFilter").value : "";
+  const isTimeSort = sortVal === "time_desc" || sortVal === "time_asc";
+  if (state.view !== "album" || !isTimeSort || state.photos.length < 16) {
+    scrubber.classList.add("hidden");
+    timelineState.buckets = [];
+    return;
+  }
+
+  const buckets = [];
+  let lastKey = "";
+  for (let i = 0; i < state.photos.length; i += 1) {
+    const dot = cardDateText(state.photos[i]);
+    if (!dot) continue;
+    const [y, m] = dot.split(".");
+    const key = `${y}.${m}`;
+    if (key !== lastKey) {
+      buckets.push({ key, label: `${y} 年 ${Number(m)} 月`, year: y, id: state.photos[i].id, index: i });
+      lastKey = key;
+    }
+  }
+  if (buckets.length < 2) {
+    scrubber.classList.add("hidden");
+    timelineState.buckets = [];
+    return;
+  }
+
+  timelineState.buckets = buckets;
+  const seenYears = new Set();
+  const maxTicks = Math.min(buckets.length, 24);
+  const step = Math.max(1, Math.floor(buckets.length / maxTicks));
+  let html = "";
+  for (let i = 0; i < buckets.length; i += step) {
+    const b = buckets[i];
+    const isNewYear = !seenYears.has(b.year);
+    if (isNewYear) seenYears.add(b.year);
+    html += `<span class="timeline-tick${isNewYear ? " is-year" : ""}" data-idx="${i}">${isNewYear ? `<i>${b.year}</i>` : ""}</span>`;
+  }
+  ticksEl.innerHTML = html;
+  scrubber.classList.remove("hidden");
+}
+
+function initTimelineScrubber() {
+  const scrubber = $("timelineScrubber");
+  const rail = $("timelineRail");
+  const pill = $("timelinePill");
+  if (!scrubber || !rail || !pill) return;
+
+  const bucketAtClientY = (clientY) => {
+    const rect = rail.getBoundingClientRect();
+    if (!rect.height || !timelineState.buckets.length) return null;
+    const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const idx = Math.min(timelineState.buckets.length - 1, Math.floor(ratio * timelineState.buckets.length));
+    return { bucket: timelineState.buckets[idx], topPx: ratio * rect.height };
+  };
+
+  const jumpTo = (clientY) => {
+    const hit = bucketAtClientY(clientY);
+    if (!hit) return;
+    pill.textContent = hit.bucket.label;
+    pill.style.top = `${hit.topPx}px`;
+    pill.classList.remove("hidden");
+    const card = document.querySelector(`#gallery .polaroid-card[data-id="${hit.bucket.id}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: "auto", block: "center" });
+      if (typeof scheduleCardSweep === "function") scheduleCardSweep();
+    }
+  };
+
+  rail.addEventListener("pointermove", (e) => {
+    const hit = bucketAtClientY(e.clientY);
+    if (!hit) return;
+    pill.textContent = hit.bucket.label;
+    pill.style.top = `${hit.topPx}px`;
+    pill.classList.remove("hidden");
+    if (timelineState.dragging) jumpTo(e.clientY);
+  });
+
+  rail.addEventListener("pointerdown", (e) => {
+    timelineState.dragging = true;
+    if (rail.setPointerCapture) rail.setPointerCapture(e.pointerId);
+    jumpTo(e.clientY);
+  });
+
+  rail.addEventListener("pointerup", () => {
+    timelineState.dragging = false;
+  });
+
+  rail.addEventListener("pointerleave", () => {
+    if (!timelineState.dragging) pill.classList.add("hidden");
+  });
+}
+
+function initMarqueeSelection(gallery) {
+  const box = $("marqueeBox");
+  if (!gallery || !box) return;
+  let active = false;
+  let startX = 0;
+  let startY = 0;
+  let additive = false;
+  let baseSelected = null;
+
+  gallery.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.target !== gallery) return;
+    active = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    baseSelected = new Set(state.selected);
+    box.style.left = `${startX}px`;
+    box.style.top = `${startY}px`;
+    box.style.width = "0px";
+    box.style.height = "0px";
+    box.classList.remove("hidden");
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!active) return;
+    const left = Math.min(startX, e.clientX);
+    const top = Math.min(startY, e.clientY);
+    const width = Math.abs(e.clientX - startX);
+    const height = Math.abs(e.clientY - startY);
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
+    box.style.width = `${width}px`;
+    box.style.height = `${height}px`;
+    if (width < 8 && height < 8) return;
+
+    const right = left + width;
+    const bottom = top + height;
+    const next = additive ? new Set(baseSelected) : new Set();
+    for (const card of gallery.querySelectorAll(".polaroid-card")) {
+      if (card.classList.contains("is-culled")) continue;
+      const r = card.getBoundingClientRect();
+      const intersects = r.right >= left && r.left <= right && r.bottom >= top && r.top <= bottom;
+      const id = Number(card.dataset.id);
+      if (intersects && Number.isFinite(id)) next.add(id);
+    }
+    state.selected = next;
+    for (const card of gallery.querySelectorAll(".polaroid-card")) {
+      const id = Number(card.dataset.id);
+      const cb = card.querySelector(".card-check input");
+      if (cb) cb.checked = state.selected.has(id);
+    }
+    updateSelectionBar();
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (!active) return;
+    active = false;
+    box.classList.add("hidden");
+  });
 }
 
 /* ==========================================================================

@@ -781,6 +781,7 @@ function renderGallery(options = {}) {
   // New cards have never been positioned; let the sweep decide which of them
   // are far enough away to cull straight away.
   scheduleCardSweep();
+  if (typeof updateTimelineScrubber === "function") updateTimelineScrubber();
 }
 
 /** Rebuild one card in place, keeping its position and selection state. */
