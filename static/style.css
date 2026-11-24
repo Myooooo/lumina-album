@@ -9971,6 +9971,75 @@ body[data-theme="classic"] .stat.active {
   box-shadow: 0 2px 10px rgba(38, 31, 25, 0.08), inset 0 1px 0 #ffffff;
 }
 
+/* ==========================================================================
+   P2 Polish: Narrow-Screen Collapsible Filters & Timeline Accessibility
+   ========================================================================== */
+
+.filters-toggle-btn {
+  display: none;
+  position: relative;
+  gap: 6px;
+}
+
+.filters-active-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+body[data-theme="vintage"] .filters-active-badge {
+  background: #eb9234;
+  color: #141210;
+}
+
+@media (max-width: 900px) {
+  .filters-toggle-btn {
+    display: inline-flex;
+    order: 1;
+  }
+  .filters .search-capsule {
+    order: 0;
+    flex: 1 1 100%;
+  }
+  .filters #resetFiltersBtn {
+    order: 2;
+  }
+  .filters .density-switcher {
+    order: 3;
+    margin-left: auto;
+  }
+  .filters > .filter-group {
+    display: none;
+    order: 10;
+    flex: 1 1 calc(50% - 6px);
+    min-width: 140px;
+  }
+  .filters.is-expanded > .filter-group {
+    display: flex;
+  }
+}
+
+.timeline-rail:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  background: rgba(125, 95, 65, 0.12);
+}
+
+.timeline-tick.is-year {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
 
 
 

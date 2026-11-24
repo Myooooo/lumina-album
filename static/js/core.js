@@ -472,11 +472,20 @@ function currentFilterValue(key) {
 }
 
 function updateFilterHighlights() {
+  let activeSecondary = 0;
+  const secondaryKeys = new Set(["sort", "kind", "min_score", "tag", "year"]);
   document.querySelectorAll("[data-filter-key]").forEach((group) => {
     const key = group.dataset.filterKey;
     const value = currentFilterValue(key);
-    group.classList.toggle("active-filter", value !== FILTER_DEFAULTS[key]);
+    const isActive = value !== FILTER_DEFAULTS[key];
+    group.classList.toggle("active-filter", isActive);
+    if (isActive && secondaryKeys.has(key)) activeSecondary += 1;
   });
+  const badge = $("filtersActiveBadge");
+  if (badge) {
+    badge.textContent = String(activeSecondary);
+    badge.classList.toggle("hidden", activeSecondary === 0);
+  }
 }
 
 function fmtSize(bytes) {

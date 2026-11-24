@@ -146,7 +146,12 @@
         </div>
       </section>
 
-      <section class="filters">
+      <section class="filters" id="filtersBar">
+        <button id="filtersToggleBtn" class="btn filters-toggle-btn" type="button" aria-expanded="false" aria-controls="filtersBar" title="展开或收起筛选条件">
+          <span class="btn-icon" data-icon="dimensions"></span>
+          <span>筛选</span>
+          <span id="filtersActiveBadge" class="filters-active-badge hidden">0</span>
+        </button>
         <div class="filter-group sort-group" data-filter-key="sort">
           <label><span class="label-icon" data-icon="dimensions"></span>排序方式</label>
           <select id="sortFilter" data-prefix="排序">

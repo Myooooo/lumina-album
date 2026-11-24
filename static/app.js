@@ -59,6 +59,14 @@ function init() {
   initTopbarAutoCollapse();
   $("searchBtn").addEventListener("click", loadPhotos);
   $("resetFiltersBtn").addEventListener("click", resetFilters);
+  const filtersToggleBtn = $("filtersToggleBtn");
+  const filtersBar = $("filtersBar");
+  if (filtersToggleBtn && filtersBar) {
+    filtersToggleBtn.addEventListener("click", () => {
+      const expanded = filtersBar.classList.toggle("is-expanded");
+      filtersToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
+    });
+  }
   if ($("emptyResetFiltersBtn")) {
     $("emptyResetFiltersBtn").addEventListener("click", resetFilters);
   }
@@ -495,25 +503,43 @@ function initTimelineScrubber() {
   const pill = $("timelinePill");
   if (!scrubber || !rail || !pill) return;
 
+  rail.setAttribute("tabindex", "0");
+  rail.setAttribute("role", "slider");
+  rail.setAttribute("aria-label", "时间轴快速定位");
+  timelineState.activeIdx = 0;
+
   const bucketAtClientY = (clientY) => {
     const rect = rail.getBoundingClientRect();
     if (!rect.height || !timelineState.buckets.length) return null;
     const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
     const idx = Math.min(timelineState.buckets.length - 1, Math.floor(ratio * timelineState.buckets.length));
-    return { bucket: timelineState.buckets[idx], topPx: ratio * rect.height };
+    return { bucket: timelineState.buckets[idx], idx, topPx: ratio * rect.height };
+  };
+
+  const jumpToIndex = (idx, topPx) => {
+    if (!timelineState.buckets.length) return;
+    const clamped = Math.max(0, Math.min(timelineState.buckets.length - 1, idx));
+    const bucket = timelineState.buckets[clamped];
+    if (!bucket) return;
+    timelineState.activeIdx = clamped;
+    const rect = rail.getBoundingClientRect();
+    const yPx = topPx !== undefined
+      ? topPx
+      : (rect.height * (timelineState.buckets.length > 1 ? clamped / (timelineState.buckets.length - 1) : 0));
+    pill.textContent = bucket.label;
+    pill.style.top = `${yPx}px`;
+    pill.classList.remove("hidden");
+    const card = document.querySelector(`#gallery .polaroid-card[data-id="${bucket.id}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: "auto", block: "center" });
+      if (typeof scheduleCardSweep === "function") scheduleCardSweep();
+    }
   };
 
   const jumpTo = (clientY) => {
     const hit = bucketAtClientY(clientY);
     if (!hit) return;
-    pill.textContent = hit.bucket.label;
-    pill.style.top = `${hit.topPx}px`;
-    pill.classList.remove("hidden");
-    const card = document.querySelector(`#gallery .polaroid-card[data-id="${hit.bucket.id}"]`);
-    if (card) {
-      card.scrollIntoView({ behavior: "auto", block: "center" });
-      if (typeof scheduleCardSweep === "function") scheduleCardSweep();
-    }
+    jumpToIndex(hit.idx, hit.topPx);
   };
 
   rail.addEventListener("pointermove", (e) => {
@@ -522,10 +548,18 @@ function initTimelineScrubber() {
     pill.textContent = hit.bucket.label;
     pill.style.top = `${hit.topPx}px`;
     pill.classList.remove("hidden");
-    if (timelineState.dragging) jumpTo(e.clientY);
+    if (timelineState.dragging) jumpToIndex(hit.idx, hit.topPx);
   });
 
   rail.addEventListener("pointerdown", (e) => {
+    const tick = e.target.closest(".timeline-tick");
+    if (tick && tick.dataset.idx !== undefined) {
+      const idx = Number(tick.dataset.idx);
+      if (Number.isFinite(idx)) {
+        jumpToIndex(idx);
+        return;
+      }
+    }
     timelineState.dragging = true;
     if (rail.setPointerCapture) rail.setPointerCapture(e.pointerId);
     jumpTo(e.clientY);
@@ -538,38 +572,48 @@ function initTimelineScrubber() {
   rail.addEventListener("pointerleave", () => {
     if (!timelineState.dragging) pill.classList.add("hidden");
   });
+
+  rail.addEventListener("keydown", (e) => {
+    if (!timelineState.buckets.length) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      jumpToIndex(timelineState.activeIdx + 1);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      jumpToIndex(timelineState.activeIdx - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      jumpToIndex(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      jumpToIndex(timelineState.buckets.length - 1);
+    }
+  });
+
+  rail.addEventListener("blur", () => {
+    if (!timelineState.dragging) pill.classList.add("hidden");
+  });
 }
 
 function initMarqueeSelection(gallery) {
   const box = $("marqueeBox");
   if (!gallery || !box) return;
   let active = false;
-  let startX = 0;
-  let startY = 0;
+  let startPageX = 0;
+  let startPageY = 0;
+  let curClientX = 0;
+  let curClientY = 0;
   let additive = false;
   let baseSelected = null;
+  let scrollRaf = null;
 
-  gallery.addEventListener("mousedown", (e) => {
-    if (e.button !== 0 || e.target !== gallery) return;
-    active = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    additive = e.shiftKey || e.metaKey || e.ctrlKey;
-    baseSelected = new Set(state.selected);
-    box.style.left = `${startX}px`;
-    box.style.top = `${startY}px`;
-    box.style.width = "0px";
-    box.style.height = "0px";
-    box.classList.remove("hidden");
-    e.preventDefault();
-  });
-
-  window.addEventListener("mousemove", (e) => {
-    if (!active) return;
-    const left = Math.min(startX, e.clientX);
-    const top = Math.min(startY, e.clientY);
-    const width = Math.abs(e.clientX - startX);
-    const height = Math.abs(e.clientY - startY);
+  const updateMarquee = () => {
+    const startClientX = startPageX - window.scrollX;
+    const startClientY = startPageY - window.scrollY;
+    const left = Math.min(startClientX, curClientX);
+    const top = Math.min(startClientY, curClientY);
+    const width = Math.abs(curClientX - startClientX);
+    const height = Math.abs(curClientY - startClientY);
     box.style.left = `${left}px`;
     box.style.top = `${top}px`;
     box.style.width = `${width}px`;
@@ -593,11 +637,67 @@ function initMarqueeSelection(gallery) {
       if (cb) cb.checked = state.selected.has(id);
     }
     updateSelectionBar();
+  };
+
+  const autoScrollStep = () => {
+    if (!active) {
+      scrollRaf = null;
+      return;
+    }
+    const edge = 52;
+    const vh = window.innerHeight;
+    let dy = 0;
+    if (curClientY < edge) {
+      dy = -Math.ceil(((edge - curClientY) / edge) * 18);
+    } else if (curClientY > vh - edge) {
+      dy = Math.ceil(((curClientY - (vh - edge)) / edge) * 18);
+    }
+    if (dy !== 0) {
+      window.scrollBy(0, dy);
+      updateMarquee();
+      scrollRaf = requestAnimationFrame(autoScrollStep);
+    } else {
+      scrollRaf = null;
+    }
+  };
+
+  gallery.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.target !== gallery) return;
+    active = true;
+    startPageX = e.clientX + window.scrollX;
+    startPageY = e.clientY + window.scrollY;
+    curClientX = e.clientX;
+    curClientY = e.clientY;
+    additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    baseSelected = new Set(state.selected);
+    box.style.left = `${curClientX}px`;
+    box.style.top = `${curClientY}px`;
+    box.style.width = "0px";
+    box.style.height = "0px";
+    box.classList.remove("hidden");
+    e.preventDefault();
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!active) return;
+    curClientX = e.clientX;
+    curClientY = e.clientY;
+    updateMarquee();
+    if (!scrollRaf) {
+      const edge = 52;
+      if (curClientY < edge || curClientY > window.innerHeight - edge) {
+        scrollRaf = requestAnimationFrame(autoScrollStep);
+      }
+    }
   });
 
   window.addEventListener("mouseup", () => {
     if (!active) return;
     active = false;
+    if (scrollRaf) {
+      cancelAnimationFrame(scrollRaf);
+      scrollRaf = null;
+    }
     box.classList.add("hidden");
   });
 }
