@@ -350,6 +350,26 @@ async function main() {
   await window.openSettings();
   await new Promise((resolve) => window.setTimeout(resolve, 120));
 
+  // --- clicking a detail tag lands on the album filtered by that tag ------
+  await window.openAlbumWithTag("旅行");
+  await new Promise((resolve) => window.setTimeout(resolve, 120));
+  check(
+    "a detail tag returns to the album with that tag selected",
+    document.getElementById("tagFilter").value,
+    "旅行"
+  );
+  check(
+    "a detail tag keeps the album on all memories",
+    document.getElementById("statusFilter").value,
+    "all"
+  );
+  const liveBadge = window.liveBadgeHtml({ has_live: true });
+  check(
+    "the Live Photo badge carries a Live label for the vintage card",
+    liveBadge.includes("live-badge-label") && liveBadge.includes("Live"),
+    true
+  );
+
   // --- map source fields keep custom values while hidden -----------------
   const mapProvider = document.getElementById("setMapTileProvider");
   const mapUrlRow = document.getElementById("setMapTileUrlRow");

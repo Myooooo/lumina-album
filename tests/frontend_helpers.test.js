@@ -1861,6 +1861,28 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
+    "detail tags are buttons that return to the filtered album",
+    /data-preview-tag=/.test(src) &&
+      /function openAlbumWithTag\(/.test(src) &&
+      /setSelectValue\(select, clean\)/.test(src) &&
+      /\.tag-filter-btn:hover/.test(css),
+    true
+  );
+  check(
+    "vintage Live Photo cards use the video-style Live pill",
+    /live-badge-label/.test(src) &&
+      /body\[data-theme="vintage"\] \.live-badge-label/.test(css) &&
+      /body\[data-theme="vintage"\] \.live-badge \{/.test(css),
+    true
+  );
+  check(
+    "vintage checkboxes are repainted instead of native white",
+    /body\[data-theme="vintage"\] \.card-check input\[type="checkbox"\]/.test(css) &&
+      /body\[data-theme="vintage"\] \.confirm-check input\[type="checkbox"\]/.test(css) &&
+      /appearance: none/.test(css),
+    true
+  );
+  check(
     "lightbox renders detected people pills and bounding boxes",
     /function previewPeopleHtml\(/.test(src) &&
       /function renderPreviewFaceBoxes\(/.test(src) &&

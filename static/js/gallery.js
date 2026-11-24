@@ -293,7 +293,18 @@ async function loadTags() {
     const select = $("tagFilter");
     const current = select.value;
     select.innerHTML = `<option value="">全部标签</option>` + (data.tags || []).map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-    if (current && (data.tags || []).includes(current)) select.value = current;
+    if (current) {
+      // A tag opened from the detail sheet may not be in the current album's
+      // stats list (for example the photo is in a different folder). Keep it
+      // as an explicit option so the filter is not silently cleared.
+      if (![...select.options].some((opt) => opt.value === current)) {
+        const option = document.createElement("option");
+        option.value = current;
+        option.textContent = current;
+        select.appendChild(option);
+      }
+      select.value = current;
+    }
     if (select.dataset.enhanced) {
       const wrapper = select.parentElement;
       const label = wrapper ? wrapper.querySelector(".custom-select-label") : null;

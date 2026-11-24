@@ -1891,7 +1891,43 @@ async function copyText(text) {
  * with the OS default application (which is how a RAW can be handed to the
  * camera vendor's editor).
  */
+async function openAlbumWithTag(tag) {
+  const clean = String(tag || "").trim();
+  if (!clean) return;
+  closeModal("previewModal");
+  if (!$("fullscreenModal").classList.contains("hidden")) closeModal("fullscreenModal");
+  state.previewContext = null;
+  showView("album");
+  setSelectValue($("statusFilter"), "all");
+  setSelectValue($("kindFilter"), "");
+  setSelectValue($("minScoreFilter"), "");
+  setSelectValue($("yearFilter"), "");
+  const search = $("searchInput");
+  if (search) search.value = "";
+  const select = $("tagFilter");
+  if (select) {
+    if (![...select.options].some((opt) => opt.value === clean)) {
+      const option = document.createElement("option");
+      option.value = clean;
+      option.textContent = clean;
+      select.appendChild(option);
+    }
+    setSelectValue(select, clean);
+  }
+  updateFilterHighlights();
+  updateActiveStat();
+  await loadPhotos();
+  window.scrollTo({ top: 0, left: 0, behavior: "smooth" });
+}
+
 async function handlePreviewInfoClick(event) {
+  const tagButton = event.target.closest("[data-preview-tag]");
+  if (tagButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    await openAlbumWithTag(tagButton.dataset.previewTag);
+    return;
+  }
   const rejectBtn = event.target.closest(".preview-person-reject");
   if (rejectBtn) {
     event.stopPropagation();

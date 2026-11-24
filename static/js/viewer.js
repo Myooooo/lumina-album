@@ -1202,7 +1202,7 @@ function updatePreview(options = {}) {
     ${photo.tags && photo.tags.length ? `
       <div class="meta-item-row" title="情感与场景标签">
         ${ICONS.tag}
-        <div class="meta-content">${photo.tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join(" ")}</div>
+        <div class="meta-content">${photo.tags.map((t) => `<button type="button" class="tag tag-filter-btn" data-preview-tag="${escapeHtml(t)}" title="查看全部「${escapeHtml(t)}」照片">${escapeHtml(t)}</button>`).join(" ")}</div>
       </div>
     ` : ""}
 

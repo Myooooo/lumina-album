@@ -540,6 +540,44 @@ class ApiClientTests(unittest.TestCase):
         self.assertEqual(build_wording_prompt(""), build_wording_prompt(DEFAULT_STYLE_PROMPT))
         self.assertEqual(build_scoring_prompt(""), build_scoring_prompt(DEFAULT_STYLE_PROMPT))
 
+    def test_capture_metadata_is_a_light_reference_in_both_prompts(self) -> None:
+        from photo_reviewer.api_client import (
+            _metadata_text,
+            build_analysis_context,
+            build_scoring_prompt,
+            build_wording_prompt,
+        )
+        context = build_analysis_context(
+            "杭州西湖",
+            {
+                "datetime_original": "2024-04-05 18:20:00",
+                "make": "Sony",
+                "model": "ILCE-7M4",
+                "lens_model": "FE 24-70mm F2.8 GM II",
+                "fnumber": 2.8,
+                "exposure": "1/250s",
+                "iso": 100,
+                "focal_length_35mm": "35mm",
+            },
+        )
+        metadata = _metadata_text(context)
+        self.assertIn("轻度参考", metadata)
+        self.assertIn("杭州西湖", metadata)
+        self.assertIn("2024-04-05", metadata)
+        self.assertIn("Sony ILCE-7M4", metadata)
+        self.assertIn("FE 24-70mm F2.8 GM II", metadata)
+        self.assertIn("光圈 f/2.8", metadata)
+        self.assertIn("快门 1/250s", metadata)
+        self.assertIn("ISO 100", metadata)
+        self.assertIn("焦距 35mm", metadata)
+        self.assertIn("不要复述", metadata)
+        self.assertIn(
+            "拍摄信息只作轻度参考", build_scoring_prompt(DEFAULT_STYLE_PROMPT)
+        )
+        self.assertIn(
+            "拍摄信息只用来理解", build_wording_prompt(DEFAULT_STYLE_PROMPT)
+        )
+
     def test_a_custom_style_cannot_remove_the_fixed_rules(self) -> None:
         from photo_reviewer.api_client import (
             JSON_FORMAT_MARKER,

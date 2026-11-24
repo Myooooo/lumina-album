@@ -1313,6 +1313,15 @@ select {
   opacity: .9;
 }
 
+.live-badge-label {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  line-height: 1;
+}
+
 @keyframes liveBadgeIn {
   from { opacity: 0; transform: scale(0.92); }
   to   { opacity: 1; transform: scale(1); }
@@ -13686,4 +13695,130 @@ body[data-theme="vintage"] .confirm-input input {
 body[data-theme="vintage"] .confirm-input input:focus {
   border-color: #eb9234;
   box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.12);
+}
+
+/* Vintage Live Photo cards wear the same amber pill as video badges. */
+body[data-theme="vintage"] .live-badge {
+  width: auto;
+  height: 22px;
+  padding: 0 8px 0 6px;
+  gap: 5px;
+  border-radius: 2px;
+  background: rgba(14, 10, 7, 0.84);
+  border: 1px solid rgba(255, 118, 56, 0.38);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="vintage"] .live-badge svg {
+  width: 13px;
+  height: 13px;
+  color: #ff8a47;
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(255, 92, 28, 0.55));
+}
+
+body[data-theme="vintage"] .live-badge-label {
+  display: inline;
+  color: #ff8a47;
+  text-shadow: 0 0 6px rgba(255, 92, 28, 0.55);
+}
+
+body[data-theme="vintage"] .polaroid-card.is-video .live-badge {
+  top: 12px;
+  left: 12px;
+}
+
+/* Vintage checkboxes: dark film stock, amber tick, no white glare. */
+body[data-theme="vintage"] .card-check input[type="checkbox"],
+body[data-theme="vintage"] .import-check input[type="checkbox"],
+body[data-theme="vintage"] .confirm-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  position: relative;
+  flex-shrink: 0;
+  border: 1px solid #4a4035;
+  border-radius: 2px;
+  background: #16120f;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  accent-color: transparent;
+  cursor: pointer;
+  transition: background-color 160ms var(--ease-out),
+              border-color 160ms var(--ease-out),
+              box-shadow 160ms var(--ease-out);
+}
+
+body[data-theme="vintage"] .card-check input[type="checkbox"]:hover,
+body[data-theme="vintage"] .import-check input[type="checkbox"]:hover,
+body[data-theme="vintage"] .confirm-check input[type="checkbox"]:hover {
+  border-color: #eb9234;
+}
+
+body[data-theme="vintage"] .card-check input[type="checkbox"]:checked,
+body[data-theme="vintage"] .import-check input[type="checkbox"]:checked,
+body[data-theme="vintage"] .confirm-check input[type="checkbox"]:checked {
+  background: #eb9234;
+  border-color: #eb9234;
+  box-shadow: 0 0 8px rgba(235, 146, 52, 0.25);
+}
+
+body[data-theme="vintage"] .card-check input[type="checkbox"]:checked::after,
+body[data-theme="vintage"] .import-check input[type="checkbox"]:checked::after,
+body[data-theme="vintage"] .confirm-check input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #141210;
+  border-width: 0 1.8px 1.8px 0;
+  transform: rotate(45deg);
+}
+
+body[data-theme="vintage"] .card-check input[type="checkbox"]:focus-visible,
+body[data-theme="vintage"] .import-check input[type="checkbox"]:focus-visible,
+body[data-theme="vintage"] .confirm-check input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.2);
+}
+
+/* Tags in the detail sheet are navigation, not decoration. */
+.tag-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  padding: 2px 8px;
+  margin: -2px -4px -2px 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 160ms var(--ease-out),
+              border-color 160ms var(--ease-out),
+              color 160ms var(--ease-out);
+}
+
+.tag-filter-btn:hover,
+.tag-filter-btn:focus-visible {
+  border-color: rgba(174, 118, 78, 0.35);
+  background: rgba(174, 118, 78, 0.1);
+  color: var(--primary-dark);
+  outline: none;
+}
+
+body[data-theme="paper"] .tag-filter-btn:hover {
+  border-radius: 3px;
+  border-color: #cbbda5;
+  background: #f3e3c9;
+}
+
+body[data-theme="vintage"] .tag-filter-btn:hover {
+  border-radius: 2px;
+  border-color: rgba(235, 146, 52, 0.45);
+  background: rgba(235, 146, 52, 0.12);
+  color: #f4b165;
 }

@@ -617,7 +617,7 @@ function videoDurationBadge(photo) {
  */
 function liveBadgeHtml(photo) {
   if (!photo.has_live) return "";
-  return `<span class="live-badge" title="实况照片，详情页可以播放">${ICONS.live}</span>`;
+  return `<span class="live-badge" title="实况照片，详情页可以播放">${ICONS.live}<span class="live-badge-label">Live</span></span>`;
 }
 
 /**

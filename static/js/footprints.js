@@ -80,7 +80,19 @@ function syncFootprintsModeButtons() {
   const width = active.offsetWidth;
   if (!width) {
     ink.style.opacity = "0";
+    // The footprints panel can still be in its 140ms view transition; measure
+    // once more after it is laid out so the active pill never loses its ink.
+    if (!sw._inkRetry) {
+      sw._inkRetry = setTimeout(() => {
+        sw._inkRetry = null;
+        syncFootprintsModeButtons();
+      }, 220);
+    }
     return;
+  }
+  if (sw._inkRetry) {
+    clearTimeout(sw._inkRetry);
+    sw._inkRetry = null;
   }
   ink.style.opacity = "1";
   ink.style.width = `${width}px`;

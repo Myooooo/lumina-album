@@ -89,6 +89,7 @@ WORDING_RULES = """{style}
 写一句照片背面的小字，不要描述画面里有什么。
 只写看到它时心里冒出来的一句话，20 个字以内。
 只输出这句话本身：不要“背面小字：”“背面写着”“心里话：”这类标签，不要日期、地点、人名，不要换行。
+拍摄信息只用来理解季节、时间与氛围，不要写进简评，也不要用它替代画面。
 不要用“这一刻、仿佛、时间、温柔、治愈、岁月、人间烟火、美好、时光”这些词。
 不编照片里没有的人名、地点、日期。
 
@@ -216,6 +217,7 @@ def build_scoring_prompt(user_prompt: str | None = None) -> str:
 标题 2-6 个字，不要只写物体或地点，也不要用“温馨、安静、美好、时光、岁月、无声、静默”这类词，不要用“……的瞬间”“……的时光”“……的陪伴”这类短语；像一句小字的题目。
 tags 用 2-3 个两字的高层标签，例如：人像、合影、自拍、宠物、风景、天空、晚霞、日出、夜景、城市、建筑、街道、海边、山、湖、花、美食、家常、旅行、日常、节日、复古、黑白。
 不要写“手工饺子”“城市景观”“清晨光影”这种长短语；每个标签尽量 2 个字。
+拍摄信息只作轻度参考：可帮助判断时间、地点、器材与拍摄难度；与画面冲突时以画面为准，不要在标题或标签里罗列参数。
 评分标准：
 {criteria}
 
@@ -396,6 +398,17 @@ def build_analysis_context(
     ).strip()
     if camera:
         context["camera"] = camera
+    if exif.get("lens_model"):
+        context["lens"] = str(exif["lens_model"]).strip()
+    if exif.get("fnumber"):
+        context["aperture"] = str(exif["fnumber"]).strip()
+    if exif.get("exposure"):
+        context["exposure"] = str(exif["exposure"]).strip()
+    if exif.get("iso"):
+        context["iso"] = str(exif["iso"]).strip()
+    focal = exif.get("focal_length_35mm") or exif.get("focal_length")
+    if focal:
+        context["focal_length"] = str(focal).strip()
     return context
 
 
@@ -409,9 +422,26 @@ def _metadata_text(context: dict[str, Any] | None) -> str:
         lines.append(f"拍摄时间：{context['captured_at']}")
     if context.get("camera"):
         lines.append(f"拍摄设备：{context['camera']}")
+    if context.get("lens"):
+        lines.append(f"镜头：{context['lens']}")
+    params = []
+    if context.get("aperture"):
+        params.append(f"光圈 f/{context['aperture']}")
+    if context.get("exposure"):
+        params.append(f"快门 {context['exposure']}")
+    if context.get("iso"):
+        params.append(f"ISO {context['iso']}")
+    if context.get("focal_length"):
+        params.append(f"焦距 {context['focal_length']}")
+    if params:
+        lines.append("拍摄参数：" + " · ".join(params))
     if not lines:
         return ""
-    return "拍摄信息（只作参考，不要复述）：\n" + "\n".join(f"- {line}" for line in lines)
+    return (
+        "拍摄信息（轻度参考：可帮助判断拍摄时间、季节、地点、器材与难度，"
+        "但不要复述、不要罗列参数，也不要让它压过画面本身）：\n"
+        + "\n".join(f"- {line}" for line in lines)
+    )
 
 
 def _image_messages(system_prompt: str, proxy_path: str, instruction: str) -> list[dict[str, Any]]:
