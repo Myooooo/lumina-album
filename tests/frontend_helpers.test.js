@@ -1541,6 +1541,12 @@ section("photobook layout and motion system");
     true
   );
   check(
+    "modal backdrop starts below the sticky header so the topbar never vanishes",
+    /\.modal \{[^}]*inset: var\(--topbar-height, 0px\) 0 0;/.test(css) &&
+      /max-height: min\(92vh, calc\(100vh - var\(--topbar-height, 0px\) - 48px\)\)/.test(css),
+    true
+  );
+  check(
     "no ease-in rule remains in style.css",
     !/:\s*[^;]*\bease-in\b(?!-out)/.test(css),
     true
