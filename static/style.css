@@ -1941,12 +1941,22 @@ select {
 .modal-close svg {
   width: 18px;
   height: 18px;
+  transition: transform 200ms var(--ease-out);
 }
 
 .modal-close:hover {
   color: var(--danger);
   background: #faeae8;
-  transform: rotate(90deg) scale(1.08);
+  transform: scale(1.06);
+}
+
+.modal-close:hover svg {
+  transform: rotate(90deg);
+}
+
+.modal-close:active {
+  transform: scale(0.94);
+  transition-duration: var(--dur-press);
 }
 
 /* ---------- Immersive Lightbox Preview Modal ---------- */
@@ -2550,9 +2560,22 @@ select {
               color var(--dur-fast) var(--ease-out),
               box-shadow var(--dur-fast) var(--ease-out);
 }
+.fs-viewer-close svg {
+  transition: transform 200ms var(--ease-out);
+}
+
 .fs-viewer-close:hover {
   background: rgba(217, 83, 79, 0.85);
-  transform: rotate(90deg) scale(1.1);
+  transform: scale(1.06);
+}
+
+.fs-viewer-close:hover svg {
+  transform: rotate(90deg);
+}
+
+.fs-viewer-close:active {
+  transform: scale(0.94);
+  transition-duration: var(--dur-press);
 }
 
 .fs-viewer-toolbar {
@@ -3089,14 +3112,19 @@ select {
   gap: 8px;
   font-size: 13.5px;
   color: var(--text);
-  transition: background-color var(--dur-press) var(--ease-out),
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-press) var(--ease-out),
               color var(--dur-press) var(--ease-out);
 }
 .dir-list li svg { width: 15px; height: 15px; color: var(--muted); }
 .dir-list li:hover, .dir-list li.active {
   background: var(--primary-light);
   color: var(--primary-dark);
-  padding-left: 18px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .dir-list li:hover {
+    transform: translateX(3px);
+  }
 }
 .dir-list li:hover svg, .dir-list li.active svg { color: var(--primary); }
 .dir-actions { text-align: right; margin-top: 14px; }
