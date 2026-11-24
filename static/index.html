@@ -20,6 +20,8 @@
         <span class="view-ink" id="viewInk" aria-hidden="true"></span>
         <button id="albumViewBtn" class="view-tab" role="tab" aria-selected="true"
                 title="按画廊浏览这个相册"><span class="btn-icon" data-icon="collection"></span>相册</button>
+        <button id="peopleBtn" class="view-tab" role="tab" aria-selected="false"
+                title="本地识别的人物与宠物"><span class="btn-icon" data-icon="people"></span>人物</button>
         <button id="footprintsBtn" class="view-tab" role="tab" aria-selected="false"
                 title="去过的城市"><span class="btn-icon" data-icon="pin"></span>足迹</button>
         <button id="memoriesBtn" class="view-tab" role="tab" aria-selected="false"
@@ -327,6 +329,54 @@
       <div class="dir-actions">
         <button id="dirChooseBtn" class="btn primary" disabled><span class="btn-icon" data-icon="check"></span>选择此文件夹</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 人物与宠物：local-first face & cat/dog recognition and clustering -->
+  <div id="peopleView" class="page-view people-content hidden">
+    <div class="view-inner">
+      <header class="view-header">
+        <div class="view-header-main">
+          <button id="peopleBackBtn" class="footprints-back hidden" type="button">
+            <span class="btn-icon" data-icon="chevronLeft"></span>所有人物与宠物
+          </button>
+          <h2><span class="modal-title-icon" data-icon="people"></span><span id="peopleTitle">人物与宠物</span></h2>
+          <p class="people-lede" id="peopleLede">本地离线识别照片中的人物与宠物猫狗，数据不出本机。</p>
+        </div>
+        <div class="people-header-actions">
+          <button id="peopleScanBtn" class="btn primary" type="button" title="后台增量扫描新照片中的人物与宠物">
+            <span class="btn-icon" data-icon="sparkles"></span>扫描识别
+          </button>
+          <button id="peopleMergeModeBtn" class="btn" type="button" title="选择多个相似人物合并为一处">
+            <span class="btn-icon" data-icon="merge"></span>合并
+          </button>
+          <button id="peopleShowHiddenBtn" class="btn" type="button" title="显示或隐藏已收起的人物">
+            <span class="btn-icon" data-icon="eye"></span>已隐藏
+          </button>
+        </div>
+      </header>
+      <div id="peopleFilterRow" class="people-filter-row">
+        <div class="people-kind-pills" role="group" aria-label="按类型筛选">
+          <button type="button" class="people-kind-pill active" data-people-kind="all">全部</button>
+          <button type="button" class="people-kind-pill" data-people-kind="person"><span class="btn-icon" data-icon="people"></span>人物</button>
+          <button type="button" class="people-kind-pill" data-people-kind="pet"><span class="btn-icon" data-icon="paw"></span>宠物猫狗</button>
+        </div>
+        <div id="peopleScanStatus" class="people-scan-status hidden">
+          <span class="preview-rendering-ring" aria-hidden="true"></span>
+          <span id="peopleScanStatusText">正在扫描…</span>
+          <button id="peopleCancelScanBtn" class="btn small" type="button">取消</button>
+        </div>
+      </div>
+      <div id="peopleDetailBar" class="people-detail-bar hidden"></div>
+      <div id="peoplePendingBanner" class="people-pending-banner hidden"></div>
+      <div id="peopleBody" class="people-body">
+        <div class="people-empty">正在整理人物与宠物…</div>
+      </div>
+    </div>
+    <div id="peopleMergeBar" class="selection-bar people-merge-bar hidden">
+      <span>已选择 <strong id="peopleMergeCount">0</strong> 位</span>
+      <button id="peopleMergeRunBtn" class="btn primary" type="button" disabled><span class="btn-icon" data-icon="merge"></span>合并所选</button>
+      <button id="peopleMergeCancelBtn" class="btn" type="button"><span class="btn-icon" data-icon="close"></span>取消</button>
     </div>
   </div>
 
@@ -1012,6 +1062,7 @@
   <script src="/static/js/views.js"></script>
   <script src="/static/js/viewer.js"></script>
   <script src="/static/js/settings.js"></script>
+  <script src="/static/js/people.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

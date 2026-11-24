@@ -13,6 +13,7 @@
 //: The views, in the order the switcher shows them.
 const VIEWS = [
   { name: "album", button: "albumViewBtn", panel: "albumView" },
+  { name: "people", button: "peopleBtn", panel: "peopleView" },
   { name: "footprints", button: "footprintsBtn", panel: "footprintsView" },
   { name: "memories", button: "memoriesBtn", panel: "memoriesView" },
   { name: "duplicates", button: "duplicatesBtn", panel: "duplicatesView" },
@@ -185,6 +186,7 @@ function viewFromHash() {
 }
 
 function openViewByName(name) {
+  if (name === "people") return openPeople();
   if (name === "footprints") return openFootprints();
   if (name === "memories") return openMemories();
   if (name === "duplicates") return openDuplicates();

@@ -11248,6 +11248,591 @@ body[data-theme="vintage"] .footprints-lede {
   letter-spacing: 0.015em;
 }
 
+/* ==========================================================================
+   People & Pets View (人物与宠物) — 3-Theme Crafted Portraits & Review Strip
+   ========================================================================== */
+
+.people-lede {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+body[data-theme="vintage"] .people-lede {
+  font-family: var(--font-vintage-prose);
+  letter-spacing: 0.015em;
+}
+
+.people-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.people-filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.people-kind-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(125, 95, 65, 0.08);
+  border: 1px solid var(--border);
+}
+
+.people-kind-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform var(--dur-press) var(--ease-out);
+}
+
+.people-kind-pill svg {
+  width: 14px;
+  height: 14px;
+}
+
+.people-kind-pill.active {
+  background: var(--panel-solid);
+  color: var(--primary-dark);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(50, 34, 18, 0.09);
+}
+
+.people-scan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 12px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  border: 1px solid var(--border-strong);
+  color: var(--primary-dark);
+  font-size: 12.5px;
+}
+
+.people-scan-status .preview-rendering-ring {
+  border-color: rgba(174, 118, 78, 0.28);
+  border-top-color: var(--primary);
+}
+
+.people-detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+  gap: 24px 20px;
+  padding: 6px 0 36px;
+}
+
+.person-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 10px 12px;
+  border-radius: var(--radius-xl);
+  border: 1px solid transparent;
+  background: rgba(255, 253, 249, 0.56);
+  cursor: pointer;
+  animation: fadeSlideIn var(--dur-panel) var(--ease-out) backwards;
+  transition: transform var(--dur-ui) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-ui) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .person-card:hover {
+    transform: translateY(-4px);
+    background: var(--panel-solid);
+    border-color: var(--border);
+    box-shadow: var(--shadow-card);
+  }
+  .person-card:hover .person-avatar-img {
+    transform: scale(1.05);
+  }
+}
+
+.person-card.is-hidden-person {
+  opacity: 0.62;
+}
+
+.person-card.is-merge-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2.5px var(--primary-glow);
+}
+
+.person-merge-check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--panel-solid);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+}
+
+.person-card.is-merge-selected .person-merge-check {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.person-merge-check svg {
+  width: 13px;
+  height: 13px;
+}
+
+.person-avatar-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.person-avatar-ring {
+  position: relative;
+  display: block;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  overflow: visible;
+  background: rgba(125, 95, 65, 0.1);
+  box-shadow: 0 8px 22px rgba(42, 30, 18, 0.14), inset 0 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.person-avatar-img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+.person-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.person-avatar-fallback svg {
+  width: 40px;
+  height: 40px;
+}
+
+.person-fav-dot,
+.person-pet-badge,
+.person-pending-dot {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+}
+
+.person-fav-dot {
+  left: 2px;
+  bottom: 2px;
+  width: 24px;
+  height: 24px;
+  background: var(--panel-solid);
+  color: var(--heart);
+}
+
+.person-fav-dot svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+.person-pet-badge {
+  right: 2px;
+  bottom: 2px;
+  width: 24px;
+  height: 24px;
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.person-pet-badge svg {
+  width: 13px;
+  height: 13px;
+}
+
+.person-pending-dot {
+  top: 0;
+  right: 0;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--heart);
+  color: #ffffff;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.person-card-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.person-name-btn {
+  max-width: 100%;
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.person-name-btn:hover {
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.person-card.is-unnamed .person-name-btn {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.person-count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* iOS-like Pending Confirmation Strip & Cover Picker */
+.people-pending-banner {
+  margin-bottom: 22px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow-soft);
+}
+
+.people-pending-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.people-pending-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.people-pending-title svg {
+  width: 16px;
+  height: 16px;
+  color: var(--primary);
+}
+
+.people-pending-strip,
+.people-cover-grid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.pending-face-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(125, 95, 65, 0.04);
+}
+
+.pending-face-thumb {
+  width: 78px;
+  height: 78px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: rgba(30, 24, 18, 0.08);
+}
+
+.pending-face-thumb img,
+.cover-pick-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pending-face-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.cover-pick-btn {
+  flex: 0 0 auto;
+  width: 68px;
+  height: 68px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.cover-pick-btn:hover {
+  transform: scale(1.06);
+}
+
+.cover-pick-btn.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+.people-empty {
+  max-width: 460px;
+  margin: 48px auto;
+  min-height: 220px;
+  padding: 36px 32px;
+  border-radius: var(--radius-xl);
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 253, 249, 0.62);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.people-empty p {
+  margin: 0;
+}
+
+.people-empty-icon {
+  display: inline-flex;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(174, 118, 78, 0.1);
+  color: var(--primary);
+}
+
+.people-empty-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.people-empty-hint {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.people-empty-actions {
+  margin-top: 4px;
+}
+
+/* --- Theme 1: Paper · Stationery Portraits --- */
+body[data-theme="paper"] .person-card {
+  background: #fffdf8;
+  border: 1px solid #d5cab5;
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 rgba(70, 55, 35, 0.08);
+}
+
+body[data-theme="paper"] .person-card:hover {
+  border-color: #bfb39c;
+  box-shadow: 4px 4px 0 rgba(70, 55, 35, 0.14);
+}
+
+body[data-theme="paper"] .person-avatar-ring {
+  border: 2px dashed #cbbda5;
+  padding: 3px;
+  background: #faf5e8;
+  box-shadow: none;
+}
+
+body[data-theme="paper"] .person-name-btn {
+  font-family: var(--font-hand);
+  font-size: 16.5px;
+  font-weight: 400;
+}
+
+body[data-theme="paper"] .people-kind-pills {
+  background: #fffdf7;
+  border: 1px dashed #bfb39c;
+  border-radius: 3px;
+}
+
+body[data-theme="paper"] .people-kind-pill {
+  border-radius: 2px;
+}
+
+body[data-theme="paper"] .people-kind-pill.active {
+  background: #362e26;
+  color: #fbf7ee;
+}
+
+body[data-theme="paper"] .people-empty {
+  background: #fffdf8;
+  border-radius: 4px;
+}
+
+/* --- Theme 2: Classic Glass Portraits --- */
+body[data-theme="classic"] .person-card {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.88) 0%, rgba(252, 249, 244, 0.78) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 18px;
+}
+
+body[data-theme="classic"] .person-name-btn {
+  font-family: var(--font-classic-sans);
+  font-size: 14.5px;
+}
+
+/* --- Theme 3: Vintage Darkroom Contact-Sheet Portraits --- */
+body[data-theme="vintage"] .person-card {
+  background: #171513;
+  border: 1px solid #2b2723;
+  border-radius: 3px;
+}
+
+body[data-theme="vintage"] .person-card:hover {
+  border-color: rgba(235, 146, 52, 0.55);
+  background: #1d1a17;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+}
+
+body[data-theme="vintage"] .person-avatar-ring {
+  border-radius: 3px;
+  border: 1px solid #35302a;
+  background: #0f0e0d;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+body[data-theme="vintage"] .person-name-btn {
+  font-family: var(--font-vintage-serif);
+  font-size: 15.5px;
+  letter-spacing: 0.05em;
+  color: #f4eee4;
+}
+
+body[data-theme="vintage"] .person-pet-badge {
+  border-radius: 2px;
+  background: #eb9234;
+  color: #141210;
+}
+
+body[data-theme="vintage"] .people-kind-pills {
+  background: #1a1816;
+  border-color: #2b2723;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .people-kind-pill {
+  border-radius: 2px;
+  color: #a89f91;
+}
+
+body[data-theme="vintage"] .people-kind-pill.active {
+  background: #eb9234;
+  color: #141210;
+  font-weight: 700;
+}
+
+body[data-theme="vintage"] .people-pending-banner,
+body[data-theme="vintage"] .people-empty {
+  background: #171513;
+  border-color: #2b2723;
+  border-radius: 3px;
+}
+
+body[data-theme="vintage"] .pending-face-thumb,
+body[data-theme="vintage"] .cover-pick-btn {
+  border-radius: 3px;
+}
+
+@media (max-width: 640px) {
+  .people-grid {
+    grid-template-columns: repeat(auto-fill, minmax(126px, 1fr));
+    gap: 14px 12px;
+  }
+  .person-avatar-ring {
+    width: 88px;
+    height: 88px;
+  }
+}
+
 
 
 

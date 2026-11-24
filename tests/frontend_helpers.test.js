@@ -1276,13 +1276,13 @@ section("toolbar layout");
     true
   );
   check(
-    "there are four tabs",
+    "there are five tabs",
     (html.match(/class="view-tab"/g) || []).length,
-    4
+    5
   );
   check(
-    "相册 is the first tab, left of 足迹",
-    /albumViewBtn[\s\S]{0,400}footprintsBtn/.test(html),
+    "相册 is first, followed by 人物 left of 足迹",
+    /albumViewBtn[\s\S]{0,400}peopleBtn[\s\S]{0,400}footprintsBtn/.test(html),
     true
   );
   check(

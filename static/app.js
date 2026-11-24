@@ -587,6 +587,7 @@ function init() {
   albumReady.finally(() => {
     initViews();
   });
+  initPeople();
   initFootprints();
   initMemories();
   initExport();
