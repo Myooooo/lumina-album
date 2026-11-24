@@ -72,7 +72,7 @@ const API = {
     gallery_thumb_size: 640,
     proxy_quality: 80,
     thumb_quality: 50,
-    scan_concurrency: 1,
+    scan_concurrency: 3,
     index_concurrency: 4,
     request_timeout: 120,
     model_retries: 3,
@@ -328,6 +328,11 @@ async function main() {
 
   window.openAlbumFolder("E:\\album");
   await new Promise((resolve) => window.setTimeout(resolve, 120));
+  check(
+    "the album opens on all memories, not the analyzed subset",
+    document.getElementById("statusFilter").value,
+    "all"
+  );
   window.applyStatFilter("favorite");
   await new Promise((resolve) => window.setTimeout(resolve, 120));
   check(
@@ -432,6 +437,30 @@ async function main() {
   check(
     "and hides the delete action",
     deletePrompt.classList.contains("hidden"),
+    true
+  );
+
+  check(
+    "settings exposes the face and ffmpeg one-click installers",
+    Boolean(document.getElementById("downloadFaceModelsBtn")) &&
+      document.getElementById("downloadFaceModelsBtn").textContent.includes("一键下载安装") &&
+      Boolean(document.getElementById("installFfmpegBtn")) &&
+      Boolean(document.getElementById("ffmpegInstallModal")),
+    true
+  );
+  check(
+    "the unnamed-cluster default is five",
+    document.getElementById("setFaceMinCluster").value,
+    "5"
+  );
+  check(
+    "the map provider defaults to AMap",
+    document.getElementById("setMapTileProvider").value,
+    "amap"
+  );
+  check(
+    "the detail dialog has a fullscreen expand control",
+    Boolean(document.getElementById("previewExpandBtn")),
     true
   );
 

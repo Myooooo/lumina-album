@@ -46,6 +46,45 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     np = None  # type: ignore
 
+def _preload_nvidia_dlls() -> list[str]:
+    """Make pip-installed CUDA/cuDNN DLLs discoverable on Windows.
+
+    ``pip install nvidia-*-cu12`` places the DLLs under
+    ``site-packages/nvidia/<component>/bin``. Windows does not search those
+    directories automatically, so CUDAExecutionProvider would report itself as
+    available and then fail to load. Python 3.8+ also ignores PATH changes for
+    extension-module dependencies; the directories must be registered with
+    ``os.add_dll_directory``.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import site
+        sites = []
+        for entry in site.getsitepackages() + [site.getusersitepackages()]:
+            if entry and entry not in sites:
+                sites.append(entry)
+    except Exception:
+        return []
+    directories: list[str] = []
+    for entry in sites:
+        nvidia = Path(entry) / "nvidia"
+        if not nvidia.is_dir():
+            continue
+        for bin_dir in sorted(nvidia.glob("*/bin")):
+            if not bin_dir.is_dir():
+                continue
+            try:
+                os.add_dll_directory(str(bin_dir))
+            except OSError:
+                continue
+            os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+            directories.append(str(bin_dir))
+    return directories
+
+
+_NVIDIA_DLL_DIRS = _preload_nvidia_dlls()
+
 try:
     import onnxruntime as ort  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -125,13 +164,26 @@ def select_ort_providers(available: list[str] | None = None, system_name: str | 
             )
     elif sys_name == "windows":
         if "CUDAExecutionProvider" in avail_set:
-            ordered.append("CUDAExecutionProvider")
+            # EXHAUSTIVE is ORT's default and cost ~46 seconds on the first
+            # Blackwell run while it tuned every convolution. HEURISTIC keeps
+            # first-use latency under a second and is fine for these models.
+            ordered.append(
+                (
+                    "CUDAExecutionProvider",
+                    {"cudnn_conv_algo_search": "HEURISTIC"},
+                )
+            )
         if "DmlExecutionProvider" in avail_set:
             ordered.append("DmlExecutionProvider")
     else:
         # Linux and other POSIX hosts.
         if "CUDAExecutionProvider" in avail_set:
-            ordered.append("CUDAExecutionProvider")
+            ordered.append(
+                (
+                    "CUDAExecutionProvider",
+                    {"cudnn_conv_algo_search": "HEURISTIC"},
+                )
+            )
         if "ROCMExecutionProvider" in avail_set:
             ordered.append("ROCMExecutionProvider")
 
@@ -323,10 +375,57 @@ def models_root(cfg) -> Path:
     return (Path(cfg.data_dir) / "models").resolve()
 
 
-def face_thumbs_dir(cfg) -> Path:
-    d = Path(cfg.data_dir) / "face_thumbs"
+def face_thumbs_dir(cfg, folder: str | None = None) -> Path:
+    """Return the thumbnail directory for faces in one album.
+
+    Face/pet crops belong with the album they came from, inside its hidden
+    cache directory, not in the project's data directory. Keeping them there
+    also means removing or hiding an album takes its entity thumbnails with it.
+    ``folder`` is optional only for legacy callers that have no album context;
+    normal scans and API reads always pass it.
+    """
+    if folder:
+        d = Path(folder) / getattr(cfg, "cache_dir_name", ".photo-review-cache") / "face_thumbs"
+    else:
+        d = Path(cfg.data_dir) / "face_thumbs"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def migrate_face_thumbnails(database, cfg) -> int:
+    """Move legacy central face crops into their album cache directories.
+
+    Older builds wrote every crop to ``data/face_thumbs``. The library is
+    re-homed lazily too (the thumb route migrates the one it is asked for), but
+    a startup pass keeps the old directory from lingering after a restart.
+    Missing source files or disconnected drives are skipped: a thumbnail is
+    regenerated on demand.
+    """
+    moved = 0
+    try:
+        rows = database.faces_with_thumb_paths()
+    except Exception:
+        return 0
+    for row in rows:
+        old = row.get("thumb_path") or ""
+        if not old or not os.path.isfile(old):
+            continue
+        folder = row.get("folder") or ""
+        if not folder:
+            continue
+        target = face_thumbs_dir(cfg, folder) / f"face_{int(row['id'])}.jpg"
+        if os.path.abspath(old) == os.path.abspath(str(target)):
+            continue
+        try:
+            if target.exists():
+                os.remove(old)
+            else:
+                shutil.move(old, target)
+            database.update_face_thumb(int(row["id"]), str(target))
+            moved += 1
+        except OSError:
+            logger.debug("could not move face thumb %s", old, exc_info=True)
+    return moved
 
 
 def _find_insightface_model_dir(cfg, model_name: str) -> Path | None:
@@ -394,6 +493,19 @@ def engine_status(cfg) -> dict[str, Any]:
     has_ultralytics_pkg = importlib.util.find_spec("ultralytics") is not None
     providers = select_ort_providers()
     ort_available = ort is not None
+    try:
+        runtime_device = str(ort.get_device()) if ort is not None else ""
+    except Exception:
+        runtime_device = ""
+    runtime_accelerator = active_accelerator_label(providers)
+    if (
+        providers
+        and (providers[0][0] if isinstance(providers[0], tuple) else providers[0])
+        == "CUDAExecutionProvider"
+        and runtime_device
+        and runtime_device.upper() != "GPU"
+    ):
+        runtime_accelerator = "NVIDIA CUDA 未加载（回退 CPU）"
     numpy_available = np is not None
     pillow_available = Image is not None
     deps = {
@@ -441,7 +553,9 @@ def engine_status(cfg) -> dict[str, Any]:
             "buffalo_s": INSIGHTFACE_MODEL_URLS["buffalo_s"],
         },
         "platform": platform.system(),
-        "accelerator": active_accelerator_label(providers),
+        "accelerator": runtime_accelerator,
+        "runtime_device": runtime_device,
+        "nvidia_dll_dirs": list(_NVIDIA_DLL_DIRS),
         "providers": [p[0] if isinstance(p, tuple) else p for p in providers],
         "deps": deps,
         "missing_packages": missing_packages,
@@ -639,8 +753,9 @@ class ModelDownloadJob:
     status: str = "idle"  # idle | running | completed | cancelled | error
     model: str = "buffalo_l"
     include_pets: bool = True
-    stage: str = "idle"  # idle | downloading | extracting | pets | done
+    stage: str = "idle"  # idle | deps | runtime | downloading | extracting | pets | done
     current_item: str = ""
+    command: str = ""
     downloaded_bytes: int = 0
     total_bytes: int = 0
     percent: float = 0.0
@@ -658,6 +773,7 @@ class ModelDownloadJob:
             "include_pets": self.include_pets,
             "stage": self.stage,
             "current_item": self.current_item,
+            "command": self.command,
             "downloaded_bytes": self.downloaded_bytes,
             "total_bytes": self.total_bytes,
             "percent": round(self.percent, 1),
@@ -667,6 +783,137 @@ class ModelDownloadJob:
             "warnings": list(self.warnings),
             "downloaded": list(self.downloaded),
         }
+
+
+def _has_nvidia_gpu() -> bool:
+    exe = shutil.which("nvidia-smi")
+    if not exe:
+        return False
+    try:
+        result = subprocess.run(
+            [exe, "-L"], capture_output=True, text=True, timeout=8
+        )
+        return result.returncode == 0 and "GPU" in (result.stdout or "")
+    except Exception:
+        return False
+
+
+def _pip_install(job: "ModelDownloadJob", args: list[str], stage: str, message: str) -> str | None:
+    """Run one pip command and fold its result into the download job."""
+    job.stage = stage
+    job.message = message
+    job.command = f"{sys.executable} -m pip " + " ".join(args)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pip", *args, "--disable-pip-version-check"],
+            capture_output=True,
+            text=True,
+            timeout=2400,
+        )
+    except Exception as exc:
+        return str(exc)
+    if proc.returncode != 0:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
+        return tail[0] if tail else f"pip 退出码 {proc.returncode}"
+    return None
+
+
+def _ensure_face_runtime(job: "ModelDownloadJob", include_pets: bool) -> str | None:
+    """Install InsightFace and the best ONNX Runtime for this machine.
+
+    The button is intentionally one action: dependencies, the GPU/CPU runtime
+    and the model files. The actual runtime swap cannot take effect in the
+    already-running process, so the job tells the UI that a restart is needed.
+    """
+    import importlib.util
+
+    job.percent = max(job.percent, 2)
+    missing = [
+        name
+        for name in ("numpy", "insightface", "onnx", "PIL")
+        if importlib.util.find_spec(name) is None
+    ]
+    if missing:
+        pkg = ["numpy", "insightface", "onnx", "opencv-python-headless"]
+        err = _pip_install(job, ["install", *pkg], "deps", "正在安装 InsightFace 与人像依赖…")
+        job.percent = 16
+        if err:
+            return f"人像依赖安装失败：{err}"
+
+    active_cuda = False
+    try:
+        if ort is not None:
+            providers = list(ort.get_available_providers())
+            active_cuda = "CUDAExecutionProvider" in providers and str(ort.get_device()).upper() == "GPU"
+    except Exception:
+        active_cuda = False
+
+    if not active_cuda:
+        if _has_nvidia_gpu():
+            # Avoid the known CPU-wheel-overwrites-GPU-wheel trap: remove the
+            # CPU package first, then install the GPU wheel without letting pip
+            # resolve insightface's onnxruntime dependency again.
+            _pip_install(job, ["uninstall", "-y", "onnxruntime"], "runtime", "正在移除 CPU 版 ONNX Runtime…")
+            version = "onnxruntime-gpu==1.19.2" if sys.version_info < (3, 10) else "onnxruntime-gpu"
+            err = _pip_install(
+                job,
+                ["install", "--no-deps", "--force-reinstall", version],
+                "runtime",
+                "正在安装 NVIDIA CUDA 版 ONNX Runtime…",
+            )
+            job.percent = 24
+            if err:
+                return f"CUDA 版 ONNX Runtime 安装失败：{err}。可先重启应用后重试。"
+            # cuDNN 9 / CUDA 12 DLLs. These wheels are what let ORT 1.19 load
+            # on Blackwell without a system-wide CUDA 12 install.
+            err = _pip_install(
+                job,
+                [
+                    "install",
+                    "nvidia-cuda-runtime-cu12",
+                    "nvidia-cublas-cu12",
+                    "nvidia-cufft-cu12",
+                    "nvidia-cudnn-cu12",
+                ],
+                "runtime",
+                "正在安装 CUDA 12 / cuDNN 9 运行库…",
+            )
+            job.percent = 34
+            if err:
+                return f"CUDA 运行库安装失败：{err}"
+            job.command = ""
+            job.warnings.append("CUDA 版 ONNX Runtime 已安装，重启应用后生效。")
+            job.message = "人像运行时已安装，重启应用后生效；接下来下载模型。"
+        elif sys.platform == "win32":
+            _pip_install(job, ["uninstall", "-y", "onnxruntime"], "runtime", "正在切换 Windows 图形后端…")
+            err = _pip_install(
+                job,
+                ["install", "--no-deps", "--force-reinstall", "onnxruntime-directml"],
+                "runtime",
+                "正在安装 Windows DirectML 版 ONNX Runtime…",
+            )
+            job.percent = 34
+            if err:
+                return f"DirectML 版 ONNX Runtime 安装失败：{err}"
+        else:
+            err = _pip_install(job, ["install", "onnxruntime"], "runtime", "正在安装 ONNX Runtime…")
+            job.percent = 34
+            if err:
+                return f"ONNX Runtime 安装失败：{err}"
+
+    if include_pets and importlib.util.find_spec("ultralytics") is None:
+        job.message = "正在检查宠物识别依赖…"
+        err = _pip_install(
+            job,
+            ["install", "ultralytics", "onnx"],
+            "pets",
+            "正在安装宠物识别依赖 ultralytics / onnx…",
+        )
+        job.percent = max(job.percent, 40)
+        if err:
+            return f"宠物识别依赖安装失败：{err}（不影响人像识别）"
+    importlib.invalidate_caches()
+    return None
 
 
 class ModelDownloadCoordinator:
@@ -692,6 +939,7 @@ class ModelDownloadCoordinator:
         cfg,
         model_name: str = "buffalo_l",
         include_pets: bool = True,
+        install_deps: bool = True,
     ) -> dict[str, Any]:
         if model_name not in FACE_MODELS:
             raise ValueError(f"不支持的模型名称：{model_name}")
@@ -714,6 +962,11 @@ class ModelDownloadCoordinator:
                 root.mkdir(parents=True, exist_ok=True)
                 need_pets = bool(include_pets and not has_pet_model(cfg))
                 face_max_pct = 62.0 if need_pets else 92.0
+                install_note = None
+                if install_deps:
+                    install_note = _ensure_face_runtime(job, include_pets)
+                    if install_note:
+                        job.warnings.append(install_note)
 
                 if not has_insightface_model(cfg, model_name):
                     zip_path = root / f"{model_name}.zip"
@@ -728,7 +981,7 @@ class ModelDownloadCoordinator:
                         job.total_bytes = total_b
                         job.speed_bps = speed
                         if total_b > 0:
-                            job.percent = min(face_max_pct, (done_b / total_b) * face_max_pct)
+                            job.percent = max(job.percent, min(face_max_pct, (done_b / total_b) * face_max_pct))
 
                     _stream_download_file(
                         url,
@@ -737,7 +990,7 @@ class ModelDownloadCoordinator:
                         cancel_event=job.cancel_event,
                     )
                     job.stage = "extracting"
-                    job.percent = face_max_pct + 2.0
+                    job.percent = max(job.percent, face_max_pct + 2.0)
                     job.message = f"下载完成，正在解压 {model_name} 模型…"
                     try:
                         _extract_insightface_zip(zip_path, target_dir)
@@ -785,7 +1038,7 @@ class ModelDownloadCoordinator:
                         job.total_bytes = total_b
                         job.speed_bps = speed
                         if total_b > 0:
-                            job.percent = min(93.0, 75.0 + (done_b / total_b) * 18.0)
+                            job.percent = max(job.percent, min(93.0, 75.0 + (done_b / total_b) * 18.0))
 
                     warn = _try_prepare_pet_model(
                         root,
@@ -1168,7 +1421,7 @@ def match_and_cluster_library(database, cfg) -> dict[str, int]:
     model_name = getattr(cfg, "face_model", "buffalo_l")
     threshold = float(getattr(cfg, "face_match_threshold", 0.40))
     pending_cutoff = min(0.75, threshold + 0.14)
-    min_cluster = max(2, int(getattr(cfg, "face_min_cluster_size", 2)))
+    min_cluster = max(2, int(getattr(cfg, "face_min_cluster_size", 5)))
 
     # 1. Build prototype centroids for every confirmed person/pet (named first).
     all_people = database.all_people_raw()
@@ -1334,7 +1587,6 @@ class PeopleScanCoordinator:
                     folder=folder, model_name=model_name, force=force
                 )
                 job.total = len(photos)
-                thumbs_root = face_thumbs_dir(cfg)
                 last_cluster_at = time.monotonic()
                 photos_since_cluster = 0
                 entities_since_cluster = 0
@@ -1376,7 +1628,11 @@ class PeopleScanCoordinator:
                     )
                     # Generate cropped square avatars for newly detected faces/pets.
                     for fid, rec in zip(inserted_ids, records):
-                        thumb_file = thumbs_root / f"face_{fid}.jpg"
+                        photo_folder = (
+                            photo.get("folder")
+                            or os.path.dirname(photo.get("path") or "")
+                        )
+                        thumb_file = face_thumbs_dir(cfg, photo_folder) / f"face_{fid}.jpg"
                         saved = crop_entity_thumbnail(
                             img_path,
                             (rec["bbox_x"], rec["bbox_y"], rec["bbox_w"], rec["bbox_h"]),

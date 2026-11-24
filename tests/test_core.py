@@ -395,6 +395,9 @@ class DatabaseTests(unittest.TestCase):
         cfg = Config(data_dir=self.tmp.name)
         self.assertEqual(cfg.model_retries, 3)
         self.assertEqual(cfg.scan_concurrency, 3)
+        self.assertEqual(cfg.face_min_cluster_size, 5)
+        self.assertEqual(cfg.map_tile_provider, "amap")
+        self.assertEqual(cfg.ffmpeg_path, "")
 
     def test_thumbnail_quality_defaults_to_fifty(self) -> None:
         from photo_reviewer.config import Config
@@ -1552,6 +1555,17 @@ class ServerApiTests(unittest.TestCase):
             resp = self.client.post("/api/config", json={"video_preview_mode": mode})
             self.assertEqual(resp.status_code, 200, mode)
             self.assertEqual(self.client.get("/api/config").get_json()["video_preview_mode"], mode)
+
+    def test_ffmpeg_installer_status_and_path_roundtrip(self) -> None:
+        data = self.client.get("/api/video/install/status").get_json()
+        self.assertIn("job", data)
+        self.assertIn(data["job"]["status"], ("idle", "completed", "running", "error", "cancelled"))
+        target = str(Path(self.tmp.name) / "ffmpeg" / "bin")
+        resp = self.client.post("/api/config", json={"ffmpeg_path": target})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/config").get_json()["ffmpeg_path"], target
+        )
 
     def test_the_defaults_are_three_seconds_and_half_volume(self) -> None:
         cfg = Config(data_dir=self.tmp.name)

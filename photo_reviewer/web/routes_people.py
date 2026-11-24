@@ -17,6 +17,7 @@ from ..faces import (
     crop_entity_thumbnail,
     engine_status,
     face_thumbs_dir,
+    migrate_face_thumbnails,
     match_and_cluster_library,
     recompute_person_centroid,
 )
@@ -93,7 +94,7 @@ def register(app, cfg, database):
             kind = None
         include_hidden = request.args.get("include_hidden", "0") in ("1", "true", "yes")
         include_singles = request.args.get("include_singles", "0") in ("1", "true", "yes")
-        min_unnamed = 1 if include_singles else max(1, int(getattr(cfg, "face_min_cluster_size", 2)))
+        min_unnamed = 1 if include_singles else max(1, int(getattr(cfg, "face_min_cluster_size", 5)))
         people = database.list_people(
             folder=folder,
             include_hidden=include_hidden,
@@ -286,6 +287,13 @@ def register(app, cfg, database):
         if not face:
             return jsonify({"error": "人脸不存在"}), 404
         thumb_path = face.get("thumb_path")
+        if thumb_path and os.path.isfile(thumb_path) and "face_thumbs" in str(thumb_path) and Path(thumb_path).parent == Path(cfg.data_dir) / "face_thumbs":
+            try:
+                migrate_face_thumbnails(database, cfg)
+                face = database.get_face(face_id) or face
+                thumb_path = face.get("thumb_path")
+            except Exception:
+                pass
         if thumb_path and os.path.isfile(thumb_path):
             return send_file(thumb_path, mimetype="image/jpeg")
         photo = database.get_photo(face["photo_id"])
@@ -293,7 +301,8 @@ def register(app, cfg, database):
             return jsonify({"error": "原图不存在"}), 404
         src = photo.get("proxy_path") or photo.get("path")
         if src and os.path.isfile(src):
-            out = face_thumbs_dir(cfg) / f"face_{face_id}.jpg"
+            folder = photo.get("folder") or os.path.dirname(photo.get("path") or "")
+            out = face_thumbs_dir(cfg, folder) / f"face_{face_id}.jpg"
             saved = crop_entity_thumbnail(
                 src,
                 (face["bbox_x"], face["bbox_y"], face["bbox_w"], face["bbox_h"]),

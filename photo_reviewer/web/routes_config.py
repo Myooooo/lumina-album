@@ -267,6 +267,8 @@ def register(app, cfg, database):
 
         if "face_models_dir" in data:
             staged["face_models_dir"] = str(data["face_models_dir"] or "").strip()[:512]
+        if "ffmpeg_path" in data:
+            staged["ffmpeg_path"] = str(data["ffmpeg_path"] or "").strip()[:512]
 
         if "api_base_url" in data:
             staged["api_base_url"] = (

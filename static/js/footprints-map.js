@@ -27,6 +27,7 @@ const fpMapState = {
   tileLayerKey: "",
   activeDrawerKey: null,
   resizeObserver: null,
+  animToken: 0,
 };
 
 const MAP_TILE_SIZE = 256;
@@ -74,8 +75,8 @@ function fpWgs84ToGcj02(lat, lon) {
 }
 
 function fpDisplayCoords(lat, lon) {
-  const provider = state.mapTileProvider || "carto";
-  if (provider === "amap") {
+  const provider = state.mapTileProvider || "amap";
+  if (provider !== "carto") {
     return fpWgs84ToGcj02(lat, lon);
   }
   return [lat, lon];
@@ -102,11 +103,11 @@ function fpWorldToLatLon(x, y, zoom) {
 }
 
 /* --------------------------------------------------------------------------
-   Tile Provider Resolution (Keyless Default: CartoDB Voyager / Dark Matter)
+   Tile Provider Resolution (Default: AMap; OSM as the keyless international fallback)
    -------------------------------------------------------------------------- */
 
 function fpResolveTileSpec() {
-  const provider = (state.mapTileProvider || "carto").toLowerCase();
+  const provider = (state.mapTileProvider || "amap").toLowerCase();
   const theme = document.body ? document.body.dataset.theme || "paper" : "paper";
   const retina = window.devicePixelRatio > 1.25 ? "@2x" : "";
 
@@ -156,7 +157,7 @@ function fpResolveTileSpec() {
     };
   }
 
-  // Default keyless provider: CartoDB (Voyager for Paper/Classic, Dark Matter for Vintage).
+  // Legacy CartoDB configs keep working; new installs use AMap above.
   const style = theme === "vintage" ? "dark_all" : "rastertiles/voyager";
   return {
     key: `carto:${style}`,
@@ -269,8 +270,21 @@ function ensureFootprintsMapMounted() {
   const fitBtn = $("footprintsMapFitBtn");
   if (fitBtn) {
     fitBtn.addEventListener("click", () => {
+      const before = {
+        lat: fpMapState.centerLat,
+        lon: fpMapState.centerLon,
+        zoom: fpMapState.zoom,
+      };
       fitFootprintsMapToPlaces(fpMapState.places);
-      fpMapDraw();
+      const target = {
+        lat: fpMapState.centerLat,
+        lon: fpMapState.centerLon,
+        zoom: fpMapState.zoom,
+      };
+      fpMapState.centerLat = before.lat;
+      fpMapState.centerLon = before.lon;
+      fpMapState.zoom = before.zoom;
+      fpAnimateView(target.lat, target.lon, target.zoom, 460);
     });
   }
 
@@ -389,6 +403,39 @@ function fpMapStepZoom(delta, anchorPxX, anchorPxY) {
   fpMapDraw();
 }
 
+function fpAnimateView(targetLat, targetLon, targetZoom, duration = 420, done = null) {
+  const startLat = fpMapState.centerLat;
+  const startLon = fpMapState.centerLon;
+  const startZoom = fpMapState.zoom;
+  const endZoom = Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, targetZoom));
+  const token = ++fpMapState.animToken;
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduced || duration <= 0) {
+    fpMapState.centerLat = targetLat;
+    fpMapState.centerLon = targetLon;
+    fpMapState.zoom = endZoom;
+    fpMapDraw();
+    if (done) done();
+    return;
+  }
+  const started = performance.now();
+  const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+  const frame = (now) => {
+    if (token !== fpMapState.animToken) return;
+    const k = Math.min(1, (now - started) / duration);
+    const e = ease(k);
+    fpMapState.centerLat = startLat + (targetLat - startLat) * e;
+    fpMapState.centerLon = startLon + (targetLon - startLon) * e;
+    fpMapState.zoom = startZoom + (endZoom - startZoom) * e;
+    fpMapDraw();
+    if (k < 1) requestAnimationFrame(frame);
+    else if (done) done();
+  };
+  requestAnimationFrame(frame);
+}
+
 function fpClusterPins(projected) {
   const sorted = projected.slice().sort((a, b) => b.place.count - a.place.count);
   const clusters = [];
@@ -468,6 +515,7 @@ function fpMapDraw() {
         img.decoding = "async";
         img.draggable = false;
         img.src = spec.urlFor(z, wrappedX, ty);
+        img.addEventListener("load", () => img.classList.add("is-loaded"), { once: true });
         fpMapState.tileCache.set(key, img);
         tilesEl.appendChild(img);
       }
@@ -541,20 +589,29 @@ function fpMapDraw() {
       const cl = clusters[Number(btn.dataset.clusterIdx)];
       if (!cl) return;
       if (cl.members.length > 1 && fpMapState.zoom < MAP_MAX_ZOOM) {
-        // Zoom in smoothly to split the cluster
+        // Fly to the cluster instead of hard-cutting to a new zoom level.
         let sumLat = 0;
         let sumLon = 0;
         for (const m of cl.members) {
           sumLat += m.lat;
           sumLon += m.lon;
         }
-        fpMapState.centerLat = sumLat / cl.members.length;
-        fpMapState.centerLon = sumLon / cl.members.length;
-        fpMapState.zoom = Math.min(MAP_MAX_ZOOM, fpMapState.zoom + 2);
-        fpMapDraw();
+        fpAnimateView(
+          sumLat / cl.members.length,
+          sumLon / cl.members.length,
+          Math.min(MAP_MAX_ZOOM, fpMapState.zoom + 2)
+        );
         return;
       }
-      openFootprintsMapDrawer(cl.primary, cl.primaryIndex);
+      const p = cl.primary;
+      if (p.lat != null && p.lon != null) {
+        const [dLat, dLon] = fpDisplayCoords(Number(p.lat), Number(p.lon));
+        fpAnimateView(dLat, dLon, Math.max(fpMapState.zoom, 14), 420, () =>
+          openFootprintsMapDrawer(cl.primary, cl.primaryIndex)
+        );
+      } else {
+        openFootprintsMapDrawer(cl.primary, cl.primaryIndex);
+      }
     });
   });
 }

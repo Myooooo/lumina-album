@@ -1847,11 +1847,18 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
+    "people/pets sit below the score block and above tags",
+    /dimension-section[\s\S]{0,1400}previewPeopleHtml\(photo\)[\s\S]{0,700}photo\.tags/.test(src),
+    true
+  );
+  check(
     "lightbox renders detected people pills and bounding boxes",
     /function previewPeopleHtml\(/.test(src) &&
       /function renderPreviewFaceBoxes\(/.test(src) &&
       /\.preview-person-pill \{/.test(css) &&
-      /\.preview-face-box\.is-active \{/.test(css),
+      /\.preview-face-box\.is-active \{/.test(css) &&
+      /id="previewExpandBtn"/.test(html) &&
+      /function openFullscreenViewer\(/.test(src),
     true
   );
   check(
@@ -1897,12 +1904,32 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "settings 地点 tab exposes keyless default map provider (carto) and map view config",
+    "settings 地点 tab defaults to AMap with OSM as the fallback and keeps custom tiles",
     /id="setFootprintDefaultView"/.test(html) &&
       /id="setMapTileProvider"/.test(html) &&
-      /value="carto"/.test(html) &&
+      /value="amap"/.test(html) &&
+      /value="osm"/.test(html) &&
       /id="setMapTileUrl"/.test(html) &&
       /map_tile_provider:/.test(src),
+    true
+  );
+  check(
+    "footprints mode switch has a sliding ink and smooth map camera",
+    /id="footprintsModeInk"/.test(html) &&
+      /\.footprints-mode-ink \{/.test(css) &&
+      /function fpAnimateView\(/.test(src) &&
+      /fpMapAnimate|fpAnimateView\(/.test(src) &&
+      /fpMapModeIn/.test(css),
+    true
+  );
+  check(
+    "one-click installers are exposed for face runtime and FFmpeg",
+    /id="downloadFaceModelsBtn"/.test(html) &&
+      /一键下载安装/.test(html) &&
+      /id="installFfmpegBtn"/.test(html) &&
+      /id="ffmpegInstallModal"/.test(html) &&
+      /function installFfmpeg\(/.test(src) &&
+      /install_deps: true/.test(src),
     true
   );
   check(

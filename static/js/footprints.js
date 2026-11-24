@@ -73,6 +73,18 @@ function syncFootprintsModeButtons() {
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
   });
+  const ink = $("footprintsModeInk");
+  const active = sw.querySelector(".footprints-mode-btn.active");
+  if (!ink || !active) return;
+  const base = sw.getBoundingClientRect();
+  const rect = active.getBoundingClientRect();
+  if (!rect.width) {
+    ink.style.opacity = "0";
+    return;
+  }
+  ink.style.opacity = "1";
+  ink.style.width = `${rect.width}px`;
+  ink.style.transform = `translateX(${rect.left - base.left - 3}px)`;
 }
 
 function setFootprintsMode(mode) {
@@ -346,6 +358,7 @@ async function openFootprints(options = {}) {
     fpState.modeInitialized = true;
   }
   syncFootprintsModeButtons();
+  requestAnimationFrame(syncFootprintsModeButtons);
 
   const body = $("footprintsBody");
   const lede = $("footprintsLede");

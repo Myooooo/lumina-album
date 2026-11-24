@@ -41,6 +41,8 @@
 
 **人物与宠物**
 - 100% 本地离线识别照片中的人脸与宠物猫狗，照片与特征向量绝不上传云端
+- 人脸/宠物缩略图保存在对应相册的隐藏缓存目录 `.photo-review-cache/face_thumbs/`，跟着相册一起移动/删除，不再堆在项目根目录
+- 设置页「人物」支持一键下载安装：自动检测平台与 NVIDIA GPU，安装匹配的 ONNX Runtime、CUDA 12/cuDNN 9 运行库、InsightFace/宠物依赖，再下载模型；弹窗显示命令与阶段进度，装好后重启应用生效
 - 默认使用高精度 InsightFace `buffalo_l` 模型，可在设置中切换轻量版 `buffalo_s`
 - 自动调用平台硬件加速：macOS 优先 Apple CoreML（ANE / GPU），Windows / Linux 优先 NVIDIA CUDA（Windows 兼容 DirectML），无 GPU 时自动回退 CPU
 - 支持手工命名、同名自动合并、多选合并、隐藏/置顶、更换封面，以及「待确认照片」一键「是 / 否」核验；命名后后续新照片自动归入同一集合
@@ -50,7 +52,7 @@
 - 合并展示 EXIF GPS 自动识别的城市与用户**自定义地点**，支持「卡片」和「地图」两种视图切换
 - 新建地点时自动调用「设置 → 地点」中的地理编码接口反查经纬度，支持候选确认或手工填写坐标
 - 支持在地点内批量添加/移出照片，或在相册多选底栏一键「归入地点」；归入后仅覆盖数据库中的地点字段，原图 EXIF 全程不动
-- 地图模式仿 iOS 相册体验：封面缩略图气泡图钉 + 照片数量角标 + 缩放动态聚合 + 进入时自动缩放到刚好覆盖所有有照片的地点；默认使用免 Key 底图（CartoDB），并兼容高德（自动火星坐标纠偏）、OSM 与自定义 XYZ 瓦片源
+- 地图模式仿 iOS 相册体验：封面缩略图气泡图钉 + 照片数量角标 + 缩放动态聚合 + 进入时自动缩放到刚好覆盖所有有照片的地点；默认使用高德地图（自动火星坐标纠偏），海外网络可切换 OpenStreetMap，也支持自定义 XYZ 瓦片源
 
 **导出**
 - 存成**网页**：单个 HTML，图片全部内嵌，十年后还能直接打开、也能打印
@@ -167,10 +169,10 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_GEOCODING_INTERVAL` | `1.0` | 地理编码最小间隔（秒） |
 | `PHOTO_GEOCODING_RETRIES` | `3` | 地理编码重试次数 |
 | `PHOTO_FOOTPRINT_DEFAULT_VIEW` | `grid` | 足迹默认视图：`grid`（卡片）或 `map`（地图） |
-| `PHOTO_MAP_TILE_PROVIDER` | `carto` | 地图底图源：`carto`（免 Key 默认）/ `osm` / `amap` / `custom` |
+| `PHOTO_MAP_TILE_PROVIDER` | `amap` | 地图底图源：`amap`（默认）/ `osm` / `custom`（旧 `carto` 兼容） |
 | `PHOTO_MAP_TILE_URL` | 空 | 自定义 XYZ 瓦片模板（支持 `{z}/{x}/{y}/{s}/{apikey}`） |
 | `PHOTO_MAP_API_KEY` | 空 | 自定义底图可选 API Key |
-| `PHOTO_FFMPEG_PATH` | 空 | ffmpeg/ffprobe 所在目录 |
+| `PHOTO_FFMPEG_PATH` | 空 | ffmpeg/ffprobe 所在目录（也可由设置页一键安装自动写入） |
 | `PHOTO_VIDEO_CLIP_SECONDS` | `3` | 详情页预览时长 |
 | `PHOTO_VIDEO_CLIP_MAX_EDGE` | `960` | 预览最大边长 |
 | `PHOTO_VIDEO_CLIP_CRF` | `28` | 预览压缩质量 |
@@ -188,7 +190,7 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_FACE_MODEL` | `buffalo_l` | 人脸模型：`buffalo_l`（高精度）或 `buffalo_s`（轻量） |
 | `PHOTO_FACE_DETECT_PETS` | `true` | 是否同时识别宠物猫狗 |
 | `PHOTO_FACE_MATCH_THRESHOLD` | `0.40` | 自动归类余弦距离阈值（0.25–0.75，越小越严格） |
-| `PHOTO_FACE_MIN_CLUSTER` | `2` | 未命名人物聚类的最少照片数 |
+| `PHOTO_FACE_MIN_CLUSTER_SIZE` | `5` | 未命名人物聚类的最少照片数 |
 | `PHOTO_FACE_MODELS_DIR` | 空 | 本地模型存放目录（默认 `data/models`） |
 | `PHOTO_OPEN_BROWSER` | `1` | 启动时自动打开浏览器 |
 | `PHOTO_HOST` | `127.0.0.1` | 监听地址 |
@@ -200,14 +202,25 @@ sudo apt install ffmpeg        # Linux
 
 - **模型**：API 地址、Key、模型名、并发/重试/超时、评价风格与评分标准（可保存自定义提示词）
 - **图片**：代理图与缩略图、索引线程数、实况照片、那年今日时间范围
-- **视频**：处理方式、预览参数、ffmpeg 检测状态
-- **人物**：开关、自动扫描、宠物猫狗、`buffalo_l`/`buffalo_s` 模型切换、聚类阈值、硬件加速与依赖检查、一键下载（弹窗进度条）及手动下载路径指引
-- **地点**：地理编码与地名解析（服务商、Key、回退、间隔、重试）、地图模式默认视图与底图源（默认免 Key CartoDB，兼容高德/OSM/自定义 XYZ）
+- **视频**：处理方式、预览参数、ffmpeg 检测状态、一键下载安装（失败时弹窗给出手动指引）
+- **人物**：开关、自动扫描、宠物猫狗、`buffalo_l`/`buffalo_s` 模型切换、聚类阈值、硬件加速与依赖检查、一键下载安装（按平台/GPU 自动装运行时与模型，弹窗显示命令和进度）及手动路径指引
+- **地点**：地理编码与地名解析（服务商、Key、回退、间隔、重试）、地图模式默认视图与底图源（默认高德，兼容 OSM/自定义 XYZ）
 - **系统**：分为「主题」（三套界面主题切换）与「数据」（清理缓存、隐藏当前目录、查看隐藏的目录、移除当前目录）
 
 提示词只有评价风格和评分标准是开放的；每张照片先用固定的「说人话」规则写一句简评，再由模型判断这句是不是只是画面说明（是则重写），最后单独按评分标准打分、打标签、起标题。粘贴一份完整提示词也会被自动裁掉固定部分。用本地 9B 级模型实测时，把写简评和打分分开、并在必要时重写一句，比一次输出 JSON 更不容易把简评写成画面说明。
 
-`PHOTO_HOST` / `PHOTO_PORT` / `PHOTO_DEBUG` / `PHOTO_FFMPEG_PATH` / `PHOTO_OPEN_BROWSER` 只从环境变量读取。
+`PHOTO_HOST` / `PHOTO_PORT` / `PHOTO_DEBUG` / `PHOTO_OPEN_BROWSER` 只从环境变量读取；`PHOTO_FFMPEG_PATH` 可由设置页安装器写入数据库并持久化。
+
+## NVIDIA GPU 加速
+
+设置 → 人物 → 一键下载安装 会自动检测平台和 GPU：NVIDIA 机器安装 `onnxruntime-gpu` 与 pip 版 CUDA 12/cuDNN 9；Windows 无 NVIDIA 时回退 DirectML；macOS 用 CoreML/CPU。安装完成后需重启应用，运行时才会从 CPU 切换到 GPU。
+
+如果状态仍显示 CPU，依次检查：
+
+1. `onnxruntime` 与 `onnxruntime-gpu` 不能同时安装，后者会被前者的二进制覆盖；执行 `pip uninstall -y onnxruntime onnxruntime-gpu` 后只装 `onnxruntime-gpu`。
+2. `onnxruntime-gpu` 需要 CUDA 12 + cuDNN 9。设置页安装器会装 `nvidia-cuda-runtime-cu12`、`nvidia-cublas-cu12`、`nvidia-cufft-cu12`、`nvidia-cudnn-cu12`，应用启动时自动注册这些 DLL 目录。
+3. RTX 50 系（Blackwell）需要支持 `sm_120` 的运行时；Python 3.9 最高只能装 ORT 1.19.2，本项目已验证它配合 CUDA 12.9/cuDNN 9.28 可运行。若手动安装最新版，建议使用 Python 3.10+。
+4. 设置页「引擎状态」现在会读取真实的 `ort.get_device()`，而不是只看 Provider 列表；CUDA 未真正加载时会显示“回退 CPU”。
 
 ## 开发与测试
 

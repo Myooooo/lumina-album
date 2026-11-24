@@ -2304,6 +2304,20 @@ class Database:
             finally:
                 conn.close()
 
+    def faces_with_thumb_paths(self) -> list[dict[str, Any]]:
+        """Return ``id/thumb_path/folder`` for legacy thumbnail migration."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT f.id, f.thumb_path, p.folder, p.path "
+                    "FROM faces f JOIN photos p ON p.id = f.photo_id "
+                    "WHERE f.thumb_path IS NOT NULL AND f.thumb_path != ''"
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
     def faces_for_photo(self, photo_id: int) -> list[dict[str, Any]]:
         """Return detected people & pets for one photo (used by detail lightbox)."""
         with self._lock:

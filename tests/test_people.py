@@ -29,6 +29,7 @@ class _DummyConfig:
         self.face_match_threshold = 0.45
         self.face_min_cluster_size = 2
         self.face_models_dir = ""
+        self.cache_dir_name = ".photo-review-cache"
 
 
 class PeopleAndPetsTest(unittest.TestCase):
@@ -46,7 +47,10 @@ class PeopleAndPetsTest(unittest.TestCase):
             available=["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"],
             system_name="Windows",
         )
-        self.assertEqual(win_cuda[0], "CUDAExecutionProvider")
+        self.assertEqual(
+            win_cuda[0][0] if isinstance(win_cuda[0], tuple) else win_cuda[0],
+            "CUDAExecutionProvider",
+        )
         self.assertEqual(win_cuda[1], "DmlExecutionProvider")
         self.assertEqual(active_accelerator_label(win_cuda), "NVIDIA CUDA GPU")
 
@@ -61,7 +65,10 @@ class PeopleAndPetsTest(unittest.TestCase):
             available=["CUDAExecutionProvider", "CPUExecutionProvider"],
             system_name="Linux",
         )
-        self.assertEqual(linux_cuda[0], "CUDAExecutionProvider")
+        self.assertEqual(
+            linux_cuda[0][0] if isinstance(linux_cuda[0], tuple) else linux_cuda[0],
+            "CUDAExecutionProvider",
+        )
 
     def test_embedding_roundtrip_and_dbscan(self) -> None:
         v1 = [1.0, 0.0, 0.0, 0.0]
@@ -188,6 +195,45 @@ class PeopleAndPetsTest(unittest.TestCase):
                 except ImportError:
                     pass
 
+
+    def test_face_thumbnails_live_in_the_album_cache(self) -> None:
+        from photo_reviewer.faces import face_thumbs_dir, migrate_face_thumbnails
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "library.db"))
+            cfg = _DummyConfig(tmp)
+            folder = Path(tmp) / "album"
+            folder.mkdir()
+            try:
+                pid = db.upsert_photo(
+                    {
+                        "path": str(folder / "a.jpg"),
+                        "folder": str(folder),
+                        "filename": "a.jpg",
+                        "status": "analyzed",
+                    }
+                )
+                ids = db.replace_auto_faces_for_photo(
+                    pid,
+                    [{"entity_kind": "person", "bbox_x": 0.1, "bbox_y": 0.1,
+                      "bbox_w": 0.2, "bbox_h": 0.2, "det_score": 0.9,
+                      "embedding": encode_embedding([1.0, 0.0])}],
+                    "buffalo_l",
+                )
+                old = Path(tmp) / "face_thumbs"
+                old.mkdir()
+                old_file = old / f"face_{ids[0]}.jpg"
+                old_file.write_bytes(b"legacy-thumb")
+                db.update_face_thumb(ids[0], str(old_file))
+                migrate_face_thumbnails(db, cfg)
+                target = face_thumbs_dir(cfg, str(folder)) / f"face_{ids[0]}.jpg"
+                self.assertTrue(target.is_file())
+                self.assertFalse(old_file.exists())
+                self.assertEqual(
+                    Path(db.get_face(ids[0])["thumb_path"]).resolve(), target.resolve()
+                )
+            finally:
+                db.close()
 
     def test_manual_model_layout_detection_and_zip_extract(self) -> None:
         import zipfile

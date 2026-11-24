@@ -223,8 +223,8 @@
 
     <div class="hidden">
       <select id="statusFilter" data-no-custom>
-        <option value="all">全部回忆</option>
-        <option value="analyzed" selected>已收录</option>
+        <option value="all" selected>全部回忆</option>
+        <option value="analyzed">已收录</option>
         <option value="favorite">已珍藏</option>
         <option value="pending">待整理</option>
         <option value="deleted">已收起</option>
@@ -301,6 +301,9 @@
                  the same shape as the one a video card carries. -->
             <button id="previewLiveBtn" class="preview-live-btn hidden" type="button" title="播放实况">
               <span class="btn-icon" data-icon="play"></span>
+            </button>
+            <button id="previewExpandBtn" class="preview-expand-btn" type="button" title="全屏放大查看" aria-label="全屏放大查看">
+              <span class="btn-icon" data-icon="maximize"></span>
             </button>
           </div>
         </div>
@@ -398,6 +401,7 @@
         </div>
         <div class="footprints-header-actions" id="footprintsHeaderActions">
           <div class="footprints-mode-switch" id="footprintsModeSwitch" role="group" aria-label="切换足迹视图">
+            <span class="footprints-mode-ink" id="footprintsModeInk" aria-hidden="true"></span>
             <button type="button" class="footprints-mode-btn active" data-fp-mode="grid" aria-pressed="true">卡片</button>
             <button type="button" class="footprints-mode-btn" data-fp-mode="map" aria-pressed="false">地图</button>
           </div>
@@ -742,6 +746,11 @@
               </label>
             </div>
             <div class="settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
+            <div class="settings-row-actions">
+              <button id="installFfmpegBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="import"></span>一键下载安装 FFmpeg</button>
+              <button id="refreshFfmpegBtn" class="btn" type="button"><span class="btn-icon" data-icon="sync"></span>重新检测</button>
+            </div>
+            <p class="settings-section-desc">Windows 会自动下载官方静态版；macOS 使用 Homebrew，Linux 使用 apt。自动安装失败时会给出可操作的手动安装指引。</p>
           </div>
 
           <div class="settings-section">
@@ -776,7 +785,7 @@
                  aria-labelledby="tabBtnPeople" data-pane="people" hidden>
           <div class="settings-section">
             <h3 class="settings-section-title">本地人物与宠物识别</h3>
-            <p class="settings-section-desc">100% 本地离线运行，自动调用 Apple CoreML、NVIDIA CUDA 或 Windows DirectML 加速，照片与特征向量绝不上传云端。</p>
+            <p class="settings-section-desc">本地离线运行，自动检测并调用 Apple CoreML、NVIDIA CUDA 或 Windows DirectML 加速。</p>
             <div class="form-grid">
               <label class="checkbox-row full-row">
                 <input id="setFaceEnabled" type="checkbox" />
@@ -807,10 +816,11 @@
 
           <div class="settings-section">
             <h3 class="settings-section-title">引擎状态与本地模型</h3>
+            <p class="settings-section-desc">自动识别当前平台与 NVIDIA GPU，安装匹配的 ONNX Runtime、CUDA 运行库和 InsightFace 依赖，然后下载所选模型。</p>
             <div class="settings-status" id="setPeopleEngineStatus">正在检测本地识别引擎与硬件加速…</div>
             <div class="engine-status-pills" id="setPeopleStatusPills"></div>
             <div class="settings-row-actions people-engine-actions">
-              <button id="downloadFaceModelsBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="import"></span>一键下载本地模型</button>
+              <button id="downloadFaceModelsBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="import"></span>一键下载安装</button>
               <button id="refreshFaceStatusBtn" class="btn" type="button"><span class="btn-icon" data-icon="sync"></span>重新检测</button>
               <button id="reclusterPeopleBtn" class="btn" type="button"><span class="btn-icon" data-icon="refresh"></span>重新聚类</button>
             </div>
@@ -875,7 +885,7 @@
 
           <div class="settings-section">
             <h3 class="settings-section-title">地图模式与底图源</h3>
-            <p class="settings-section-desc">默认使用免 Key 的 Carto 矢量风底图并自动匹配当前主题；国内网络也可切换高德底图，或填写自定义 XYZ 瓦片地址。</p>
+            <p class="settings-section-desc">默认使用高德地图并自动处理火星坐标；海外网络可切换 OpenStreetMap，或填写自定义 XYZ 瓦片地址。CartoDB 底图不再作为默认选项，避免 Key/网络策略带来的不可用。</p>
             <div class="form-grid">
               <label>默认足迹视图
                 <select id="setFootprintDefaultView">
@@ -885,9 +895,8 @@
               </label>
               <label>地图底图源
                 <select id="setMapTileProvider">
-                  <option value="carto">CartoDB 矢量风（免 Key · 自动适配主题）</option>
-                  <option value="osm">OpenStreetMap 标准（免 Key）</option>
-                  <option value="amap">高德地图矢量（免 Key · 自动火星坐标纠偏）</option>
+                  <option value="amap">高德地图（默认 · 国内推荐 · 自动火星坐标纠偏）</option>
+                  <option value="osm">OpenStreetMap（国际 · 免 Key）</option>
                   <option value="custom">自定义 XYZ 瓦片服务</option>
                 </select>
               </label>
@@ -972,13 +981,38 @@
     </div>
   </div>
 
+  <!-- FFmpeg install progress modal -->
+  <div id="ffmpegInstallModal" class="modal hidden">
+    <div class="modal-content model-download-content">
+      <button class="modal-close" id="ffmpegInstallXBtn" title="关闭"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="video"></span>安装 FFmpeg</h2>
+      <div class="modal-body">
+        <p id="ffmpegInstallMessage" class="model-download-message">正在检测平台…</p>
+        <div id="ffmpegInstallCommand" class="model-download-command hidden"></div>
+        <div class="model-download-progress-wrap">
+          <div class="progress-bar model-download-bar"><div id="ffmpegInstallFill" class="progress-fill"></div></div>
+          <div class="model-download-stats">
+            <span id="ffmpegInstallMeta">准备中…</span>
+            <span id="ffmpegInstallPct" class="progress-eta">0%</span>
+          </div>
+        </div>
+        <div id="ffmpegInstallGuide" class="model-download-warnings hidden"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="ffmpegInstallCancelBtn" class="btn danger" type="button"><span class="btn-icon" data-icon="close"></span>取消安装</button>
+        <button id="ffmpegInstallCloseBtn" class="btn primary hidden" type="button"><span class="btn-icon" data-icon="check"></span>完成</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Model download progress modal -->
   <div id="modelDownloadModal" class="modal hidden">
     <div class="modal-content model-download-content">
       <button class="modal-close" id="modelDownloadXBtn" title="关闭"><span class="btn-icon" data-icon="close"></span></button>
-      <h2><span class="modal-title-icon" data-icon="import"></span>下载本地识别模型</h2>
+      <h2><span class="modal-title-icon" data-icon="import"></span>安装本地识别引擎与模型</h2>
       <div class="modal-body">
-        <p id="modelDownloadMessage" class="model-download-message">正在连接模型源…</p>
+        <p id="modelDownloadMessage" class="model-download-message">正在准备安装环境…</p>
+        <div id="modelDownloadCommand" class="model-download-command hidden"></div>
         <div class="model-download-progress-wrap">
           <div class="progress-bar model-download-bar"><div id="modelDownloadFill" class="progress-fill"></div></div>
           <div class="model-download-stats">

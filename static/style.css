@@ -12292,6 +12292,26 @@ body[data-theme="vintage"] .preview-face-label {
   max-width: 520px;
 }
 
+.model-download-command {
+  margin: 0 0 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(28, 22, 17, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+body[data-theme="vintage"] .model-download-command {
+  background: #121110;
+  border-color: #2b2723;
+  color: #eb9234;
+}
+
 .model-download-message {
   margin: 0 0 14px;
   font-size: 14px;
@@ -12666,6 +12686,7 @@ body[data-theme="vintage"] .dup-group-keep:hover {
 }
 
 .footprints-mode-switch {
+  position: relative;
   display: inline-flex;
   align-items: center;
   padding: 3px;
@@ -12675,7 +12696,24 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   gap: 2px;
 }
 
+.footprints-mode-ink {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  bottom: 3px;
+  width: 0;
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 260ms var(--ease-out), width 260ms var(--ease-out),
+              opacity 160ms var(--ease-out);
+}
+
 .footprints-mode-btn {
+  position: relative;
+  z-index: 1;
   border: none;
   background: transparent;
   color: var(--muted);
@@ -12684,7 +12722,7 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   padding: 5px 14px;
   border-radius: 999px;
   cursor: pointer;
-  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  transition: color 180ms var(--ease-out);
 }
 
 .footprints-mode-btn:hover {
@@ -12692,9 +12730,20 @@ body[data-theme="vintage"] .dup-group-keep:hover {
 }
 
 .footprints-mode-btn.active {
-  background: var(--surface, #fff);
+  background: transparent;
   color: var(--text);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
+}
+
+/* The map replaces the grid inside the same sheet: fade/scale it in rather
+   than swapping two DOM states with a hard cut. */
+.footprints-map-wrap:not(.hidden) {
+  animation: fpMapModeIn 280ms var(--ease-out) both;
+}
+
+@keyframes fpMapModeIn {
+  from { opacity: 0; transform: scale(0.985) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 .footprints-detail-bar {
@@ -12934,10 +12983,34 @@ body[data-theme="vintage"] .footprints-mode-switch {
   border-color: rgba(235, 146, 52, 0.28);
 }
 
-body[data-theme="vintage"] .footprints-mode-btn.active {
+body[data-theme="vintage"] .footprints-mode-ink {
   background: rgba(235, 146, 52, 0.22);
+  box-shadow: 0 0 0 1px rgba(235, 146, 52, 0.3);
+}
+
+body[data-theme="vintage"] .footprints-mode-btn.active {
+  background: transparent;
   color: #f4b165;
   box-shadow: none;
+}
+
+body[data-theme="paper"] .footprints-mode-switch {
+  background: #f3ecdd;
+  border: 1px dashed #cbbda5;
+}
+
+body[data-theme="paper"] .footprints-mode-ink {
+  background: #fffdf8;
+  box-shadow: 0 1px 0 rgba(138, 114, 88, 0.16), 0 2px 5px rgba(46, 34, 20, 0.08);
+}
+
+body[data-theme="paper"] .footprints-mode-btn.active {
+  color: #6b4f38;
+}
+
+body[data-theme="classic"] .footprints-mode-ink {
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 2px 10px rgba(38, 31, 25, 0.1), inset 0 1px 0 #ffffff;
 }
 
 body[data-theme="vintage"] .footprint-source-badge {
@@ -12996,6 +13069,12 @@ body[data-theme="classic"] .footprints-mode-switch {
   height: 256px;
   pointer-events: none;
   will-change: transform;
+  opacity: 0;
+  transition: opacity 220ms var(--ease-out);
+}
+
+.fp-map-tile.is-loaded {
+  opacity: 1;
 }
 
 .fp-map-pins {
@@ -13359,4 +13438,256 @@ body[data-theme="vintage"] .footprints-map-float-btn {
   color: #f3e8d8;
 }
 
+/* ==========================================================================
+   Media controls: paper-journal / vintage-film coordination
+   The play, sound, Live Photo and fullscreen controls share one geometry, but
+   their material follows the active theme instead of the old universal dark
+   glass pill. This keeps the photograph the loudest object and the controls as
+   quiet stationery laid on top of it.
+   ========================================================================== */
+.preview-expand-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 99px;
+  border: 1px solid rgba(247, 239, 228, 0.28);
+  background: rgba(14, 12, 10, 0.56);
+  color: #f7efe4;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0.82;
+  transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out),
+              background-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
+  z-index: 6;
+}
 
+.preview-expand-btn svg { width: 16px; height: 16px; }
+
+.preview-expand-btn:hover {
+  opacity: 1;
+  background: rgba(24, 20, 16, 0.8);
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
+}
+
+.preview-expand-btn:active { transform: scale(0.94); }
+
+/* Paper: a letterpress chip on cream stock. */
+body[data-theme="paper"] .preview-sound-btn,
+body[data-theme="paper"] .preview-video-pause,
+body[data-theme="paper"] .preview-live-btn {
+  border-radius: 3px;
+  border: 1px solid rgba(138, 114, 88, 0.34);
+  background: rgba(250, 245, 232, 0.92);
+  color: #6b4f38;
+  box-shadow: 0 2px 8px rgba(46, 34, 20, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+body[data-theme="paper"] .preview-sound-btn:hover,
+body[data-theme="paper"] .preview-video-pause:hover,
+body[data-theme="paper"] .preview-live-btn:hover {
+  background: #fffdf8;
+  color: #8a5a36;
+  border-color: rgba(154, 96, 44, 0.55);
+  box-shadow: 0 5px 14px rgba(46, 34, 20, 0.16);
+}
+
+body[data-theme="paper"] .preview-sound-btn.is-on {
+  border-color: rgba(154, 96, 44, 0.6);
+  background: #f3e3c9;
+  color: #7a4a24;
+  box-shadow: 0 0 0 3px rgba(174, 118, 78, 0.12);
+}
+
+body[data-theme="paper"] .preview-expand-btn {
+  border-radius: 3px;
+  border-color: rgba(138, 114, 88, 0.34);
+  background: rgba(250, 245, 232, 0.92);
+  color: #6b4f38;
+  box-shadow: 0 2px 8px rgba(46, 34, 20, 0.12);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+body[data-theme="paper"] .preview-expand-btn:hover {
+  background: #fffdf8;
+  color: #8a5a36;
+  border-color: rgba(154, 96, 44, 0.55);
+}
+
+/* Vintage: darkroom metal with a faint amber edge-light. */
+body[data-theme="vintage"] .preview-sound-btn,
+body[data-theme="vintage"] .preview-video-pause,
+body[data-theme="vintage"] .preview-live-btn {
+  border-radius: 2px;
+  border: 1px solid rgba(235, 146, 52, 0.4);
+  background: rgba(18, 14, 11, 0.82);
+  color: #f4b165;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.44);
+}
+
+body[data-theme="vintage"] .preview-sound-btn:hover,
+body[data-theme="vintage"] .preview-video-pause:hover,
+body[data-theme="vintage"] .preview-live-btn:hover {
+  background: rgba(36, 26, 18, 0.92);
+  border-color: rgba(255, 154, 61, 0.72);
+  color: #ffc27d;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.12), 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+body[data-theme="vintage"] .preview-sound-btn.is-on {
+  border-color: #eb9234;
+  color: #ffd19a;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.16), 0 0 14px rgba(235, 146, 52, 0.25);
+}
+
+body[data-theme="vintage"] .preview-expand-btn {
+  border-radius: 2px;
+  border-color: rgba(235, 146, 52, 0.4);
+  background: rgba(18, 14, 11, 0.82);
+  color: #f4b165;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.44);
+}
+
+body[data-theme="vintage"] .preview-expand-btn:hover {
+  background: rgba(36, 26, 18, 0.92);
+  border-color: rgba(255, 154, 61, 0.72);
+  color: #ffc27d;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.12);
+}
+
+body[data-theme="classic"] .preview-expand-btn {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(255, 255, 255, 0.78);
+  color: #3a2f25;
+  box-shadow: 0 4px 14px rgba(38, 31, 25, 0.14);
+}
+
+/* The card badges use the same material language as the controls. */
+body[data-theme="paper"] .polaroid-card .live-badge {
+  border-radius: 3px;
+  background: #fffdf8;
+  border: 1px dashed rgba(154, 96, 44, 0.5);
+  box-shadow: 0 2px 6px rgba(46, 34, 20, 0.12);
+}
+
+body[data-theme="paper"] .polaroid-card .live-badge svg { color: #8a5a36; }
+
+body[data-theme="vintage"] .polaroid-card .live-badge {
+  border-radius: 2px;
+  background: rgba(18, 14, 11, 0.86);
+  border: 1px solid rgba(235, 146, 52, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 10px rgba(235, 146, 52, 0.22);
+}
+
+body[data-theme="vintage"] .polaroid-card .live-badge svg { color: #ffb35d; }
+
+.video-badge, .live-badge {
+  transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
+}
+
+.polaroid-card:hover .video-badge,
+.polaroid-card:hover .live-badge { transform: translateY(-1px); }
+
+/* Open-original round control: a small brass button on paper, amber on film. */
+body[data-theme="paper"] .path-open-btn {
+  border-radius: 3px;
+  border-color: rgba(138, 114, 88, 0.34);
+  background: #fffdf8;
+  color: #6b4f38;
+}
+
+body[data-theme="paper"] .path-open-btn:hover {
+  border-color: rgba(154, 96, 44, 0.6);
+  color: #8a5a36;
+  background: #fffaf0;
+}
+
+body[data-theme="vintage"] .path-open-btn {
+  border-radius: 2px;
+  border-color: rgba(235, 146, 52, 0.38);
+  background: rgba(18, 14, 11, 0.82);
+  color: #f4b165;
+}
+
+body[data-theme="vintage"] .path-open-btn:hover {
+  border-color: #eb9234;
+  color: #ffc27d;
+  box-shadow: 0 0 10px rgba(235, 146, 52, 0.2);
+}
+
+.preview-sound-btn:active,
+.preview-video-pause:active,
+.preview-live-btn:active,
+.path-open-btn:active { transform: scale(0.94); }
+
+@media (prefers-reduced-motion: reduce) {
+  .footprints-map-wrap:not(.hidden) { animation: none; }
+  .preview-expand-btn,
+  .preview-sound-btn,
+  .preview-video-pause,
+  .preview-live-btn { transition: none; }
+}
+
+/* A quiet play affordance on film cards. It is a print-like stamp rather than
+   a media-player button, and disappears into the hover lift. */
+.video-card-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 38px;
+  height: 38px;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(14, 12, 10, 0.56);
+  border: 1px solid rgba(247, 239, 228, 0.28);
+  color: #f7efe4;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  z-index: 4;
+  transition: transform 220ms var(--ease-out), background-color 180ms var(--ease-out),
+              opacity 180ms var(--ease-out);
+}
+
+.video-card-play svg { width: 15px; height: 15px; margin-left: 2px; }
+
+.polaroid-card.is-video:hover .video-card-play {
+  transform: translate(-50%, -50%) scale(1.08);
+  background: rgba(24, 20, 16, 0.76);
+}
+
+body[data-theme="paper"] .video-card-play {
+  border-radius: 3px;
+  background: rgba(250, 245, 232, 0.92);
+  border-color: rgba(138, 114, 88, 0.34);
+  color: #6b4f38;
+  box-shadow: 0 2px 8px rgba(46, 34, 20, 0.12);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video:hover .video-card-play {
+  background: #fffdf8;
+  color: #8a5a36;
+}
+
+body[data-theme="vintage"] .video-card-play {
+  border-radius: 2px;
+  background: rgba(18, 14, 11, 0.82);
+  border-color: rgba(235, 146, 52, 0.5);
+  color: #f4b165;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 12px rgba(235, 146, 52, 0.18);
+}

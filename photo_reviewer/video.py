@@ -27,7 +27,11 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
+import urllib.request
+import zipfile
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -110,6 +114,193 @@ def _binary_in(directory: str, name: str) -> str | None:
         if os.path.isfile(path) and os.access(path, os.X_OK):
             return path
     return None
+
+
+#: Official static Windows build used by the one-click installer. It is a zip
+#: with ffmpeg.exe/ffprobe.exe under a single versioned top-level folder.
+FFMPEG_WINDOWS_ZIP = (
+    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+)
+
+
+@dataclass
+class FFmpegInstallJob:
+    status: str = "idle"  # idle | running | completed | cancelled | error
+    stage: str = "idle"
+    percent: float = 0.0
+    message: str = ""
+    command: str = ""
+    error: str = ""
+    guide: str = ""
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "stage": self.stage,
+            "percent": round(self.percent, 1),
+            "message": self.message,
+            "command": self.command,
+            "error": self.error,
+            "guide": self.guide,
+        }
+
+
+class FFmpegInstaller:
+    """Background one-click ffmpeg installer (Windows zip / brew / apt)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._job = FFmpegInstallJob()
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return self._job.to_dict()
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self._job.status == "running":
+                self._job.cancel_event.set()
+                return True
+            return False
+
+    def start(self, cfg, database=None) -> dict[str, Any]:
+        with self._lock:
+            if self._job.status == "running":
+                return self._job.to_dict()
+            job = FFmpegInstallJob(
+                status="running",
+                stage="checking",
+                message="正在检测 ffmpeg 与当前平台…",
+            )
+            self._job = job
+
+        def _run(job: FFmpegInstallJob) -> None:
+            try:
+                if find_tools(cfg.ffmpeg_path or None, refresh=True) is not None:
+                    job.status = "completed"
+                    job.percent = 100.0
+                    job.stage = "done"
+                    job.message = "已检测到 ffmpeg，无需安装。"
+                    return
+                if sys.platform == "win32":
+                    self._install_windows(cfg, job)
+                elif sys.platform == "darwin":
+                    self._install_brew(job, "macOS")
+                else:
+                    self._install_linux(job)
+                if job.status == "cancelled":
+                    return
+                tools = find_tools(cfg.ffmpeg_path or None, refresh=True)
+                if tools is None and job.status != "error":
+                    raise RuntimeError("安装完成后仍未找到 ffmpeg/ffprobe")
+                if job.status != "error":
+                    job.status = "completed"
+                    job.stage = "done"
+                    job.percent = 100.0
+                    job.message = "ffmpeg 已安装并可用。"
+                    job.command = ""
+                    if database is not None and cfg.ffmpeg_path:
+                        database.save_settings({"ffmpeg_path": cfg.ffmpeg_path})
+            except Exception as exc:
+                logger.warning("ffmpeg install failed: %s", exc, exc_info=True)
+                job.status = "error"
+                job.error = str(exc)
+                job.message = f"自动安装未完成：{exc}"
+                job.guide = _ffmpeg_install_guide()
+
+        thread = threading.Thread(target=_run, args=(job,), name="lumina-ffmpeg-install", daemon=True)
+        thread.start()
+        return job.to_dict()
+
+    def _install_windows(self, cfg, job: FFmpegInstallJob) -> None:
+        tools_dir = Path(cfg.data_dir) / "tools" / "ffmpeg"
+        tools_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = tools_dir / "ffmpeg-release-essentials.zip"
+        job.stage = "downloading"
+        job.command = f"下载 {FFMPEG_WINDOWS_ZIP}"
+        job.message = "正在下载 Windows 版 ffmpeg（约 80–120 MB）…"
+        req = urllib.request.Request(FFMPEG_WINDOWS_ZIP, headers={"User-Agent": "Lumina-Album/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as resp, open(zip_path, "wb") as out:
+            total = int(resp.headers.get("Content-Length") or 0)
+            done = 0
+            while True:
+                if job.cancel_event.is_set():
+                    job.status = "cancelled"
+                    job.message = "已取消 ffmpeg 安装"
+                    return
+                chunk = resp.read(65536)
+                if not chunk:
+                    break
+                out.write(chunk)
+                done += len(chunk)
+                if total > 0:
+                    job.percent = min(82.0, 4.0 + (done / total) * 78.0)
+        job.stage = "extracting"
+        job.percent = 86.0
+        job.command = f"解压 {zip_path.name}"
+        job.message = "正在解压 ffmpeg…"
+        target_bin = tools_dir / "bin"
+        target_bin.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            for member in zf.infolist():
+                name = Path(member.filename).name.lower()
+                if name not in ("ffmpeg.exe", "ffprobe.exe"):
+                    continue
+                with zf.open(member) as src, open(target_bin / Path(member.filename).name, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        try:
+            zip_path.unlink()
+        except OSError:
+            pass
+        cfg.ffmpeg_path = str(target_bin)
+        reset_tools_cache()
+        job.percent = 96.0
+        job.message = "ffmpeg 解压完成，正在验证…"
+
+    def _install_linux(self, job: FFmpegInstallJob) -> None:
+        job.stage = "installing"
+        job.command = "sudo -n apt-get install -y ffmpeg"
+        job.message = "正在通过 apt 安装 ffmpeg…"
+        proc = subprocess.run(
+            ["sudo", "-n", "apt-get", "install", "-y", "ffmpeg"],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
+                and (proc.stderr or proc.stdout).strip().splitlines()[-1]
+                or "apt-get 安装失败（可能需要管理员权限）"
+            )
+        job.percent = 95.0
+
+    def _install_brew(self, job: FFmpegInstallJob, label: str) -> None:
+        job.stage = "installing"
+        job.command = "brew install ffmpeg"
+        job.message = f"正在通过 Homebrew 安装 ffmpeg（{label}）…"
+        proc = subprocess.run(
+            ["brew", "install", "ffmpeg"], capture_output=True, text=True, timeout=1800
+        )
+        if proc.returncode != 0:
+            raise RuntimeError("Homebrew 安装失败")
+        job.percent = 95.0
+
+
+def _ffmpeg_install_guide() -> str:
+    if sys.platform == "win32":
+        return (
+            "自动安装未完成。可任选一种方式：\n"
+            "1. 打开「终端」，执行 winget install Gyan.FFmpeg；\n"
+            "2. 从 https://www.gyan.dev/ffmpeg/builds/ 下载 release-essentials.zip，"
+            "解压后把 bin 目录填到 PHOTO_FFMPEG_PATH；\n"
+            "3. 安装后在设置「视频」页点「重新检测」。"
+        )
+    if sys.platform == "darwin":
+        return "请先安装 Homebrew，再执行：brew install ffmpeg；完成后回到设置页点「重新检测」。"
+    return "请用发行版包管理器安装 ffmpeg（如 sudo apt install ffmpeg），或设置 PHOTO_FFMPEG_PATH 指向 bin 目录。"
+
+
+FFMPEG_INSTALLER = FFmpegInstaller()
 
 
 def find_tools(override_dir: str | None = None, refresh: bool = False) -> Tools | None:

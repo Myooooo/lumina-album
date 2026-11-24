@@ -101,9 +101,9 @@ const state = {
   cardPendingSeen: 0,
   cardTimer: null,
   historyCloseTimer: null,
-  //: Which status filter this album opens on ("analyzed", or "all" for a folder
-  //: that has only been indexed). Set once the album is known.
-  defaultStatusFilter: "analyzed",
+  //: Which status filter this album opens on. Always "all" now: the
+  //: "已收录" subset is never the default. Set once the album is known.
+  defaultStatusFilter: "all",
   fullscreen: {
     scale: 1,
     panX: 0,
@@ -410,17 +410,16 @@ async function loadInitialFolder() {
  * instead of undoing the fallback the user never chose.
  */
 async function applyDefaultStatusFilter() {
-  let value = "analyzed";
+  // The album always opens on every memory, never on the "已收录" subset:
+  // arriving at a page and seeing a filtered view made new imports look empty.
+  const value = "all";
   const folder = state.folder || "";
-  // Until this album's own numbers arrive it holds nothing as far as the
-  // empty state is concerned; the previous album's total must not leak in.
   state.albumTotal = 0;
   if (folder) {
     try {
       const stats = await api(`/api/stats?folder=${encodeURIComponent(folder)}`);
       if (folder !== (state.folder || "")) return;
       state.albumTotal = Number(stats.total) || 0;
-      if (!stats.analyzed && stats.total) value = "all";
     } catch (e) {
       console.warn("loadStats failed", e);
     }

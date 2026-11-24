@@ -11,7 +11,7 @@
  * it wants rather than the remembered default.
  */
 function clearFilterControls({ status } = {}) {
-  const statusValue = status || state.defaultStatusFilter || "analyzed";
+  const statusValue = status || state.defaultStatusFilter || "all";
   setSelectValue($("statusFilter"), statusValue);
   setSelectValue($("favoriteFilter"), "");
   setSelectValue($("minScoreFilter"), "");
@@ -51,7 +51,7 @@ async function applyFolderChange(folder) {
   // so the controls are cleared before that answer is known - then corrected.
   clearFilterControls({ status: "all" });
   await applyDefaultStatusFilter();
-  clearFilterControls({ status: state.defaultStatusFilter || "analyzed" });
+  clearFilterControls({ status: state.defaultStatusFilter || "all" });
   await reloadCurrentView();
 }
 
@@ -493,6 +493,7 @@ function stopModelDownloadPoll() {
 
 function paintModelDownloadJob(job) {
   const msgEl = $("modelDownloadMessage");
+  const commandEl = $("modelDownloadCommand");
   const fillEl = $("modelDownloadFill");
   const pctEl = $("modelDownloadPct");
   const metaEl = $("modelDownloadMeta");
@@ -504,6 +505,11 @@ function paintModelDownloadJob(job) {
   const running = job.status === "running";
   const pct = Math.max(0, Math.min(100, Number(job.percent) || 0));
   if (msgEl) msgEl.textContent = job.message || "正在下载模型…";
+  if (commandEl) {
+    const command = (job.command || "").trim();
+    commandEl.textContent = command ? `$ ${command}` : "";
+    commandEl.classList.toggle("hidden", !command);
+  }
   if (fillEl) {
     fillEl.style.width = `${pct}%`;
     fillEl.classList.toggle("is-indeterminate", running && pct <= 1 && !(job.total_bytes > 0));
@@ -549,7 +555,11 @@ function startModelDownloadPoll() {
         stopModelDownloadPoll();
         await paintPeopleEngineStatus();
         if (job.status === "completed") {
-          showToast(job.message || "本地模型准备完成", "success");
+          showToast(
+            (job.message || "本地模型准备完成") +
+              (job.command || job.stage === "runtime" ? " 如刚安装了运行时，请重启应用后生效。" : ""),
+            "success"
+          );
         } else if (job.status === "error") {
           showToast("自动下载未完成，可按设置页指引手动下载放置", "warning");
         }
@@ -573,7 +583,7 @@ async function downloadFaceModels() {
     });
     const data = await api("/api/people/models/download", {
       method: "POST",
-      body: JSON.stringify({ model, include_pets: includePets }),
+      body: JSON.stringify({ model, include_pets: includePets, install_deps: true }),
     });
     const modal = $("modelDownloadModal");
     paintModelDownloadJob(data.job || { status: "running", percent: 0, message: `正在下载 ${model}…` });
@@ -640,6 +650,102 @@ async function reclusterPeopleFromSettings() {
   }
 }
 
+let ffmpegInstallPollTimer = null;
+
+function paintFfmpegInstallJob(job) {
+  const msgEl = $("ffmpegInstallMessage");
+  const cmdEl = $("ffmpegInstallCommand");
+  const fillEl = $("ffmpegInstallFill");
+  const metaEl = $("ffmpegInstallMeta");
+  const pctEl = $("ffmpegInstallPct");
+  const guideEl = $("ffmpegInstallGuide");
+  const cancelBtn = $("ffmpegInstallCancelBtn");
+  const closeBtn = $("ffmpegInstallCloseBtn");
+  if (!job) return;
+  const running = job.status === "running";
+  const pct = Math.max(0, Math.min(100, Number(job.percent) || 0));
+  if (msgEl) msgEl.textContent = job.message || "正在安装 FFmpeg…";
+  if (cmdEl) {
+    const command = (job.command || "").trim();
+    cmdEl.textContent = command ? `$ ${command}` : "";
+    cmdEl.classList.toggle("hidden", !command);
+  }
+  if (fillEl) {
+    fillEl.style.width = `${pct}%`;
+    fillEl.classList.toggle("is-indeterminate", running && pct <= 1);
+  }
+  if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
+  if (metaEl) metaEl.textContent = job.stage ? `阶段：${job.stage}` : running ? "正在处理…" : "";
+  if (guideEl) {
+    const notices = [job.error, job.guide].filter(Boolean);
+    guideEl.innerHTML = notices.map((n) => `<p>${escapeHtml(n).replace(/\n/g, "<br>")}</p>`).join("");
+    guideEl.classList.toggle("hidden", !notices.length);
+  }
+  if (cancelBtn) cancelBtn.classList.toggle("hidden", !running);
+  if (closeBtn) closeBtn.classList.toggle("hidden", running);
+}
+
+function stopFfmpegInstallPoll() {
+  if (ffmpegInstallPollTimer) {
+    clearInterval(ffmpegInstallPollTimer);
+    ffmpegInstallPollTimer = null;
+  }
+}
+
+async function pollFfmpegInstall() {
+  try {
+    const data = await api("/api/video/install/status");
+    const job = data.job || {};
+    paintFfmpegInstallJob(job);
+    if (job.status !== "running") {
+      stopFfmpegInstallPoll();
+      paintFfmpegStatus();
+      if (job.status === "completed") {
+        showToast("FFmpeg 已安装并可用。", "success");
+      } else if (job.status === "error") {
+        showToast("FFmpeg 自动安装未完成，请按弹窗指引手动安装。", "warning");
+      }
+    }
+  } catch (e) {
+    stopFfmpegInstallPoll();
+  }
+}
+
+async function installFfmpeg() {
+  const btn = $("installFfmpegBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api("/api/video/install", { method: "POST" });
+    const modal = $("ffmpegInstallModal");
+    paintFfmpegInstallJob(data.job || { status: "running", percent: 0, message: "正在准备安装…" });
+    if (modal) {
+      showModal(modal);
+      pushModal(modal);
+    }
+    stopFfmpegInstallPoll();
+    ffmpegInstallPollTimer = setInterval(pollFfmpegInstall, 500);
+  } catch (e) {
+    showToast("启动 FFmpeg 安装失败：" + e.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function cancelFfmpegInstall() {
+  try {
+    await api("/api/video/install/cancel", { method: "POST" });
+    showToast("正在取消 FFmpeg 安装…", "info");
+  } catch (e) {
+    showToast("取消失败：" + e.message, "error");
+  }
+}
+
+function closeFfmpegInstallModal() {
+  stopFfmpegInstallPoll();
+  closeModal("ffmpegInstallModal");
+  paintFfmpegStatus();
+}
+
 async function openSettings() {
   try {
     await loadPromptPresets();
@@ -672,7 +778,7 @@ async function openSettings() {
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
     if ($("setFootprintDefaultView")) setSelectValue($("setFootprintDefaultView"), cfg.footprint_default_view || "grid");
-    if ($("setMapTileProvider")) setSelectValue($("setMapTileProvider"), cfg.map_tile_provider || "carto");
+    if ($("setMapTileProvider")) setSelectValue($("setMapTileProvider"), ["amap", "osm", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap");
     if ($("setMapTileUrl")) $("setMapTileUrl").value = cfg.map_tile_url || "";
     if ($("setMapApiKey")) $("setMapApiKey").value = cfg.map_api_key || "";
     $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 3;
@@ -692,7 +798,7 @@ async function openSettings() {
     if ($("setFaceDetectPets")) $("setFaceDetectPets").checked = cfg.face_detect_pets !== false;
     if ($("setFaceModel")) setSelectValue($("setFaceModel"), cfg.face_model || "buffalo_l");
     if ($("setFaceMatchThreshold")) $("setFaceMatchThreshold").value = cfg.face_match_threshold ?? 0.4;
-    if ($("setFaceMinCluster")) $("setFaceMinCluster").value = cfg.face_min_cluster_size ?? 2;
+    if ($("setFaceMinCluster")) $("setFaceMinCluster").value = cfg.face_min_cluster_size ?? 5;
     if ($("setFaceModelsDir")) $("setFaceModelsDir").value = cfg.face_models_dir || "";
     state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
     state.videoPreviewMode = cfg.video_preview_mode || "once";
@@ -702,7 +808,7 @@ async function openSettings() {
     state.faceAutoScan = !!cfg.face_auto_scan;
     state.geocodingProvider = cfg.geocoding_provider || "nominatim";
     state.footprintDefaultView = cfg.footprint_default_view || "grid";
-    state.mapTileProvider = cfg.map_tile_provider || "carto";
+    state.mapTileProvider = ["amap", "osm", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
     state.mapTileUrl = cfg.map_tile_url || "";
     state.mapApiKey = cfg.map_api_key || "";
     paintFfmpegStatus();
@@ -738,7 +844,7 @@ async function saveSettings() {
     geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
     geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
     footprint_default_view: $("setFootprintDefaultView") ? $("setFootprintDefaultView").value : "grid",
-    map_tile_provider: $("setMapTileProvider") ? $("setMapTileProvider").value : "carto",
+    map_tile_provider: $("setMapTileProvider") ? $("setMapTileProvider").value : "amap",
     map_tile_url: $("setMapTileUrl") ? $("setMapTileUrl").value.trim() : "",
     map_api_key: $("setMapApiKey") ? $("setMapApiKey").value.trim() : "",
     video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 3,
@@ -758,7 +864,7 @@ async function saveSettings() {
     face_detect_pets: $("setFaceDetectPets") ? $("setFaceDetectPets").checked : true,
     face_model: $("setFaceModel") ? $("setFaceModel").value : "buffalo_l",
     face_match_threshold: parseFloat($("setFaceMatchThreshold") ? $("setFaceMatchThreshold").value : "0.4") || 0.4,
-    face_min_cluster_size: parseInt($("setFaceMinCluster") ? $("setFaceMinCluster").value : "2", 10) || 2,
+    face_min_cluster_size: parseInt($("setFaceMinCluster") ? $("setFaceMinCluster").value : "5", 10) || 5,
     face_models_dir: $("setFaceModelsDir") ? $("setFaceModelsDir").value.trim() : "",
   };
   try {
@@ -770,7 +876,7 @@ async function saveSettings() {
     state.faceAutoScan = !!payload.face_auto_scan;
     state.geocodingProvider = payload.geocoding_provider || "nominatim";
     state.footprintDefaultView = payload.footprint_default_view || "grid";
-    state.mapTileProvider = payload.map_tile_provider || "carto";
+    state.mapTileProvider = payload.map_tile_provider || "amap";
     state.mapTileUrl = payload.map_tile_url || "";
     state.mapApiKey = payload.map_api_key || "";
     if (typeof refreshFootprintsMapLayer === "function") {
@@ -1908,7 +2014,7 @@ async function loadPlaybackConfig() {
     state.faceAutoScan = !!cfg.face_auto_scan;
     state.geocodingProvider = cfg.geocoding_provider || "nominatim";
     state.footprintDefaultView = cfg.footprint_default_view || "grid";
-    state.mapTileProvider = cfg.map_tile_provider || "carto";
+    state.mapTileProvider = ["amap", "osm", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
     state.mapTileUrl = cfg.map_tile_url || "";
     state.mapApiKey = cfg.map_api_key || "";
   } catch (e) {

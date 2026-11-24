@@ -143,6 +143,27 @@ def register(app, cfg, database):
     # any hand-written byte-range code.
     # ------------------------------------------------------------------
 
+    @app.post("/api/video/install")
+    def api_video_install():
+        try:
+            job = video.FFMPEG_INSTALLER.start(cfg, database)
+            return jsonify({"ok": True, "job": job})
+        except Exception as exc:
+            return jsonify({"error": f"启动 ffmpeg 安装失败：{exc}"}), 500
+
+    @app.get("/api/video/install/status")
+    def api_video_install_status():
+        return jsonify({"job": video.FFMPEG_INSTALLER.status()})
+
+    @app.post("/api/video/install/cancel")
+    def api_video_install_cancel():
+        return jsonify(
+            {
+                "cancelled": video.FFMPEG_INSTALLER.cancel(),
+                "job": video.FFMPEG_INSTALLER.status(),
+            }
+        )
+
     @app.get("/api/video/status")
     def api_video_status():
         """Whether the video pipeline can run on this machine.
@@ -151,7 +172,7 @@ def register(app, cfg, database):
         user has to be told "not found" somewhere visible rather than discovering
         it when a card has no picture.
         """
-        available = video.tools_available(cfg.ffmpeg_path or None)
+        available = video.find_tools(cfg.ffmpeg_path or None, refresh=True) is not None
         return jsonify(
             {
                 "available": available,

@@ -76,6 +76,7 @@ PERSISTED_FIELDS = (
     "face_match_threshold",
     "face_min_cluster_size",
     "face_models_dir",
+    "ffmpeg_path",
 )
 
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
@@ -180,7 +181,7 @@ class Config:
         default_factory=lambda: os.getenv("PHOTO_FOOTPRINT_DEFAULT_VIEW", "grid")
     )
     map_tile_provider: str = field(
-        default_factory=lambda: os.getenv("PHOTO_MAP_TILE_PROVIDER", "carto")
+        default_factory=lambda: os.getenv("PHOTO_MAP_TILE_PROVIDER", "amap")
     )
     map_tile_url: str = field(
         default_factory=lambda: os.getenv("PHOTO_MAP_TILE_URL", "")
@@ -367,7 +368,7 @@ class Config:
         default_factory=lambda: float(os.getenv("PHOTO_FACE_MATCH_THRESHOLD", "0.40"))
     )
     face_min_cluster_size: int = field(
-        default_factory=lambda: int(os.getenv("PHOTO_FACE_MIN_CLUSTER_SIZE", "2"))
+        default_factory=lambda: int(os.getenv("PHOTO_FACE_MIN_CLUSTER_SIZE", "5"))
     )
     face_models_dir: str = field(
         default_factory=lambda: os.getenv("PHOTO_FACE_MODELS_DIR", "")
@@ -427,6 +428,7 @@ class Config:
             "face_match_threshold": self.face_match_threshold,
             "face_min_cluster_size": self.face_min_cluster_size,
             "face_models_dir": self.face_models_dir,
+            "ffmpeg_path": self.ffmpeg_path,
         }
 
 

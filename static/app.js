@@ -9,7 +9,7 @@ function init() {
   // Render embedded icons
   renderAllIcons();
 
-  setSelectValue($("statusFilter"), "analyzed");
+  setSelectValue($("statusFilter"), "all");
   $("folderInput").addEventListener("change", () => {
     const val = $("folderInput").value.trim();
     if (val) openAlbumFolder(val);
@@ -195,6 +195,13 @@ function init() {
     const photo = photoById(state.currentPreviewId);
     if (photo) playLiveMotion(photo, { loud: true });
   });
+  const previewExpandBtn = $("previewExpandBtn");
+  if (previewExpandBtn) {
+    previewExpandBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openFullscreenViewer();
+    });
+  }
 
   // Fullscreen Viewer Controls
   const fsCloseBtn = $("fsCloseBtn");
@@ -380,6 +387,11 @@ function init() {
     });
   });
   if ($("downloadFaceModelsBtn")) $("downloadFaceModelsBtn").addEventListener("click", downloadFaceModels);
+  if ($("installFfmpegBtn")) $("installFfmpegBtn").addEventListener("click", installFfmpeg);
+  if ($("refreshFfmpegBtn")) $("refreshFfmpegBtn").addEventListener("click", paintFfmpegStatus);
+  if ($("ffmpegInstallCancelBtn")) $("ffmpegInstallCancelBtn").addEventListener("click", cancelFfmpegInstall);
+  if ($("ffmpegInstallCloseBtn")) $("ffmpegInstallCloseBtn").addEventListener("click", closeFfmpegInstallModal);
+  if ($("ffmpegInstallXBtn")) $("ffmpegInstallXBtn").addEventListener("click", closeFfmpegInstallModal);
   if ($("refreshFaceStatusBtn")) $("refreshFaceStatusBtn").addEventListener("click", paintPeopleEngineStatus);
   if ($("reclusterPeopleBtn")) $("reclusterPeopleBtn").addEventListener("click", reclusterPeopleFromSettings);
   if ($("copyFaceModelsPathBtn")) $("copyFaceModelsPathBtn").addEventListener("click", copyFaceModelsPath);

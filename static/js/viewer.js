@@ -1150,8 +1150,6 @@ function updatePreview(options = {}) {
       </div>
     ` : ""}
 
-    ${previewPeopleHtml(photo)}
-
     ${specItems.length ? `
       <div class="specs-badge-grid">
         ${specItems.join("")}
@@ -1198,6 +1196,8 @@ function updatePreview(options = {}) {
         ${dimensionRows(photo.dimensions || {}, photo.score)}
       </div>
     </div>
+
+    ${previewPeopleHtml(photo)}
 
     ${photo.tags && photo.tags.length ? `
       <div class="meta-item-row" title="情感与场景标签">
