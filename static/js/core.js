@@ -474,17 +474,65 @@ function currentFilterValue(key) {
 function updateFilterHighlights() {
   let activeSecondary = 0;
   const secondaryKeys = new Set(["sort", "kind", "min_score", "tag", "year"]);
+  const chipLabels = {
+    sort: "排序",
+    kind: "类型",
+    min_score: "总分",
+    tag: "标签",
+    year: "年份",
+    search: "搜索",
+  };
+  const selectIds = {
+    sort: "sortFilter",
+    kind: "kindFilter",
+    min_score: "minScoreFilter",
+    tag: "tagFilter",
+    year: "yearFilter",
+  };
+  const activeChips = [];
+
   document.querySelectorAll("[data-filter-key]").forEach((group) => {
     const key = group.dataset.filterKey;
     const value = currentFilterValue(key);
     const isActive = value !== FILTER_DEFAULTS[key];
     group.classList.toggle("active-filter", isActive);
     if (isActive && secondaryKeys.has(key)) activeSecondary += 1;
+    if (isActive && chipLabels[key]) {
+      let display = value;
+      const selId = selectIds[key];
+      if (selId) {
+        const sel = $(selId);
+        const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+        if (opt && opt.textContent) display = opt.textContent.trim();
+      }
+      activeChips.push({ key, label: chipLabels[key], display });
+    }
   });
+
   const badge = $("filtersActiveBadge");
   if (badge) {
     badge.textContent = String(activeSecondary);
     badge.classList.toggle("hidden", activeSecondary === 0);
+  }
+
+  const bar = $("activeFiltersBar");
+  if (bar) {
+    if (!activeChips.length) {
+      bar.classList.add("hidden");
+      bar.innerHTML = "";
+    } else {
+      bar.innerHTML = activeChips
+        .map(
+          (c) =>
+            `<button type="button" class="filter-chip" data-clear-filter="${escapeHtml(c.key)}" title="移除「${escapeHtml(c.label)}」筛选">` +
+            `<span class="filter-chip-key">${escapeHtml(c.label)}</span>` +
+            `<span class="filter-chip-val">${escapeHtml(c.display)}</span>` +
+            `<span class="filter-chip-x" aria-hidden="true">×</span>` +
+            `</button>`
+        )
+        .join("");
+      bar.classList.remove("hidden");
+    }
   }
 }
 

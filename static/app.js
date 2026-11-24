@@ -67,6 +67,29 @@ function init() {
       filtersToggleBtn.setAttribute("aria-expanded", expanded ? "true" : "false");
     });
   }
+  const activeFiltersBar = $("activeFiltersBar");
+  if (activeFiltersBar) {
+    activeFiltersBar.addEventListener("click", (e) => {
+      const chip = e.target.closest("[data-clear-filter]");
+      if (!chip) return;
+      const key = chip.dataset.clearFilter;
+      const map = {
+        sort: "sortFilter",
+        kind: "kindFilter",
+        min_score: "minScoreFilter",
+        tag: "tagFilter",
+        year: "yearFilter",
+      };
+      if (key === "search") {
+        const input = $("searchInput");
+        if (input) input.value = "";
+      } else if (map[key]) {
+        setSelectValue($(map[key]), FILTER_DEFAULTS[key]);
+      }
+      updateFilterHighlights();
+      loadPhotos();
+    });
+  }
   if ($("emptyResetFiltersBtn")) {
     $("emptyResetFiltersBtn").addEventListener("click", resetFilters);
   }
@@ -224,11 +247,89 @@ function init() {
 
     fsContainer.addEventListener("dblclick", (e) => {
       if (state.fullscreen.scale > 1.1) {
-        resetFullscreenZoom();
+        resetFullscreenZoom(true);
       } else {
-        zoomFullscreen(2.0, e.clientX, e.clientY);
+        zoomFullscreen(2.0, e.clientX, e.clientY, true);
       }
     });
+
+    // Mobile touch gestures: swipe to navigate (1x), drag to pan (>1x), pinch to zoom
+    let touchMode = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let pinchStartDist = 0;
+    let pinchStartScale = 1;
+    const touchDist = (t1, t2) => Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+
+    fsContainer.addEventListener("touchstart", (e) => {
+      if (e.target.closest("button")) return;
+      resetFsIdleTimer();
+      if (e.touches.length === 2) {
+        touchMode = "pinch";
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]) || 1;
+        pinchStartScale = state.fullscreen.scale;
+      } else if (e.touches.length === 1) {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        if (state.fullscreen.scale > 1.05) {
+          touchMode = "pan";
+          state.fullscreen.isDragging = true;
+          state.fullscreen.startX = touchStartX - state.fullscreen.panX;
+          state.fullscreen.startY = touchStartY - state.fullscreen.panY;
+        } else {
+          touchMode = "swipe";
+        }
+      }
+    }, { passive: true });
+
+    fsContainer.addEventListener("touchmove", (e) => {
+      if (touchMode === "pinch" && e.touches.length === 2) {
+        e.preventDefault();
+        const dist = touchDist(e.touches[0], e.touches[1]);
+        const targetScale = Math.max(0.5, Math.min(6.0, pinchStartScale * (dist / pinchStartDist)));
+        const factor = targetScale / state.fullscreen.scale;
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        zoomFullscreen(factor, midX, midY, false);
+      } else if (touchMode === "pan" && e.touches.length === 1) {
+        e.preventDefault();
+        state.fullscreen.panX = e.touches[0].clientX - state.fullscreen.startX;
+        state.fullscreen.panY = e.touches[0].clientY - state.fullscreen.startY;
+        applyFsTransform(false);
+      }
+    }, { passive: false });
+
+    fsContainer.addEventListener("touchend", (e) => {
+      if (touchMode === "swipe" && e.changedTouches && e.changedTouches.length) {
+        const dx = e.changedTouches[0].clientX - touchStartX;
+        const dy = e.changedTouches[0].clientY - touchStartY;
+        if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+          navigateFullscreen(dx > 0 ? -1 : 1);
+        }
+      }
+      state.fullscreen.isDragging = false;
+      touchMode = null;
+    }, { passive: true });
+  }
+
+  // Lightbox photo stage horizontal touch swipe
+  const previewMediaCol = document.querySelector("#previewModal .preview-media-col");
+  if (previewMediaCol) {
+    let pTouchX = 0;
+    let pTouchY = 0;
+    previewMediaCol.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) return;
+      pTouchX = e.touches[0].clientX;
+      pTouchY = e.touches[0].clientY;
+    }, { passive: true });
+    previewMediaCol.addEventListener("touchend", (e) => {
+      if (!e.changedTouches || !e.changedTouches.length) return;
+      const dx = e.changedTouches[0].clientX - pTouchX;
+      const dy = e.changedTouches[0].clientY - pTouchY;
+      if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        navigatePreview(dx > 0 ? -1 : 1);
+      }
+    }, { passive: true });
   }
 
   $("dirGoBtn").addEventListener("click", () => loadDirList($("dirPathInput").value.trim()));

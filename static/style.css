@@ -11005,6 +11005,121 @@ body[data-theme="vintage"][data-density="wall"] .polaroid-card:has(.card-check i
   }
 }
 
+/* ==========================================================================
+   Round 3 P1: Active Filter Chips & Vintage CINE Video Card Distinction
+   ========================================================================== */
+
+.active-filters-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+
+.filter-chip:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.filter-chip:active {
+  transform: scale(0.95);
+}
+
+.filter-chip-key {
+  opacity: 0.72;
+  font-size: 11px;
+}
+
+.filter-chip-val {
+  font-weight: 600;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-chip-x {
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.78;
+  margin-left: 1px;
+}
+
+body[data-theme="paper"] .filter-chip {
+  border-radius: 3px;
+  background: #fffdf8;
+  border: 1px dashed #bfb39c;
+  color: #362e26;
+  box-shadow: 1.5px 1.5px 0 rgba(70, 55, 35, 0.1);
+}
+
+body[data-theme="paper"] .filter-chip:hover {
+  background: #362e26;
+  border-style: solid;
+  border-color: #362e26;
+  color: #fbf7ee;
+}
+
+body[data-theme="vintage"] .filter-chip {
+  border-radius: 2px;
+  background: rgba(235, 146, 52, 0.14);
+  border: 1px solid rgba(235, 146, 52, 0.42);
+  color: #f4b165;
+  font-family: var(--font-mono), var(--font-sans);
+}
+
+body[data-theme="vintage"] .filter-chip:hover {
+  background: #eb9234;
+  border-color: #eb9234;
+  color: #141210;
+}
+
+/* Vintage Analog Video Card: Subtle CINE Recording Indicator */
+body[data-theme="vintage"] .polaroid-card.is-video .polaroid-photo-frame::before {
+  content: "● CINE";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 4;
+  padding: 2px 7px;
+  border-radius: 2px;
+  background: rgba(14, 10, 7, 0.84);
+  border: 1px solid rgba(255, 106, 43, 0.42);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #ff6a2b;
+  text-shadow: 0 0 6px rgba(255, 92, 28, 0.55);
+  pointer-events: none;
+}
+
+body[data-theme="vintage"][data-density="wall"] .polaroid-card.is-video .polaroid-photo-frame::before {
+  display: none;
+}
+
 
 
 
