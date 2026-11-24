@@ -48,7 +48,6 @@
     local("LXGW WenKai"),
     local("霞鹜文楷轻便版"),
     local("霞鹜文楷"),
-    url("/static/fonts/lxgw-wenkai-lite-400.ttf") format("truetype"),
     url("/static/fonts/lxgw-wenkai-lite-400.woff2") format("woff2");
 }
 
