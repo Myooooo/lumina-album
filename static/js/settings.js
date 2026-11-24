@@ -318,7 +318,7 @@ async function deleteCustomPrompt() {
    Settings dialog: tabs
    ========================================================================== */
 
-const SETTINGS_TABS = ["model", "image", "video", "people", "geo", "data"];
+const SETTINGS_TABS = ["model", "image", "video", "people", "geo", "places", "data"];
 
 /** Slide the "ink" behind the active tab and show its pane. */
 function showSettingsTab(name, options = {}) {
@@ -410,53 +410,213 @@ async function paintFfmpegStatus() {
   }
 }
 
+let modelDownloadPollTimer = null;
+let lastPeopleEngineStatus = null;
+
+function formatDownloadSpeed(bps) {
+  const v = Number(bps) || 0;
+  if (v <= 0) return "";
+  if (v >= 1024 * 1024) return `${(v / (1024 * 1024)).toFixed(1)} MB/s`;
+  if (v >= 1024) return `${(v / 1024).toFixed(0)} KB/s`;
+  return `${Math.round(v)} B/s`;
+}
+
 async function paintPeopleEngineStatus() {
   const el = $("setPeopleEngineStatus");
+  const pillsEl = $("setPeopleStatusPills");
+  const pathEl = $("setFaceModelsResolvedPath");
+  const listEl = $("setFaceManualList");
   if (!el) return;
   el.classList.remove("ok", "bad");
   el.textContent = "正在检测本地识别引擎与硬件加速…";
   try {
     const data = await api("/api/people/status");
+    lastPeopleEngineStatus = data;
     const accel = data.accelerator || "CPU";
     const model = data.model || "buffalo_l";
-    const ready = Boolean(data.engine_ready);
+    const deps = data.deps || {};
+    const modelsInstalled = data.models_installed || {};
+    const ready = Boolean(data.ready || data.engine_ready);
+    const missingPkgs = Array.isArray(data.missing_packages)
+      ? data.missing_packages
+      : Object.entries(deps).filter(([, ok]) => !ok).map(([k]) => k);
+    const modelReady = Boolean(modelsInstalled[model]);
+
     if (ready) {
       el.classList.add("ok");
-      el.textContent = `本地引擎就绪 · 模型 ${model} · 硬件加速：${accel}`;
+      el.textContent = `本地识别引擎已就绪 · 当前模型 ${model} · 硬件加速：${accel}`;
     } else {
       el.classList.add("bad");
-      const missing = Array.isArray(data.missing_packages) && data.missing_packages.length
-        ? `缺少依赖：${data.missing_packages.join(", ")}`
-        : "尚未下载或初始化本地模型";
-      el.textContent = `${missing} · 检测到的加速设备：${accel}`;
+      const reasons = [];
+      if (missingPkgs.length) reasons.push(`缺少 Python 依赖（${missingPkgs.join(", ")}）`);
+      if (!modelReady) reasons.push(`未检测到 ${model} 本地模型文件`);
+      el.textContent = `${reasons.join("；") || "尚未就绪"} · 硬件加速：${accel}`;
+    }
+
+    if (pillsEl) {
+      const pill = (label, ok) =>
+        `<span class="engine-pill ${ok ? "is-ok" : "is-miss"}">${ok ? "✓" : "!"} ${escapeHtml(label)}</span>`;
+      pillsEl.innerHTML = [
+        pill(`加速：${accel}`, Boolean(deps.onnxruntime)),
+        pill(`buffalo_l`, Boolean(modelsInstalled.buffalo_l)),
+        pill(`buffalo_s`, Boolean(modelsInstalled.buffalo_s)),
+        pill(`宠物检测`, Boolean(modelsInstalled.pets)),
+        pill(`insightface`, Boolean(deps.insightface)),
+        pill(`onnxruntime`, Boolean(deps.onnxruntime)),
+      ].join("");
+    }
+
+    if (pathEl && data.models_dir) {
+      pathEl.textContent = data.models_dir;
+      pathEl.title = data.models_dir;
+    }
+    if (listEl && data.manual_paths && data.manual_urls) {
+      listEl.innerHTML = `
+        <li><strong>buffalo_l（默认高精度）</strong>：下载 <a href="${escapeHtml(data.manual_urls.buffalo_l)}" target="_blank" rel="noopener noreferrer">buffalo_l.zip</a> 并解压 <code>.onnx</code> 到 <code>${escapeHtml(data.manual_paths.buffalo_l)}</code></li>
+        <li><strong>buffalo_s（轻量版）</strong>：下载 <a href="${escapeHtml(data.manual_urls.buffalo_s)}" target="_blank" rel="noopener noreferrer">buffalo_s.zip</a> 并解压 <code>.onnx</code> 到 <code>${escapeHtml(data.manual_paths.buffalo_s)}</code></li>
+        <li><strong>宠物猫狗（可选）</strong>：将 <code>yolov8n.onnx</code> 放至 <code>${escapeHtml(data.manual_paths.pets)}</code></li>
+      `;
     }
   } catch (e) {
+    el.classList.add("bad");
     el.textContent = "无法检测本地人物识别引擎：" + e.message;
   }
+}
+
+function stopModelDownloadPoll() {
+  if (modelDownloadPollTimer) {
+    clearInterval(modelDownloadPollTimer);
+    modelDownloadPollTimer = null;
+  }
+}
+
+function paintModelDownloadJob(job) {
+  const msgEl = $("modelDownloadMessage");
+  const fillEl = $("modelDownloadFill");
+  const pctEl = $("modelDownloadPct");
+  const metaEl = $("modelDownloadMeta");
+  const warnEl = $("modelDownloadWarnings");
+  const cancelBtn = $("modelDownloadCancelBtn");
+  const closeBtn = $("modelDownloadCloseBtn");
+  if (!job) return;
+
+  const running = job.status === "running";
+  const pct = Math.max(0, Math.min(100, Number(job.percent) || 0));
+  if (msgEl) msgEl.textContent = job.message || "正在下载模型…";
+  if (fillEl) {
+    fillEl.style.width = `${pct}%`;
+    fillEl.classList.toggle("is-indeterminate", running && pct <= 1 && !(job.total_bytes > 0));
+  }
+  if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
+  if (metaEl) {
+    if (job.total_bytes > 0) {
+      const speed = formatDownloadSpeed(job.speed_bps);
+      metaEl.textContent = `${formatBytes(job.downloaded_bytes)} / ${formatBytes(job.total_bytes)}${speed ? ` · ${speed}` : ""}`;
+    } else if (job.downloaded_bytes > 0) {
+      const speed = formatDownloadSpeed(job.speed_bps);
+      metaEl.textContent = `已下载 ${formatBytes(job.downloaded_bytes)}${speed ? ` · ${speed}` : ""}`;
+    } else if (job.current_item) {
+      metaEl.textContent = job.current_item;
+    } else {
+      metaEl.textContent = running ? "正在处理…" : "";
+    }
+  }
+  if (warnEl) {
+    const notices = [];
+    if (job.error) notices.push(job.error);
+    if (Array.isArray(job.warnings)) notices.push(...job.warnings);
+    if (notices.length) {
+      warnEl.innerHTML = notices.map((n) => `<p>${escapeHtml(n)}</p>`).join("");
+      warnEl.classList.remove("hidden");
+    } else {
+      warnEl.classList.add("hidden");
+      warnEl.innerHTML = "";
+    }
+  }
+  if (cancelBtn) cancelBtn.classList.toggle("hidden", !running);
+  if (closeBtn) closeBtn.classList.toggle("hidden", running);
+}
+
+function startModelDownloadPoll() {
+  stopModelDownloadPoll();
+  modelDownloadPollTimer = setInterval(async () => {
+    try {
+      const data = await api("/api/people/models/download/status");
+      const job = data.job || {};
+      paintModelDownloadJob(job);
+      if (job.status !== "running") {
+        stopModelDownloadPoll();
+        await paintPeopleEngineStatus();
+        if (job.status === "completed") {
+          showToast(job.message || "本地模型准备完成", "success");
+        } else if (job.status === "error") {
+          showToast("自动下载未完成，可按设置页指引手动下载放置", "warning");
+        }
+      }
+    } catch (e) {
+      stopModelDownloadPoll();
+    }
+  }, 500);
 }
 
 async function downloadFaceModels() {
   const btn = $("downloadFaceModelsBtn");
   if (btn) btn.disabled = true;
-  showToast("正在检查并下载本地识别模型，请稍候…", "info");
   try {
+    const customDir = $("setFaceModelsDir") ? $("setFaceModelsDir").value.trim() : "";
     const model = $("setFaceModel") ? $("setFaceModel").value : "buffalo_l";
-    const detectPets = $("setFaceDetectPets") ? $("setFaceDetectPets").checked : true;
+    const includePets = $("setFaceDetectPets") ? $("setFaceDetectPets").checked : true;
+    await api("/api/config", {
+      method: "POST",
+      body: JSON.stringify({ face_model: model, face_detect_pets: includePets, face_models_dir: customDir }),
+    });
     const data = await api("/api/people/models/download", {
       method: "POST",
-      body: JSON.stringify({ model, detect_pets: detectPets }),
+      body: JSON.stringify({ model, include_pets: includePets }),
     });
-    if (data.ok) {
-      showToast(`本地模型（${model}）准备完成，加速设备：${data.accelerator || "CPU"}`, "success");
-    } else {
-      showToast(data.error || "模型下载未完成，请检查本地依赖与网络。", "warning");
+    const modal = $("modelDownloadModal");
+    paintModelDownloadJob(data.job || { status: "running", percent: 0, message: `正在下载 ${model}…` });
+    if (modal) {
+      showModal(modal);
+      pushModal(modal);
     }
-    await paintPeopleEngineStatus();
+    startModelDownloadPoll();
   } catch (e) {
-    showToast("下载本地模型失败：" + e.message, "error");
+    showToast("启动下载失败：" + e.message, "error");
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+async function cancelModelDownload() {
+  try {
+    await api("/api/people/models/download/cancel", { method: "POST" });
+    showToast("正在取消模型下载…", "info");
+  } catch (e) {
+    showToast("取消失败：" + e.message, "error");
+  }
+}
+
+function closeModelDownloadModal() {
+  stopModelDownloadPoll();
+  closeModal("modelDownloadModal");
+  paintPeopleEngineStatus();
+}
+
+async function copyFaceModelsPath() {
+  const path = (lastPeopleEngineStatus && lastPeopleEngineStatus.models_dir) || ($("setFaceModelsResolvedPath") && $("setFaceModelsResolvedPath").textContent) || "";
+  if (!path || path === "检测中…") return;
+  const ok = await copyText(path);
+  showToast(ok ? `已复制模型目录路径：${path}` : "复制失败，请手动复制", ok ? "success" : "error");
+}
+
+async function openFaceModelsDir() {
+  const path = (lastPeopleEngineStatus && lastPeopleEngineStatus.models_dir) || "";
+  if (!path) {
+    showToast("尚未获取到模型目录路径", "warning");
+    return;
+  }
+  await openFolderByPath(path);
 }
 
 async function reclusterPeopleFromSettings() {

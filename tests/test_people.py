@@ -189,5 +189,37 @@ class PeopleAndPetsTest(unittest.TestCase):
                     pass
 
 
+    def test_manual_model_layout_detection_and_zip_extract(self) -> None:
+        import zipfile
+        from photo_reviewer.faces import (
+            _extract_insightface_zip,
+            engine_status,
+            has_insightface_model,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = _DummyConfig(tmp)
+            # Manual placement directly under <models_dir>/buffalo_l/*.onnx should be detected.
+            manual_dir = Path(tmp) / "models" / "buffalo_l"
+            manual_dir.mkdir(parents=True, exist_ok=True)
+            (manual_dir / "w600k_r50.onnx").write_bytes(b"fake-onnx")
+            self.assertTrue(has_insightface_model(cfg, "buffalo_l"))
+
+            st = engine_status(cfg)
+            self.assertTrue(st["models_installed"]["buffalo_l"])
+            self.assertIn("buffalo_l", st["manual_paths"])
+            self.assertIn("buffalo_l", st["manual_urls"])
+
+            # Zip extraction flattens nested folder into target_dir/*.onnx.
+            zpath = Path(tmp) / "buffalo_s.zip"
+            with zipfile.ZipFile(zpath, "w") as zf:
+                zf.writestr("buffalo_s/det_500m.onnx", b"onnx-det")
+                zf.writestr("buffalo_s/w600k_mbf.onnx", b"onnx-rec")
+            target = Path(tmp) / "models" / "models" / "buffalo_s"
+            _extract_insightface_zip(zpath, target)
+            self.assertTrue((target / "det_500m.onnx").is_file())
+            self.assertTrue((target / "w600k_mbf.onnx").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

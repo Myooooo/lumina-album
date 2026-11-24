@@ -374,7 +374,13 @@ function init() {
     });
   });
   if ($("downloadFaceModelsBtn")) $("downloadFaceModelsBtn").addEventListener("click", downloadFaceModels);
+  if ($("refreshFaceStatusBtn")) $("refreshFaceStatusBtn").addEventListener("click", paintPeopleEngineStatus);
   if ($("reclusterPeopleBtn")) $("reclusterPeopleBtn").addEventListener("click", reclusterPeopleFromSettings);
+  if ($("copyFaceModelsPathBtn")) $("copyFaceModelsPathBtn").addEventListener("click", copyFaceModelsPath);
+  if ($("openFaceModelsDirBtn")) $("openFaceModelsDirBtn").addEventListener("click", openFaceModelsDir);
+  if ($("modelDownloadCancelBtn")) $("modelDownloadCancelBtn").addEventListener("click", cancelModelDownload);
+  if ($("modelDownloadCloseBtn")) $("modelDownloadCloseBtn").addEventListener("click", closeModelDownloadModal);
+  if ($("modelDownloadXBtn")) $("modelDownloadXBtn").addEventListener("click", closeModelDownloadModal);
   $("cleanCacheBtn").addEventListener("click", cleanCache);
   $("hideFolderBtn").addEventListener("click", hideCurrentFolder);
   $("viewHiddenFoldersBtn").addEventListener("click", openHiddenFolders);

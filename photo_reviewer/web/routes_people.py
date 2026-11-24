@@ -12,9 +12,9 @@ from flask import jsonify, request, send_file
 
 from ..faces import (
     FACE_MODELS,
+    MODEL_DOWNLOADER,
     SCAN_COORDINATOR,
     crop_entity_thumbnail,
-    download_local_models,
     engine_status,
     face_thumbs_dir,
     match_and_cluster_library,
@@ -30,6 +30,7 @@ def register(app, cfg, database):
     def api_people_status():
         st = engine_status(cfg)
         st["job"] = SCAN_COORDINATOR.status()
+        st["download_job"] = MODEL_DOWNLOADER.status()
         return jsonify(st)
 
     @app.post("/api/people/scan")
@@ -42,7 +43,7 @@ def register(app, cfg, database):
             return (
                 jsonify(
                     {
-                        "error": "本地人物/宠物模型尚未就绪，请先在「设置 → 人物与宠物」中安装依赖或下载本地模型。",
+                        "error": "本地人物/宠物模型尚未就绪，请先在「设置 → 人物」中检查依赖或下载本地模型。",
                         "status": st,
                     }
                 ),
@@ -67,12 +68,22 @@ def register(app, cfg, database):
         model_name = str(data.get("model") or cfg.face_model or "buffalo_l").strip()
         if model_name not in FACE_MODELS:
             return jsonify({"error": "不支持的模型选项"}), 400
-        include_pets = bool(data.get("include_pets", cfg.face_detect_pets))
+        raw_pets = data.get("include_pets", data.get("detect_pets", cfg.face_detect_pets))
+        include_pets = bool(raw_pets)
         try:
-            result = download_local_models(cfg, model_name=model_name, include_pets=include_pets)
-            return jsonify({"ok": True, **result})
+            job = MODEL_DOWNLOADER.start(cfg, model_name=model_name, include_pets=include_pets)
+            return jsonify({"ok": True, "job": job, "status": engine_status(cfg)})
         except Exception as exc:
-            return jsonify({"error": f"下载模型失败：{exc}"}), 502
+            return jsonify({"error": f"启动模型下载失败：{exc}"}), 500
+
+    @app.get("/api/people/models/download/status")
+    def api_people_download_status():
+        return jsonify({"job": MODEL_DOWNLOADER.status(), "status": engine_status(cfg)})
+
+    @app.post("/api/people/models/download/cancel")
+    def api_people_download_cancel():
+        cancelled = MODEL_DOWNLOADER.cancel()
+        return jsonify({"cancelled": cancelled, "job": MODEL_DOWNLOADER.status()})
 
     @app.get("/api/people")
     def api_list_people():

@@ -20,13 +20,20 @@ import logging
 import math
 import os
 import platform
+import shutil
 import struct
 import threading
+import time
 import urllib.request
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+try:
+    import requests  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    requests = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -299,8 +306,8 @@ def cluster_embeddings_dbscan(
 def models_root(cfg) -> Path:
     custom = str(getattr(cfg, "face_models_dir", "") or "").strip()
     if custom:
-        return Path(custom).expanduser()
-    return Path(cfg.data_dir) / "models"
+        return Path(custom).expanduser().resolve()
+    return (Path(cfg.data_dir) / "models").resolve()
 
 
 def face_thumbs_dir(cfg) -> Path:
@@ -309,15 +316,53 @@ def face_thumbs_dir(cfg) -> Path:
     return d
 
 
-def has_insightface_model(cfg, model_name: str) -> bool:
-    root = models_root(cfg) / "models" / model_name
-    if not root.is_dir():
+def _find_insightface_model_dir(cfg, model_name: str) -> Path | None:
+    """Locate an installed InsightFace pack, tolerating manual zip layouts."""
+    root = models_root(cfg)
+    candidates = (
+        root / "models" / model_name,
+        root / "models" / model_name / model_name,
+        root / model_name,
+        root / model_name / model_name,
+    )
+    for cand in candidates:
+        if cand.is_dir() and any(cand.glob("*.onnx")):
+            return cand
+    return None
+
+
+def _normalize_insightface_layout(cfg, model_name: str) -> bool:
+    """Ensure ONNX files sit in ``<models_dir>/models/<model_name>/`` for InsightFace."""
+    target = models_root(cfg) / "models" / model_name
+    if target.is_dir() and any(target.glob("*.onnx")):
+        return True
+    found = _find_insightface_model_dir(cfg, model_name)
+    if found is None:
         return False
-    return any(root.glob("*.onnx"))
+    if found.resolve() == target.resolve():
+        return True
+    target.mkdir(parents=True, exist_ok=True)
+    for onnx_file in found.glob("*.onnx"):
+        dest = target / onnx_file.name
+        if not dest.exists():
+            shutil.copy2(onnx_file, dest)
+    return any(target.glob("*.onnx"))
+
+
+def has_insightface_model(cfg, model_name: str) -> bool:
+    return _find_insightface_model_dir(cfg, model_name) is not None
+
+
+def _find_pet_model_path(cfg) -> Path | None:
+    root = models_root(cfg)
+    for cand in (root / PET_DETECTOR_FILENAME, root / "models" / PET_DETECTOR_FILENAME):
+        if cand.is_file() and cand.stat().st_size > 0:
+            return cand
+    return None
 
 
 def has_pet_model(cfg) -> bool:
-    return (models_root(cfg) / PET_DETECTOR_FILENAME).is_file()
+    return _find_pet_model_path(cfg) is not None
 
 
 def engine_status(cfg) -> dict[str, Any]:
@@ -337,43 +382,311 @@ def engine_status(cfg) -> dict[str, Any]:
     ort_available = ort is not None
     numpy_available = np is not None
     pillow_available = Image is not None
+    deps = {
+        "onnxruntime": ort_available,
+        "numpy": numpy_available,
+        "insightface": has_insightface_pkg,
+        "pillow": pillow_available,
+    }
+    missing_packages = [k for k, ok in deps.items() if not ok]
+    models_installed = {
+        "buffalo_l": has_insightface_model(cfg, "buffalo_l"),
+        "buffalo_s": has_insightface_model(cfg, "buffalo_s"),
+        "pets": has_pet_model(cfg),
+    }
     face_ready = (
         ort_available
         and numpy_available
         and pillow_available
         and has_insightface_pkg
-        and has_insightface_model(cfg, model_name)
+        and models_installed.get(model_name, False)
     )
     pet_ready = (
         ort_available
         and numpy_available
         and pillow_available
-        and has_pet_model(cfg)
+        and models_installed["pets"]
     )
+    root = models_root(cfg)
     return {
         "enabled": bool(getattr(cfg, "face_recognition_enabled", True)),
         "auto_scan": bool(getattr(cfg, "face_auto_scan", True)),
         "model": model_name,
         "detect_pets": bool(getattr(cfg, "face_detect_pets", True)),
-        "models_dir": str(models_root(cfg)),
+        "models_dir": str(root),
+        "manual_paths": {
+            "buffalo_l": str(root / "models" / "buffalo_l"),
+            "buffalo_s": str(root / "models" / "buffalo_s"),
+            "pets": str(root / PET_DETECTOR_FILENAME),
+        },
+        "manual_urls": {
+            "buffalo_l": INSIGHTFACE_MODEL_URLS["buffalo_l"],
+            "buffalo_s": INSIGHTFACE_MODEL_URLS["buffalo_s"],
+        },
         "platform": platform.system(),
         "accelerator": active_accelerator_label(providers),
         "providers": [p[0] if isinstance(p, tuple) else p for p in providers],
-        "deps": {
-            "onnxruntime": ort_available,
-            "numpy": numpy_available,
-            "insightface": has_insightface_pkg,
-            "pillow": pillow_available,
-        },
-        "models_installed": {
-            "buffalo_l": has_insightface_model(cfg, "buffalo_l"),
-            "buffalo_s": has_insightface_model(cfg, "buffalo_s"),
-            "pets": has_pet_model(cfg),
-        },
+        "deps": deps,
+        "missing_packages": missing_packages,
+        "models_installed": models_installed,
         "face_ready": face_ready,
         "pet_ready": pet_ready,
         "ready": face_ready or (bool(getattr(cfg, "face_detect_pets", True)) and pet_ready),
+        "engine_ready": face_ready or (bool(getattr(cfg, "face_detect_pets", True)) and pet_ready),
     }
+
+
+def _extract_insightface_zip(zip_path: Path, target_dir: Path) -> None:
+    """Extract a buffalo_l/buffalo_s zip so all .onnx files land directly in target_dir."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        for member in zf.infolist():
+            if member.is_dir():
+                continue
+            fname = Path(member.filename).name
+            if not fname or fname.startswith(".") or "__MACOSX" in member.filename:
+                continue
+            if not fname.lower().endswith(".onnx"):
+                continue
+            dest = target_dir / fname
+            with zf.open(member, "r") as src, open(dest, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
+def _stream_download_file(
+    url: str,
+    dest_path: Path,
+    on_progress=None,
+    cancel_event: threading.Event | None = None,
+) -> None:
+    """Download ``url`` to ``dest_path`` in chunks with progress & cancel support."""
+    part_path = dest_path.with_suffix(dest_path.suffix + ".part")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    headers = {"User-Agent": "Lumina-Album/1.0"}
+    downloaded = 0
+    total = 0
+    started = time.monotonic()
+
+    try:
+        if requests is not None:
+            with requests.get(url, stream=True, timeout=(15, 60), headers=headers) as resp:
+                resp.raise_for_status()
+                raw_len = resp.headers.get("Content-Length")
+                total = int(raw_len) if raw_len and raw_len.isdigit() else 0
+                if on_progress:
+                    on_progress(0, total, 0.0)
+                with open(part_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise InterruptedError("已取消下载")
+                        if not chunk:
+                            continue
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        elapsed = max(0.05, time.monotonic() - started)
+                        if on_progress:
+                            on_progress(downloaded, total, downloaded / elapsed)
+        else:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw_len = resp.headers.get("Content-Length")
+                total = int(raw_len) if raw_len and raw_len.isdigit() else 0
+                if on_progress:
+                    on_progress(0, total, 0.0)
+                with open(part_path, "wb") as f:
+                    while True:
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise InterruptedError("已取消下载")
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        elapsed = max(0.05, time.monotonic() - started)
+                        if on_progress:
+                            on_progress(downloaded, total, downloaded / elapsed)
+        os.replace(part_path, dest_path)
+    except Exception:
+        if part_path.exists():
+            part_path.unlink(missing_ok=True)
+        raise
+
+
+def _try_prepare_pet_model(root: Path) -> str | None:
+    """Try to export yolov8n.onnx via ultralytics if installed; return warning if unavailable."""
+    dest = root / PET_DETECTOR_FILENAME
+    if dest.is_file() and dest.stat().st_size > 0:
+        return None
+    try:
+        from ultralytics import YOLO  # type: ignore
+
+        tmp_pt = root / "yolov8n.pt"
+        model = YOLO(str(tmp_pt) if tmp_pt.is_file() else "yolov8n.pt")
+        exported = model.export(format="onnx", imgsz=640, simplify=False)
+        if exported and os.path.isfile(str(exported)):
+            shutil.move(str(exported), str(dest))
+            return None
+    except ImportError:
+        return (
+            "宠物猫狗检测模型（yolov8n.onnx）为可选项：如需识别宠物，"
+            "请安装 ultralytics 或手动将 yolov8n.onnx 放入模型目录。"
+        )
+    except Exception as exc:
+        return f"宠物检测模型自动准备未完成（不影响人脸识别）：{exc}"
+    return "宠物检测模型尚未就绪，可手动放入 yolov8n.onnx。"
+
+
+@dataclass
+class ModelDownloadJob:
+    status: str = "idle"  # idle | running | completed | cancelled | error
+    model: str = "buffalo_l"
+    include_pets: bool = True
+    stage: str = "idle"  # idle | downloading | extracting | pets | done
+    current_item: str = ""
+    downloaded_bytes: int = 0
+    total_bytes: int = 0
+    percent: float = 0.0
+    speed_bps: float = 0.0
+    message: str = ""
+    error: str = ""
+    warnings: list[str] = field(default_factory=list)
+    downloaded: list[str] = field(default_factory=list)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "model": self.model,
+            "include_pets": self.include_pets,
+            "stage": self.stage,
+            "current_item": self.current_item,
+            "downloaded_bytes": self.downloaded_bytes,
+            "total_bytes": self.total_bytes,
+            "percent": round(self.percent, 1),
+            "speed_bps": round(self.speed_bps, 1),
+            "message": self.message,
+            "error": self.error,
+            "warnings": list(self.warnings),
+            "downloaded": list(self.downloaded),
+        }
+
+
+class ModelDownloadCoordinator:
+    """Background streaming downloader with live progress for local face/pet models."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._job = ModelDownloadJob()
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return self._job.to_dict()
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self._job.status == "running":
+                self._job.cancel_event.set()
+                return True
+            return False
+
+    def start(
+        self,
+        cfg,
+        model_name: str = "buffalo_l",
+        include_pets: bool = True,
+    ) -> dict[str, Any]:
+        if model_name not in FACE_MODELS:
+            raise ValueError(f"不支持的模型名称：{model_name}")
+        with self._lock:
+            if self._job.status == "running":
+                return self._job.to_dict()
+            job = ModelDownloadJob(
+                status="running",
+                model=model_name,
+                include_pets=bool(include_pets),
+                stage="downloading",
+                current_item=f"{model_name}.zip",
+                message=f"正在准备下载 {model_name} 模型…",
+            )
+            self._job = job
+
+        def _worker():
+            try:
+                root = models_root(cfg)
+                root.mkdir(parents=True, exist_ok=True)
+
+                if not has_insightface_model(cfg, model_name):
+                    zip_path = root / f"{model_name}.zip"
+                    target_dir = root / "models" / model_name
+                    url = INSIGHTFACE_MODEL_URLS[model_name]
+                    job.stage = "downloading"
+                    job.current_item = f"{model_name}.zip"
+                    job.message = f"正在下载 {model_name}.zip…"
+
+                    def _on_prog(done_b: int, total_b: int, speed: float):
+                        job.downloaded_bytes = done_b
+                        job.total_bytes = total_b
+                        job.speed_bps = speed
+                        if total_b > 0:
+                            job.percent = min(92.0, (done_b / total_b) * 92.0)
+
+                    _stream_download_file(
+                        url,
+                        zip_path,
+                        on_progress=_on_prog,
+                        cancel_event=job.cancel_event,
+                    )
+                    job.stage = "extracting"
+                    job.percent = 94.0
+                    job.message = f"下载完成，正在解压 {model_name} 模型…"
+                    try:
+                        _extract_insightface_zip(zip_path, target_dir)
+                    finally:
+                        if zip_path.exists():
+                            zip_path.unlink(missing_ok=True)
+                    if not has_insightface_model(cfg, model_name):
+                        raise RuntimeError(f"解压 {model_name}.zip 后未找到 .onnx 模型文件")
+                    job.downloaded.append(model_name)
+                else:
+                    _normalize_insightface_layout(cfg, model_name)
+                    job.percent = 92.0
+                    job.message = f"{model_name} 模型已存在于本地"
+
+                if include_pets and not has_pet_model(cfg):
+                    if job.cancel_event.is_set():
+                        raise InterruptedError("已取消下载")
+                    job.stage = "pets"
+                    job.percent = 96.0
+                    job.current_item = PET_DETECTOR_FILENAME
+                    job.message = "正在检查宠物猫狗检测模型…"
+                    warn = _try_prepare_pet_model(root)
+                    if warn:
+                        job.warnings.append(warn)
+                    else:
+                        job.downloaded.append("pets")
+
+                job.stage = "done"
+                job.percent = 100.0
+                job.status = "completed"
+                if job.downloaded:
+                    job.message = f"本地模型准备完成：{', '.join(job.downloaded)}"
+                else:
+                    job.message = f"本地模型（{model_name}）已就绪，无需重复下载"
+            except InterruptedError:
+                job.status = "cancelled"
+                job.message = "已取消模型下载"
+            except Exception as exc:
+                logger.warning("model download failed: %s", exc, exc_info=True)
+                job.status = "error"
+                job.error = str(exc)
+                job.message = f"下载失败：{exc}（可按设置页指引手动下载并放到模型目录）"
+
+        t = threading.Thread(target=_worker, name="lumina-model-download", daemon=True)
+        t.start()
+        return job.to_dict()
+
+
+MODEL_DOWNLOADER = ModelDownloadCoordinator()
 
 
 def download_local_models(
@@ -387,29 +700,31 @@ def download_local_models(
     root = models_root(cfg)
     root.mkdir(parents=True, exist_ok=True)
     downloaded: list[str] = []
+    warnings: list[str] = []
 
     if not has_insightface_model(cfg, model_name):
         zip_path = root / f"{model_name}.zip"
-        models_sub = root / "models"
-        models_sub.mkdir(parents=True, exist_ok=True)
+        target_dir = root / "models" / model_name
         url = INSIGHTFACE_MODEL_URLS[model_name]
         logger.info("downloading %s from %s", model_name, url)
-        urllib.request.urlretrieve(url, zip_path)
+        _stream_download_file(url, zip_path)
         try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(models_sub)
+            _extract_insightface_zip(zip_path, target_dir)
         finally:
             if zip_path.exists():
                 zip_path.unlink(missing_ok=True)
         downloaded.append(model_name)
+    else:
+        _normalize_insightface_layout(cfg, model_name)
 
     if include_pets and not has_pet_model(cfg):
-        pet_path = root / PET_DETECTOR_FILENAME
-        logger.info("downloading pet detector from %s", PET_DETECTOR_URL)
-        urllib.request.urlretrieve(PET_DETECTOR_URL, pet_path)
-        downloaded.append("pets")
+        warn = _try_prepare_pet_model(root)
+        if warn:
+            warnings.append(warn)
+        else:
+            downloaded.append("pets")
 
-    return {"downloaded": downloaded, "status": engine_status(cfg)}
+    return {"downloaded": downloaded, "warnings": warnings, "status": engine_status(cfg)}
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +856,7 @@ class LocalFacePetEngine:
                 return self._face_app
             if ort is None or np is None:
                 return None
-            if not has_insightface_model(cfg, model_name):
+            if not _normalize_insightface_layout(cfg, model_name):
                 return None
             try:
                 from insightface.app import FaceAnalysis  # type: ignore
@@ -563,8 +878,8 @@ class LocalFacePetEngine:
     def _ensure_pet_session(self, cfg) -> Any:
         if not getattr(cfg, "face_detect_pets", True):
             return None
-        pet_path = models_root(cfg) / PET_DETECTOR_FILENAME
-        if not pet_path.is_file() or ort is None or np is None:
+        pet_path = _find_pet_model_path(cfg)
+        if pet_path is None or ort is None or np is None:
             return None
         with self._lock:
             if self._pet_session is not None and self._pet_model_path == str(pet_path):

@@ -32,17 +32,31 @@ function personDisplayName(person) {
 }
 
 function renderPeopleScanStatus(job) {
-  const pill = $("peopleScanStatus");
-  const textEl = $("peopleScanStatusText");
+  const bar = $("peopleScanProgress");
+  const textEl = $("peopleScanProgressText");
+  const pctEl = $("peopleScanProgressPct");
+  const fillEl = $("peopleScanProgressFill");
   const scanBtn = $("peopleScanBtn");
-  if (!pill || !textEl) return;
-  const running = job && job.status === "running";
-  pill.classList.toggle("hidden", !running);
+  if (!bar || !textEl) return;
+  const running = Boolean(job && job.status === "running");
+  bar.classList.toggle("hidden", !running);
   if (running) {
-    textEl.textContent = job.message || `已扫描 ${job.done || 0} / ${job.total || 0}…`;
+    const total = Number(job.total) || 0;
+    const done = Number(job.done) || 0;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const foundParts = [];
+    if (job.faces_found) foundParts.push(`${job.faces_found} 人脸`);
+    if (job.pets_found) foundParts.push(`${job.pets_found} 宠物`);
+    const suffix = foundParts.length ? ` · 已发现 ${foundParts.join(" / ")}` : "";
+    textEl.textContent = (job.message || (total > 0 ? `正在扫描 ${done} / ${total} 张照片…` : "正在准备识别人物与宠物…")) + suffix;
+    if (pctEl) pctEl.textContent = total > 0 ? `${pct}% · ${done}/${total}` : "准备中";
+    if (fillEl) {
+      fillEl.style.width = total > 0 ? `${pct}%` : "18%";
+      fillEl.classList.toggle("is-indeterminate", total === 0);
+    }
   }
   if (scanBtn) {
-    scanBtn.disabled = !!running;
+    scanBtn.disabled = running;
   }
 }
 
@@ -79,7 +93,7 @@ function startPeoplePoll() {
     } catch (e) {
       stopPeoplePoll();
     }
-  }, 1500);
+  }, 800);
 }
 
 async function startPeopleScan(force = false) {

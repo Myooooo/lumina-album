@@ -1646,12 +1646,13 @@ section("hidden albums");
   const html = fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
 
-  const cacheAt = html.indexOf(">清理缓存<");
   const hideAt = html.indexOf(">隐藏当前目录<");
   const removeAt = html.indexOf(">移除当前目录<");
+  const themeAt = html.indexOf('id="settingsThemePicker"');
+  const cacheAt = html.indexOf(">清理缓存<");
   check(
-    "data management runs cache → hide → remove",
-    cacheAt > -1 && cacheAt < hideAt && hideAt < removeAt,
+    "places tab runs hide → remove and data tab puts theme picker above cache",
+    hideAt > -1 && hideAt < removeAt && themeAt > -1 && themeAt < cacheAt,
     true
   );
   check(
@@ -1858,6 +1859,22 @@ section("people & pets (人物与宠物)");
     /face_model:/.test(src) &&
       /face_detect_pets:/.test(src) &&
       /paintPeopleEngineStatus\(\)/.test(src),
+    true
+  );
+  check(
+    "settings topbar has the seven redesigned tabs in order",
+    /tabBtnModel[\s\S]{0,360}tabBtnImage[\s\S]{0,360}tabBtnVideo[\s\S]{0,360}tabBtnPeople[\s\S]{0,360}tabBtnGeo[\s\S]{0,360}tabBtnPlaces[\s\S]{0,360}tabBtnData/.test(
+      html
+    ),
+    true
+  );
+  check(
+    "model download modal, manual download guide, and people scan progress bar exist",
+    /id="modelDownloadModal"/.test(html) &&
+      /id="modelDownloadFill"/.test(html) &&
+      /id="setFaceManualGuide"/.test(html) &&
+      /id="peopleScanProgress"/.test(html) &&
+      /id="peopleScanProgressFill"/.test(html),
     true
   );
 }

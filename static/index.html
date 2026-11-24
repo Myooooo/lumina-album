@@ -362,11 +362,14 @@
           <button type="button" class="people-kind-pill" data-people-kind="person"><span class="btn-icon" data-icon="people"></span>人物</button>
           <button type="button" class="people-kind-pill" data-people-kind="pet"><span class="btn-icon" data-icon="paw"></span>宠物猫狗</button>
         </div>
-        <div id="peopleScanStatus" class="people-scan-status hidden">
-          <span class="preview-rendering-ring" aria-hidden="true"></span>
-          <span id="peopleScanStatusText">正在扫描…</span>
-          <button id="peopleCancelScanBtn" class="btn small" type="button">取消</button>
+      </div>
+      <div id="peopleScanProgress" class="scan-progress people-scan-progress hidden" role="status" aria-live="polite">
+        <div class="progress-text">
+          <span id="peopleScanProgressText">正在识别人物与宠物…</span>
+          <span id="peopleScanProgressPct" class="progress-eta">0%</span>
         </div>
+        <div class="progress-bar"><div id="peopleScanProgressFill" class="progress-fill"></div></div>
+        <button id="peopleCancelScanBtn" class="btn small" type="button"><span class="btn-icon" data-icon="close"></span>取消</button>
       </div>
       <div id="peopleDetailBar" class="people-detail-bar hidden"></div>
       <div id="peoplePendingBanner" class="people-pending-banner hidden"></div>
@@ -555,49 +558,69 @@
         <span class="settings-tab-ink" id="settingsTabInk" aria-hidden="true"></span>
         <button class="settings-tab active" role="tab" data-tab="model" id="tabBtnModel"
                 aria-selected="true" aria-controls="tabModel">
-          <span class="btn-icon" data-icon="sparkles"></span><span class="tab-label">大模型</span>
+          <span class="btn-icon" data-icon="sparkles"></span><span class="tab-label">模型</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="image" id="tabBtnImage"
                 aria-selected="false" aria-controls="tabImage" tabindex="-1">
-          <span class="btn-icon" data-icon="imageSize"></span><span class="tab-label">照片处理</span>
+          <span class="btn-icon" data-icon="imageSize"></span><span class="tab-label">图片</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="video" id="tabBtnVideo"
                 aria-selected="false" aria-controls="tabVideo" tabindex="-1">
-          <span class="btn-icon" data-icon="video"></span><span class="tab-label">视频处理</span>
+          <span class="btn-icon" data-icon="video"></span><span class="tab-label">视频</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="people" id="tabBtnPeople"
                 aria-selected="false" aria-controls="tabPeople" tabindex="-1">
-          <span class="btn-icon" data-icon="people"></span><span class="tab-label">人物与宠物</span>
+          <span class="btn-icon" data-icon="people"></span><span class="tab-label">人物</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="geo" id="tabBtnGeo"
                 aria-selected="false" aria-controls="tabGeo" tabindex="-1">
-          <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地理编码</span>
+          <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地理</span>
+        </button>
+        <button class="settings-tab" role="tab" data-tab="places" id="tabBtnPlaces"
+                aria-selected="false" aria-controls="tabPlaces" tabindex="-1">
+          <span class="btn-icon" data-icon="folder"></span><span class="tab-label">地点</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="data" id="tabBtnData"
                 aria-selected="false" aria-controls="tabData" tabindex="-1">
-          <span class="btn-icon" data-icon="archive"></span><span class="tab-label">数据管理</span>
+          <span class="btn-icon" data-icon="archive"></span><span class="tab-label">数据</span>
         </button>
       </div>
 
       <div class="settings-panes" id="settingsPanes">
 
+        <!-- 1. 模型 -->
         <section class="settings-pane active" id="tabModel" role="tabpanel"
                  aria-labelledby="tabBtnModel" data-pane="model">
-          <div class="form-grid">
-            <label>API Base URL
-              <input id="setApiBase" type="text" placeholder="http://localhost:1234/v1 或 Ollama 地址" />
-            </label>
-            <label>API Key
-              <input id="setApiKey" type="password" placeholder="not-needed" />
-            </label>
-            <label class="full-row">多模态模型名称
-              <input id="setModel" type="text" placeholder="例如：llava, qwen-vl, local-model" />
-            </label>
-            <div class="full-row prompt-editor">
+          <div class="settings-section">
+            <h3 class="settings-section-title">接口与模型</h3>
+            <div class="form-grid">
+              <label>API Base URL
+                <input id="setApiBase" type="text" placeholder="http://localhost:1234/v1 或 Ollama 地址" />
+              </label>
+              <label>API Key
+                <input id="setApiKey" type="password" placeholder="not-needed" />
+              </label>
+              <label class="full-row">多模态模型名称
+                <input id="setModel" type="text" placeholder="例如：llava, qwen-vl, local-model" />
+              </label>
+              <label>并发请求数
+                <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />
+              </label>
+              <label>失败重试次数
+                <input id="setModelRetries" type="number" min="0" max="10" step="1" />
+              </label>
+              <label>请求超时（秒）
+                <input id="setTimeout" type="number" min="5" />
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="prompt-editor">
               <div class="prompt-editor-head">
                 <label for="setSystemPrompt">评价风格与评分标准</label>
               </div>
-              <textarea id="setSystemPrompt" rows="9"
+              <textarea id="setSystemPrompt" rows="7"
                         placeholder="写你想要的评价风格和打分标准，例如：语气像朋友聊天；9-10 分留给会立刻留下的照片"></textarea>
               <div class="prompt-preset-row">
                 <div class="prompt-builtin-row" id="promptPresetRow" aria-label="内置风格">
@@ -625,230 +648,286 @@
                 <button id="deletePromptPresetBtn" class="btn small prompt-delete-btn hidden" type="button"><span class="btn-icon" data-icon="trash"></span>删除</button>
               </div>
             </div>
-            <label>模型并发请求数
-              <input id="setModelConcurrency" type="number" min="1" max="16" step="1" />
-            </label>
-            <label>模型请求重试次数
-              <input id="setModelRetries" type="number" min="0" max="10" step="1" />
-            </label>
-            <label>请求超时（秒）
-              <input id="setTimeout" type="number" min="5" />
-            </label>
           </div>
         </section>
 
+        <!-- 2. 图片 -->
         <section class="settings-pane" id="tabImage" role="tabpanel"
                  aria-labelledby="tabBtnImage" data-pane="image" hidden>
-          <p class="settings-hint">代理图是送去给模型看的那张图，画廊缩略图只用于网格显示。数值越大越清晰，也越占空间。</p>
-          <div class="form-grid">
-            <label>代理图片最大边长 (px)
-              <input id="setMaxEdge" type="number" min="64" step="64" />
-            </label>
-            <label>代理图片质量 (1-100)
-              <input id="setProxyQuality" type="number" min="1" max="100" step="1" />
-            </label>
-            <label>画廊缩略图边长 (px)
-              <input id="setGalleryThumbSize" type="number" min="96" max="1024" step="32" />
-            </label>
-            <label>画廊缩略图质量 (1-100)
-              <input id="setThumbQuality" type="number" min="1" max="100" step="1" />
-            </label>
-            <label>索引线程数
-              <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
-            </label>
-          </div>
-
-          <h3 class="settings-subtitle">那年今日</h3>
-          <div class="form-grid">
-            <label class="full-row">回忆的时间范围
-              <select id="setMemoryWindow">
-                <option value="0">只看同一天</option>
-                <option value="1">前后 1 天</option>
-                <option value="2">前后 2 天</option>
-                <option value="3">前后 3 天</option>
-              </select>
-            </label>
-            <p class="settings-hint full-row">范围越宽，越容易找出一段旅程；同时也会带进一些相近的日子。</p>
-          </div>
-
-          <h3 class="settings-subtitle">实况照片</h3>
-          <div class="form-grid">
-            <label class="checkbox-row full-row">
-              <input id="setMergeLivePhotos" type="checkbox" />
-              <span>合并显示实况照片（下次同步后生效）</span>
-            </label>
-            <div class="volume-editor full-row" data-volume-key="live">
-              <span class="volume-editor-label">实况音量</span>
-              <input id="setLiveVolume" class="volume-range" type="range" min="0" max="100" step="1" value="0" />
-              <input id="setLiveVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
+          <div class="settings-section">
+            <h3 class="settings-section-title">代理图与缩略图</h3>
+            <p class="settings-section-desc">代理图用于送交大模型与灯箱预览，缩略图用于画廊网格；数值越大越清晰，也越占缓存空间。</p>
+            <div class="form-grid">
+              <label>代理图最大边长 (px)
+                <input id="setMaxEdge" type="number" min="64" step="64" />
+              </label>
+              <label>代理图质量 (1-100)
+                <input id="setProxyQuality" type="number" min="1" max="100" step="1" />
+              </label>
+              <label>画廊缩略图边长 (px)
+                <input id="setGalleryThumbSize" type="number" min="96" max="1024" step="32" />
+              </label>
+              <label>画廊缩略图质量 (1-100)
+                <input id="setThumbQuality" type="number" min="1" max="100" step="1" />
+              </label>
+              <label>索引线程数
+                <input id="setIndexThreads" type="number" min="1" max="32" step="1" />
+              </label>
             </div>
           </div>
 
-          <h3 class="settings-subtitle">界面主题</h3>
-          <div class="theme-picker" id="settingsThemePicker" role="radiogroup" aria-label="选择界面主题">
-            <button type="button" class="theme-option active" data-theme-choice="paper" aria-checked="true">
-              <span class="theme-option-swatch swatch-paper" aria-hidden="true"><span class="theme-option-icon" data-icon="themePaper"></span></span>
-              <span class="theme-option-body">
-                <span class="theme-option-title">纸质手账 · Paper</span>
-                <span class="theme-option-desc">点阵棉纸肌理、三色和纸胶带与复古手写剪贴。</span>
-              </span>
-            </button>
-            <button type="button" class="theme-option" data-theme-choice="classic" aria-checked="false">
-              <span class="theme-option-swatch swatch-classic" aria-hidden="true"><span class="theme-option-icon" data-icon="themeClassic"></span></span>
-              <span class="theme-option-body">
-                <span class="theme-option-title">经典画册</span>
-                <span class="theme-option-desc">苹果风现代玻璃拟态、通透磨砂层次与极简排版。</span>
-              </span>
-            </button>
-            <button type="button" class="theme-option" data-theme-choice="vintage" aria-checked="false">
-              <span class="theme-option-swatch swatch-vintage" aria-hidden="true"><span class="theme-option-icon" data-icon="themeVintage"></span></span>
-              <span class="theme-option-body">
-                <span class="theme-option-title">复古胶片 · Vintage</span>
-                <span class="theme-option-desc">暗房黑褐冲印、35mm 胶卷齿孔与石英橙红日期戳。</span>
-              </span>
-            </button>
+          <div class="settings-section">
+            <h3 class="settings-section-title">实况照片与那年今日</h3>
+            <div class="form-grid">
+              <label class="checkbox-row full-row">
+                <input id="setMergeLivePhotos" type="checkbox" />
+                <span>合并显示实况照片（下次同步后生效）</span>
+              </label>
+              <div class="volume-editor full-row" data-volume-key="live">
+                <span class="volume-editor-label">实况音量</span>
+                <input id="setLiveVolume" class="volume-range" type="range" min="0" max="100" step="1" value="0" />
+                <input id="setLiveVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
+              </div>
+              <label class="full-row">「那年今日」时间范围
+                <select id="setMemoryWindow">
+                  <option value="0">只看同一天</option>
+                  <option value="1">前后 1 天</option>
+                  <option value="2">前后 2 天</option>
+                  <option value="3">前后 3 天</option>
+                </select>
+              </label>
+            </div>
           </div>
         </section>
 
+        <!-- 3. 视频 -->
         <section class="settings-pane" id="tabVideo" role="tabpanel"
                  aria-labelledby="tabBtnVideo" data-pane="video" hidden>
-          <p class="settings-hint">详情页播放预览，全屏播放原片。预览越小处理越快，也越省缓存。预览相关设置在下一次同步或整理时生效。</p>
-          <div class="form-grid">
-            <label class="full-row">视频处理方式
-              <select id="setVideoProcessing">
-                <option value="ffmpeg">用 ffmpeg 处理（读取参数、生成封面与预览）</option>
-                <option value="none">不处理（下次同步后生效）</option>
-              </select>
-            </label>
-            <label>预览时长（秒）
-              <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
-            </label>
-            <label>预览最大边长 (px)
-              <input id="setVideoClipMaxEdge" type="number" min="320" max="1920" step="80" />
-            </label>
-            <label>预览压缩质量 (CRF，越小越清晰)
-              <input id="setVideoClipCrf" type="number" min="18" max="40" step="1" />
-            </label>
-            <label>预览取帧位置（时长比例 0-0.5）
-              <input id="setVideoPosterRatio" type="number" min="0" max="0.5" step="0.05" />
-            </label>
-            <label>预览模式
-              <select id="setVideoPreviewMode">
-                <option value="off">不播放</option>
-                <option value="once">播放一次</option>
-                <option value="loop">循环播放</option>
-              </select>
-            </label>
-            <div class="volume-editor full-row" data-volume-key="video">
-              <span class="volume-editor-label">预览音量</span>
-              <input id="setVideoPreviewVolume" class="volume-range" type="range" min="0" max="100" step="1" value="50" />
-              <input id="setVideoPreviewVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
+          <div class="settings-section">
+            <h3 class="settings-section-title">视频转码与封面</h3>
+            <p class="settings-section-desc">详情页播放预览，全屏播放原片。预览相关参数在下一次同步或整理时生效。</p>
+            <div class="form-grid">
+              <label class="full-row">视频处理方式
+                <select id="setVideoProcessing">
+                  <option value="ffmpeg">用 ffmpeg 处理（读取参数、生成封面与预览）</option>
+                  <option value="none">不处理（下次同步后生效）</option>
+                </select>
+              </label>
+              <label>预览时长（秒）
+                <input id="setVideoClipSeconds" type="number" min="2" max="20" step="1" />
+              </label>
+              <label>预览最大边长 (px)
+                <input id="setVideoClipMaxEdge" type="number" min="320" max="1920" step="80" />
+              </label>
+              <label>压缩质量 (CRF，越小越清晰)
+                <input id="setVideoClipCrf" type="number" min="18" max="40" step="1" />
+              </label>
+              <label>封面取帧位置（0-0.5）
+                <input id="setVideoPosterRatio" type="number" min="0" max="0.5" step="0.05" />
+              </label>
             </div>
-            <label class="checkbox-row full-row">
-              <input id="setVideoClipAudio" type="checkbox" />
-              <span>预览片段附带音轨（默认仍静音）</span>
-            </label>
-            <label class="checkbox-row full-row">
-              <input id="setVideoPregenerate" type="checkbox" />
-              <span>索引时生成预览片段（首次打开更快，扫描更慢）</span>
-            </label>
-            <div class="full-row settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
+            <div class="settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">详情页预览播放</h3>
+            <div class="form-grid">
+              <label class="full-row">预览模式
+                <select id="setVideoPreviewMode">
+                  <option value="off">不播放</option>
+                  <option value="once">播放一次</option>
+                  <option value="loop">循环播放</option>
+                </select>
+              </label>
+              <div class="volume-editor full-row" data-volume-key="video">
+                <span class="volume-editor-label">预览音量</span>
+                <input id="setVideoPreviewVolume" class="volume-range" type="range" min="0" max="100" step="1" value="50" />
+                <input id="setVideoPreviewVolumeNumber" class="volume-number" type="number" min="0" max="100" step="1" />
+              </div>
+              <label class="checkbox-row full-row">
+                <input id="setVideoClipAudio" type="checkbox" />
+                <span>预览片段附带音轨（默认仍静音）</span>
+              </label>
+              <label class="checkbox-row full-row">
+                <input id="setVideoPregenerate" type="checkbox" />
+                <span>索引时生成预览片段（首次打开更快，扫描更慢）</span>
+              </label>
+            </div>
           </div>
         </section>
 
+        <!-- 4. 人物 -->
         <section class="settings-pane" id="tabPeople" role="tabpanel"
                  aria-labelledby="tabBtnPeople" data-pane="people" hidden>
-          <p class="settings-hint">全部人脸与宠物猫狗识别、聚类均在本地离线完成，照片与特征向量绝不上传云端。自动优先调用 Apple CoreML、NVIDIA CUDA 或 Windows DirectML 加速。</p>
-          <div class="form-grid">
-            <label class="checkbox-row full-row">
-              <input id="setFaceEnabled" type="checkbox" />
-              <span>启用本地人物与宠物识别</span>
-            </label>
-            <label class="checkbox-row full-row">
-              <input id="setFaceAutoScan" type="checkbox" />
-              <span>同步或整理相册后自动在后台增量扫描新照片</span>
-            </label>
-            <label class="checkbox-row full-row">
-              <input id="setFaceDetectPets" type="checkbox" />
-              <span>同时识别宠物猫狗（本地检测与特征归类）</span>
-            </label>
-            <label class="full-row">人脸识别模型
-              <select id="setFaceModel">
-                <option value="buffalo_l">buffalo_l（高精度 · 默认，约 280MB）</option>
-                <option value="buffalo_s">buffalo_s（轻量快速，约 160MB）</option>
-              </select>
-            </label>
-            <label>自动归类相似度阈值 (0.25-0.75)
-              <input id="setFaceMatchThreshold" type="number" min="0.25" max="0.75" step="0.02" />
-            </label>
-            <label>未命名聚类最少照片数
-              <input id="setFaceMinCluster" type="number" min="1" max="10" step="1" />
-            </label>
-            <label class="full-row">本地模型存放目录（留空则使用默认 data/models）
-              <input id="setFaceModelsDir" type="text" placeholder="默认：data/models" />
-            </label>
-            <div class="full-row settings-status" id="setPeopleEngineStatus">正在检测本地识别引擎与硬件加速…</div>
-            <div class="full-row settings-row-actions">
-              <button id="downloadFaceModelsBtn" class="btn" type="button"><span class="btn-icon" data-icon="import"></span>下载 / 检查本地模型</button>
-              <button id="reclusterPeopleBtn" class="btn" type="button"><span class="btn-icon" data-icon="refresh"></span>重新聚类未命名人物</button>
+          <div class="settings-section">
+            <h3 class="settings-section-title">本地人物与宠物识别</h3>
+            <p class="settings-section-desc">100% 本地离线运行，自动调用 Apple CoreML、NVIDIA CUDA 或 Windows DirectML 加速，照片与特征向量绝不上传云端。</p>
+            <div class="form-grid">
+              <label class="checkbox-row full-row">
+                <input id="setFaceEnabled" type="checkbox" />
+                <span>启用本地人物与宠物识别</span>
+              </label>
+              <label class="checkbox-row full-row">
+                <input id="setFaceAutoScan" type="checkbox" />
+                <span>同步或整理相册后自动在后台增量扫描新照片</span>
+              </label>
+              <label class="checkbox-row full-row">
+                <input id="setFaceDetectPets" type="checkbox" />
+                <span>同时识别宠物猫狗（本地检测与特征归类）</span>
+              </label>
+              <label class="full-row">人脸识别模型
+                <select id="setFaceModel">
+                  <option value="buffalo_l">buffalo_l（高精度 · 默认，约 280MB）</option>
+                  <option value="buffalo_s">buffalo_s（轻量快速，约 160MB）</option>
+                </select>
+              </label>
+              <label>自动归类相似度阈值 (0.25-0.75)
+                <input id="setFaceMatchThreshold" type="number" min="0.25" max="0.75" step="0.02" />
+              </label>
+              <label>未命名聚类最少照片数
+                <input id="setFaceMinCluster" type="number" min="1" max="10" step="1" />
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">引擎状态与本地模型</h3>
+            <div class="settings-status" id="setPeopleEngineStatus">正在检测本地识别引擎与硬件加速…</div>
+            <div class="engine-status-pills" id="setPeopleStatusPills"></div>
+            <div class="settings-row-actions people-engine-actions">
+              <button id="downloadFaceModelsBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="import"></span>一键下载本地模型</button>
+              <button id="refreshFaceStatusBtn" class="btn" type="button"><span class="btn-icon" data-icon="sync"></span>重新检测</button>
+              <button id="reclusterPeopleBtn" class="btn" type="button"><span class="btn-icon" data-icon="refresh"></span>重新聚类</button>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">模型路径与手动下载</h3>
+            <div class="form-grid">
+              <label class="full-row">自定义模型根目录（留空则使用默认 data/models）
+                <input id="setFaceModelsDir" type="text" placeholder="默认：data/models" />
+              </label>
+            </div>
+            <div class="manual-download-box" id="setFaceManualGuide">
+              <div class="manual-path-row">
+                <span class="manual-path-label">当前生效路径：</span>
+                <code id="setFaceModelsResolvedPath" class="manual-path-code">检测中…</code>
+                <button id="copyFaceModelsPathBtn" class="btn small" type="button">复制路径</button>
+                <button id="openFaceModelsDirBtn" class="btn small" type="button"><span class="btn-icon" data-icon="folderOpen"></span>打开目录</button>
+              </div>
+              <p class="manual-guide-text">
+                如网络受限无法自动下载，可手动下载官方压缩包并解压放入上方目录：
+              </p>
+              <ul class="manual-guide-list" id="setFaceManualList">
+                <li><strong>buffalo_l（默认高精度）</strong>：下载 <code>buffalo_l.zip</code> 并解压全部 <code>.onnx</code> 文件至 <code>models/buffalo_l/</code></li>
+                <li><strong>buffalo_s（轻量版）</strong>：下载 <code>buffalo_s.zip</code> 并解压全部 <code>.onnx</code> 文件至 <code>models/buffalo_s/</code></li>
+                <li><strong>宠物猫狗（可选）</strong>：将 <code>yolov8n.onnx</code> 放至模型根目录（或安装 <code>ultralytics</code> 自动导出）</li>
+              </ul>
+              <p class="manual-guide-note">放好文件后点击上方「重新检测」即可立即生效，无需重启。</p>
             </div>
           </div>
         </section>
 
+        <!-- 5. 地理 -->
         <section class="settings-pane" id="tabGeo" role="tabpanel"
                  aria-labelledby="tabBtnGeo" data-pane="geo" hidden>
-          <p class="settings-hint">只有带 GPS 的照片会联网换取地名，其余照片全程离线处理。</p>
-          <div class="form-grid">
-            <label>地理编码服务
-              <select id="setGeocodingProvider">
-                <option value="nominatim">Nominatim（免费，无需 Key）</option>
-                <option value="amap">高德地图 API</option>
-                <option value="none">不使用（直接显示坐标）</option>
-              </select>
-            </label>
-            <label>地理编码 API Key
-              <input id="setGeocodingApiKey" type="password" placeholder="高德 Key（可选）" />
-            </label>
-            <label class="checkbox-row full-row">
-              <input id="setGeocodingFallback" type="checkbox" />
-              <span>高德查不到时改用 Nominatim（会把坐标发给 OpenStreetMap）</span>
-            </label>
-            <label>请求间隔（秒）
-              <input id="setGeocodingInterval" type="number" min="0.1" max="10" step="0.1" />
-            </label>
-            <label>请求重试次数
-              <input id="setGeocodingRetries" type="number" min="0" max="10" step="1" />
-            </label>
+          <div class="settings-section">
+            <h3 class="settings-section-title">逆地理编码服务</h3>
+            <p class="settings-section-desc">仅带 GPS 信息的照片会请求逆地理编码换取地名，其余照片全程离线处理。</p>
+            <div class="form-grid">
+              <label>地理编码服务
+                <select id="setGeocodingProvider">
+                  <option value="nominatim">Nominatim（免费，无需 Key）</option>
+                  <option value="amap">高德地图 API</option>
+                  <option value="none">不使用（直接显示坐标）</option>
+                </select>
+              </label>
+              <label>地理编码 API Key
+                <input id="setGeocodingApiKey" type="password" placeholder="高德 Key（可选）" />
+              </label>
+              <label class="checkbox-row full-row">
+                <input id="setGeocodingFallback" type="checkbox" />
+                <span>高德查不到时改用 Nominatim（会把坐标发给 OpenStreetMap）</span>
+              </label>
+              <label>请求间隔（秒）
+                <input id="setGeocodingInterval" type="number" min="0.1" max="10" step="0.1" />
+              </label>
+              <label>请求重试次数
+                <input id="setGeocodingRetries" type="number" min="0" max="10" step="1" />
+              </label>
+            </div>
           </div>
         </section>
 
+        <!-- 6. 地点 -->
+        <section class="settings-pane" id="tabPlaces" role="tabpanel"
+                 aria-labelledby="tabBtnPlaces" data-pane="places" hidden>
+          <div class="settings-section">
+            <h3 class="settings-section-title">相册目录与隐私位置</h3>
+            <p class="settings-section-desc">管理当前相册目录的可见性与索引记录，所有操作均不会改动照片原图。</p>
+            <div class="settings-danger-zone">
+              <div class="settings-danger-row">
+                <div class="settings-danger-text">
+                  <strong>隐藏当前目录</strong>
+                  <span>隐藏后不会出现在主页的路径选择中，只能从这里重新进入；照片与索引都保留。</span>
+                </div>
+                <div class="settings-row-actions">
+                  <button id="hideFolderBtn" class="btn" type="button"><span class="btn-icon" data-icon="eyeOff"></span>隐藏</button>
+                  <button id="viewHiddenFoldersBtn" class="btn" type="button"><span class="btn-icon" data-icon="eye"></span>查看隐藏的目录</button>
+                </div>
+              </div>
+              <div class="settings-danger-row">
+                <div class="settings-danger-text">
+                  <strong>移除当前目录</strong>
+                  <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
+                </div>
+                <button id="removeFolderBtn" class="btn danger remove-folder-btn" type="button"><span class="btn-icon" data-icon="trash"></span>移除</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. 数据 -->
         <section class="settings-pane" id="tabData" role="tabpanel"
                  aria-labelledby="tabBtnData" data-pane="data" hidden>
-          <p class="settings-hint">这里的操作只影响数据库记录与代理图缓存，不会碰你的照片原图。</p>
-          <div class="settings-danger-zone">
-            <div class="settings-danger-row">
-              <div class="settings-danger-text">
-                <strong>清理缓存</strong>
-                <span>删除没有被任何照片引用的代理图与缩略图，释放磁盘空间。</span>
-              </div>
-              <button id="cleanCacheBtn" class="btn"><span class="btn-icon" data-icon="clean"></span>清理</button>
+          <div class="settings-section">
+            <h3 class="settings-section-title">界面主题</h3>
+            <div class="theme-picker" id="settingsThemePicker" role="radiogroup" aria-label="选择界面主题">
+              <button type="button" class="theme-option active" data-theme-choice="paper" aria-checked="true">
+                <span class="theme-option-swatch swatch-paper" aria-hidden="true"><span class="theme-option-icon" data-icon="themePaper"></span></span>
+                <span class="theme-option-body">
+                  <span class="theme-option-title">纸质手账 · Paper</span>
+                  <span class="theme-option-desc">点阵棉纸肌理、三色和纸胶带与复古手写剪贴。</span>
+                </span>
+              </button>
+              <button type="button" class="theme-option" data-theme-choice="classic" aria-checked="false">
+                <span class="theme-option-swatch swatch-classic" aria-hidden="true"><span class="theme-option-icon" data-icon="themeClassic"></span></span>
+                <span class="theme-option-body">
+                  <span class="theme-option-title">经典画册</span>
+                  <span class="theme-option-desc">苹果风现代玻璃拟态、通透磨砂层次与极简排版。</span>
+                </span>
+              </button>
+              <button type="button" class="theme-option" data-theme-choice="vintage" aria-checked="false">
+                <span class="theme-option-swatch swatch-vintage" aria-hidden="true"><span class="theme-option-icon" data-icon="themeVintage"></span></span>
+                <span class="theme-option-body">
+                  <span class="theme-option-title">复古胶片 · Vintage</span>
+                  <span class="theme-option-desc">暗房黑褐冲印、35mm 胶卷齿孔与石英橙红日期戳。</span>
+                </span>
+              </button>
             </div>
-            <div class="settings-danger-row">
-              <div class="settings-danger-text">
-                <strong>隐藏当前目录</strong>
-                <span>隐藏后不会出现在主页的路径选择中，只能从这里重新进入；照片与索引都保留。</span>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">缓存维护</h3>
+            <p class="settings-section-desc">只清理无引用的代理图与旧缓存文件，不会碰你的照片原图。</p>
+            <div class="settings-danger-zone">
+              <div class="settings-danger-row">
+                <div class="settings-danger-text">
+                  <strong>清理缓存</strong>
+                  <span>删除没有被任何照片引用的代理图与缩略图，释放磁盘空间。</span>
+                </div>
+                <button id="cleanCacheBtn" class="btn" type="button"><span class="btn-icon" data-icon="clean"></span>清理</button>
               </div>
-              <div class="settings-row-actions">
-                <button id="hideFolderBtn" class="btn"><span class="btn-icon" data-icon="eyeOff"></span>隐藏</button>
-                <button id="viewHiddenFoldersBtn" class="btn"><span class="btn-icon" data-icon="eye"></span>查看隐藏的目录</button>
-              </div>
-            </div>
-            <div class="settings-danger-row">
-              <div class="settings-danger-text">
-                <strong>移除当前目录</strong>
-                <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
-              </div>
-              <button id="removeFolderBtn" class="btn danger remove-folder-btn"><span class="btn-icon" data-icon="trash"></span>移除</button>
             </div>
           </div>
         </section>
@@ -858,6 +937,29 @@
       <div class="modal-actions">
         <button id="settingsCancelBtn" class="btn" data-close="settingsModal"><span class="btn-icon" data-icon="close"></span>取消</button>
         <button id="saveSettingsBtn" class="btn primary"><span class="btn-icon" data-icon="check"></span>保存设置</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Model download progress modal -->
+  <div id="modelDownloadModal" class="modal hidden">
+    <div class="modal-content model-download-content">
+      <button class="modal-close" id="modelDownloadXBtn" title="关闭"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="import"></span>下载本地识别模型</h2>
+      <div class="modal-body">
+        <p id="modelDownloadMessage" class="model-download-message">正在连接模型源…</p>
+        <div class="model-download-progress-wrap">
+          <div class="progress-bar model-download-bar"><div id="modelDownloadFill" class="progress-fill"></div></div>
+          <div class="model-download-stats">
+            <span id="modelDownloadMeta">准备中…</span>
+            <span id="modelDownloadPct" class="progress-eta">0%</span>
+          </div>
+        </div>
+        <div id="modelDownloadWarnings" class="model-download-warnings hidden"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="modelDownloadCancelBtn" class="btn danger" type="button"><span class="btn-icon" data-icon="close"></span>取消下载</button>
+        <button id="modelDownloadCloseBtn" class="btn primary hidden" type="button"><span class="btn-icon" data-icon="check"></span>完成</button>
       </div>
     </div>
   </div>
