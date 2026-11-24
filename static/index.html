@@ -864,12 +864,13 @@
             <div class="shortcut-row"><span>打开 / 关闭快捷键面板</span><kbd>?</kbd></div>
           </section>
           <section class="shortcuts-group">
-            <h3>照片详情灯箱</h3>
-            <div class="shortcut-row"><span>上一张 / 下一张</span><span><kbd>←</kbd> / <kbd>→</kbd> 或 <kbd>K</kbd> / <kbd>J</kbd></span></div>
+            <h3>灯箱与全屏沉浸模式</h3>
+            <div class="shortcut-row"><span>上一张 / 下一张（灯箱与全屏均可用）</span><span><kbd>←</kbd> / <kbd>→</kbd> 或 <kbd>K</kbd> / <kbd>J</kbd></span></div>
             <div class="shortcut-row"><span>珍藏 / 取消珍藏</span><kbd>F</kbd></div>
             <div class="shortcut-row"><span>暂时收起</span><kbd>D</kbd></div>
             <div class="shortcut-row"><span>编辑回忆信息</span><kbd>E</kbd></div>
-            <div class="shortcut-row"><span>全屏放大查看</span><kbd>Space</kbd></div>
+            <div class="shortcut-row"><span>进入 / 退出全屏沉浸模式</span><kbd>Space</kbd></div>
+            <div class="shortcut-row"><span>全屏缩放 / 还原</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd></span></div>
             <div class="shortcut-row"><span>关闭当前弹窗</span><kbd>Esc</kbd></div>
           </section>
         </div>
@@ -976,6 +977,8 @@
 
   <!-- Fullscreen Zoom & Pan Modal -->
   <div id="fullscreenModal" class="fs-viewer hidden">
+    <button id="fsPrevBtn" class="fs-nav-btn prev hidden" type="button" title="上一张 (←)" aria-label="上一张"><span class="btn-icon" data-icon="chevronLeft"></span></button>
+    <button id="fsNextBtn" class="fs-nav-btn next hidden" type="button" title="下一张 (→)" aria-label="下一张"><span class="btn-icon" data-icon="chevronRight"></span></button>
     <button id="fsCloseBtn" class="fs-viewer-close" title="退出全屏 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
     <div class="fs-viewer-toolbar">
       <button id="fsZoomOutBtn" title="缩小 (滚轮下滚)"><span class="btn-icon" data-icon="zoomOut"></span></button>

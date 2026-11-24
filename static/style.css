@@ -10040,6 +10040,401 @@ body[data-theme="vintage"] .filters-active-badge {
   cursor: pointer;
 }
 
+/* ==========================================================================
+   Polish Pass: Vintage Mechanical Switches, Non-Overlapping Lightbox Arrows,
+   Fullscreen Navigation & Comprehensive Mobile Responsive Layout
+   ========================================================================== */
+
+/* --- 1. Vintage Analog Mechanical Slide Switch & Checkbox (No Square-in-Circle) --- */
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"] {
+  border-radius: 3px !important;
+  background: #121110 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.72) !important;
+}
+
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"]::after {
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  background: #9e9486;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"]:checked {
+  background: #eb9234 !important;
+  border-color: #eb9234 !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 10px rgba(235, 146, 52, 0.28) !important;
+}
+
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"]:checked::after {
+  background: #141210;
+  transform: translateX(16px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"]:active::after {
+  width: 19px;
+}
+
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"]:checked:active::after {
+  transform: translateX(13px);
+}
+
+body[data-theme="vintage"] .checkbox-row input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.34) !important;
+}
+
+body[data-theme="vintage"] .force-label input[type="checkbox"] {
+  border-radius: 2px;
+  background: #121110;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+body[data-theme="vintage"] .force-label input[type="checkbox"]:checked {
+  background: #eb9234;
+  border-color: #eb9234;
+}
+
+body[data-theme="vintage"] .force-label input[type="checkbox"]:checked::after {
+  border-color: #141210;
+}
+
+/* --- 2. Lightbox Prev/Next Dedicated Gutter (Zero Overlap with .preview-content) --- */
+#previewModal,
+body[data-theme="paper"] #previewModal {
+  padding: 12px 72px;
+}
+
+#previewModal .preview-content,
+body[data-theme="paper"] #previewModal .preview-content {
+  width: 100%;
+  max-width: calc(100vw - 144px);
+}
+
+#previewModal .preview-side-btn.prev,
+body[data-theme="paper"] #previewModal .preview-side-btn.prev {
+  left: 14px;
+}
+
+#previewModal .preview-side-btn.next,
+body[data-theme="paper"] #previewModal .preview-side-btn.next {
+  right: 14px;
+}
+
+/* --- 3. Fullscreen Immersive Prev / Next Floating Controls --- */
+.fs-nav-btn {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1010;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(20, 17, 14, 0.62);
+  color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+
+.fs-nav-btn.prev { left: 20px; }
+.fs-nav-btn.next { right: 20px; }
+
+.fs-nav-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.fs-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+  transform: translateY(-50%) scale(1.06);
+}
+
+.fs-nav-btn:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
+body[data-theme="vintage"] .fs-nav-btn {
+  border-radius: 2px;
+  border-color: rgba(235, 146, 52, 0.36);
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .fs-nav-btn:hover {
+  background: #eb9234;
+  border-color: #eb9234;
+  color: #141210;
+}
+
+/* --- 4. Comprehensive Mobile & Tablet Responsive Layout --- */
+@media (max-width: 900px) {
+  #previewModal,
+  body[data-theme="paper"] #previewModal {
+    padding: 8px;
+  }
+
+  #previewModal .preview-content,
+  body[data-theme="paper"] #previewModal .preview-content {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  #previewModal .preview-side-btn,
+  body[data-theme="paper"] #previewModal .preview-side-btn {
+    width: 36px;
+    height: 36px;
+    top: 32vh;
+  }
+
+  #previewModal .preview-side-btn.prev,
+  body[data-theme="paper"] #previewModal .preview-side-btn.prev {
+    left: 14px;
+  }
+
+  #previewModal .preview-side-btn.next,
+  body[data-theme="paper"] #previewModal .preview-side-btn.next {
+    right: 14px;
+  }
+
+  .fs-nav-btn {
+    width: 38px;
+    height: 38px;
+  }
+  .fs-nav-btn.prev { left: 10px; }
+  .fs-nav-btn.next { right: 10px; }
+}
+
+@media (max-width: 720px) {
+  .compare-content {
+    width: 98vw;
+    max-width: 98vw;
+    padding: 14px 12px 12px;
+  }
+
+  .compare-header {
+    padding-right: 34px;
+    gap: 8px;
+  }
+
+  .compare-stage {
+    height: 50vh;
+    min-height: 240px;
+  }
+
+  .compare-tag {
+    font-size: 10px;
+    padding: 3px 7px;
+    max-width: 46%;
+  }
+
+  .filmstrip-thumb {
+    width: 46px;
+    height: 34px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-pad-x: 14px;
+  }
+
+  .topbar {
+    padding: 10px 14px;
+  }
+
+  .brand h1 {
+    font-size: 19px;
+    gap: 6px;
+  }
+
+  .view-switcher {
+    width: 100%;
+    display: flex;
+  }
+
+  .view-tab {
+    flex: 1 1 0;
+    padding: 0 6px;
+    font-size: 12px;
+    gap: 4px;
+    height: 32px;
+  }
+
+  .view-tab svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .folder-row {
+    gap: 6px;
+  }
+
+  .folder-input-wrapper {
+    flex: 1 1 100%;
+  }
+
+  .folder-row .btn,
+  .folder-row .force-label {
+    height: 34px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .folder-row .btn.icon-only {
+    width: 34px;
+    padding: 0;
+  }
+
+  .album-sticky-bar {
+    margin: calc(-14px - 1px) calc(-1 * var(--page-pad-x)) 12px;
+    padding: 8px 14px 10px;
+  }
+
+  /* Single-row horizontal scroll stats bar saves ~70px vertical space on phones */
+  .stats {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 0 8px;
+    gap: 6px;
+  }
+
+  .stats::-webkit-scrollbar {
+    display: none;
+  }
+
+  .stat {
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    gap: 5px;
+  }
+
+  .stat-label {
+    font-size: 12px;
+  }
+
+  .stat-num {
+    font-size: 13.5px;
+  }
+
+  .filters {
+    padding: 0;
+    gap: 6px;
+  }
+
+  .search-capsule .search-mode-segment .custom-select-trigger {
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .search-capsule .search-submit-btn {
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .gallery {
+    grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+    gap: 12px;
+    padding: 8px 0 96px;
+  }
+
+  /* Multi-select bar wraps cleanly inside small viewports */
+  .selection-bar {
+    bottom: 12px;
+    max-width: calc(100vw - 20px);
+    padding: 8px 12px;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 16px;
+    white-space: normal;
+  }
+
+  .selection-bar .btn {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  /* Lightbox compact mobile layout */
+  #previewModal .preview-content,
+  body[data-theme="paper"] #previewModal .preview-content {
+    padding: 10px 10px 8px;
+    max-height: 96vh;
+  }
+
+  .preview-actions {
+    gap: 6px;
+    justify-content: center;
+  }
+
+  .preview-actions .btn {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .preview-header-block h3 {
+    font-size: 18px;
+  }
+
+  /* Shortcuts & forms single-column on small screens */
+  .shortcuts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .duplicates-toolbar {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+
+  .duplicates-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 16px;
+    padding: 10px 14px;
+    bottom: 12px;
+  }
+
+  .fs-viewer-toolbar {
+    bottom: 16px;
+    padding: 5px 10px;
+    gap: 4px;
+  }
+
+  .fs-viewer-toolbar button {
+    padding: 5px 8px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand h1 .sub {
+    display: none;
+  }
+}
+
 
 
 

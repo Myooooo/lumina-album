@@ -13,38 +13,34 @@ function applyFsTransform(smooth = false) {
   if (pctEl) pctEl.textContent = `${Math.round(scale * 100)}%`;
 }
 
-function openFullscreenViewer() {
-  if (!state.currentPreviewId) return;
-  const photo = photoById(state.currentPreviewId);
-  if (!photo) return;
-  
+function renderFullscreenMedia(photo) {
   const fsModal = $("fullscreenModal");
   const fsImg = $("fsImage");
   const fsVideo = $("fsVideo");
   const toolbar = fsModal ? fsModal.querySelector(".fs-viewer-toolbar") : null;
-  if (!fsModal || !fsImg) return;
+  if (!fsModal || !fsImg || !photo) return;
 
+  fsModal.dataset.photoId = String(photo.id);
   state.fullscreen.scale = 1;
   state.fullscreen.panX = 0;
   state.fullscreen.panY = 0;
   state.fullscreen.isDragging = false;
 
+  const prevBtn = $("fsPrevBtn");
+  const nextBtn = $("fsNextBtn");
+  if (prevBtn) prevBtn.classList.toggle("hidden", !previewHasNeighbour(-1));
+  if (nextBtn) nextBtn.classList.toggle("hidden", !previewHasNeighbour(1));
+
   const isVideo = photo.media_kind === "video";
   if (fsVideo) {
     if (isVideo) {
-      // The original file, with sound on: this is the "watch it properly"
-      // path, and the user asked for it explicitly by clicking.
       fsImg.classList.add("hidden");
       fsImg.removeAttribute("src");
       fsVideo.classList.remove("hidden");
       fsVideo.muted = false;
       fsVideo.src = `/api/video/${photo.id}/stream`;
       fsVideo.load();
-      // The zoom/pan toolbar belongs to the still viewer; the player has its
-      // own controls and the two would fight over the same wheel gestures.
       if (toolbar) toolbar.classList.add("hidden");
-      showModal(fsModal);
-      pushModal(fsModal);
       attachFullscreenVideoFallback(fsVideo, photo);
       return;
     }
@@ -52,13 +48,34 @@ function openFullscreenViewer() {
     fsVideo.removeAttribute("src");
     fsVideo.load();
     fsVideo.classList.add("hidden");
+    fsVideo.onerror = null;
   }
   if (toolbar) toolbar.classList.remove("hidden");
   fsImg.classList.remove("hidden");
   fsImg.src = `/api/original/${photo.id}`;
-  applyFsTransform();
+  applyFsTransform(false);
+}
+
+function openFullscreenViewer() {
+  if (!state.currentPreviewId) return;
+  const photo = photoById(state.currentPreviewId);
+  if (!photo) return;
+  const fsModal = $("fullscreenModal");
+  if (!fsModal) return;
+  renderFullscreenMedia(photo);
   showModal(fsModal);
   pushModal(fsModal);
+}
+
+async function navigateFullscreen(delta) {
+  const beforeId = state.currentPreviewId;
+  await navigatePreview(delta);
+  const fsModal = $("fullscreenModal");
+  if (!fsModal || fsModal.classList.contains("hidden")) return;
+  if (state.currentPreviewId && state.currentPreviewId !== beforeId) {
+    const nextPhoto = photoById(state.currentPreviewId);
+    if (nextPhoto) renderFullscreenMedia(nextPhoto);
+  }
 }
 
 /**
@@ -135,6 +152,11 @@ function closeFullscreenViewer() {
     fsVideo.load();
     fsVideo.classList.add("hidden");
     fsVideo.onerror = null;
+  }
+  if (fsModal) {
+    delete fsModal.dataset.photoId;
+    const at = state.modalStack.lastIndexOf("fullscreenModal");
+    if (at !== -1) state.modalStack.splice(at, 1);
   }
   hideModal(fsModal);
   state.fullscreen.scale = 1;
@@ -759,6 +781,10 @@ function closeModal(id, onHidden) {
   const at = state.modalStack.lastIndexOf(id);
   if (at !== -1) state.modalStack.splice(at, 1);
   if (id === "previewModal") {
+    const fsModal = $("fullscreenModal");
+    if (fsModal && !fsModal.classList.contains("hidden")) {
+      closeFullscreenViewer();
+    }
     // A looping preview would otherwise keep decoding (and playing) behind a
     // closed dialog until something else happened to stop it.
     stopPreviewVideo();
@@ -997,6 +1023,17 @@ function updatePreview(options = {}) {
   `;
 
   renderPreviewFilmstrip(order, frameIdx);
+  const fsModal = $("fullscreenModal");
+  if (fsModal && !fsModal.classList.contains("hidden")) {
+    if (fsModal.dataset.photoId !== String(id)) {
+      renderFullscreenMedia(photo);
+    } else {
+      const prevBtn = $("fsPrevBtn");
+      const nextBtn = $("fsNextBtn");
+      if (prevBtn) prevBtn.classList.toggle("hidden", !previewHasNeighbour(-1));
+      if (nextBtn) nextBtn.classList.toggle("hidden", !previewHasNeighbour(1));
+    }
+  }
 }
 
 function renderPreviewFilmstrip(order, activeIdx) {

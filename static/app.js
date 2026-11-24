@@ -157,6 +157,10 @@ function init() {
   // Fullscreen Viewer Controls
   const fsCloseBtn = $("fsCloseBtn");
   if (fsCloseBtn) fsCloseBtn.addEventListener("click", closeFullscreenViewer);
+  const fsPrevBtn = $("fsPrevBtn");
+  if (fsPrevBtn) fsPrevBtn.addEventListener("click", () => navigateFullscreen(-1));
+  const fsNextBtn = $("fsNextBtn");
+  if (fsNextBtn) fsNextBtn.addEventListener("click", () => navigateFullscreen(1));
   const fsZoomInBtn = $("fsZoomInBtn");
   if (fsZoomInBtn) fsZoomInBtn.addEventListener("click", () => zoomFullscreen(1.25, undefined, undefined, true));
   const fsZoomOutBtn = $("fsZoomOutBtn");
@@ -330,12 +334,29 @@ function init() {
       if (e.key === "Escape" || e.code === "Space") {
         e.preventDefault();
         closeFullscreenViewer();
+      } else if (e.key === "ArrowLeft" || e.key === "k" || e.key === "K") {
+        e.preventDefault();
+        navigateFullscreen(-1);
+      } else if (e.key === "ArrowRight" || e.key === "j" || e.key === "J") {
+        e.preventDefault();
+        navigateFullscreen(1);
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        toggleCurrentPreviewFavorite();
+      } else if (e.key === "d" || e.key === "D") {
+        e.preventDefault();
+        const photo = photoById(state.currentPreviewId);
+        if (photo && photo.status !== "deleted") deletePhotos([photo.id]);
+      } else if (e.key === "e" || e.key === "E") {
+        e.preventDefault();
+        closeFullscreenViewer();
+        openEditPreview();
       } else if (e.key === "+" || e.key === "=") {
-        zoomFullscreen(1.25);
+        zoomFullscreen(1.25, undefined, undefined, true);
       } else if (e.key === "-") {
-        zoomFullscreen(0.8);
+        zoomFullscreen(0.8, undefined, undefined, true);
       } else if (e.key === "0") {
-        resetFullscreenZoom();
+        resetFullscreenZoom(true);
       }
       return;
     }
