@@ -31,8 +31,8 @@ const state = {
   previewContext: null,
   //: Which of the four views is on screen.
   view: "album",
-  //: Active visual theme: "classic" (原版画册) or "paper" (纸质手账).
-  theme: "classic",
+  //: Active visual theme: "paper" (纸质手账, default), "classic" (经典画册), or "vintage" (复古胶片).
+  theme: "paper",
   //: True once the first view has been painted. The very first showView() has
   //: nothing to animate away from, so it activates immediately rather than
   //: waiting out the exit duration behind an empty screen.
@@ -947,7 +947,7 @@ function toggleThemeMenu() {
 
 function applyTheme(theme, options = {}) {
   const { persist = true, notify = false, animate = false } = options;
-  const next = THEME_META[theme] ? theme : "classic";
+  const next = THEME_META[theme] ? theme : "paper";
   const meta = THEME_META[next];
   const changed = state.theme !== next;
 
@@ -1021,7 +1021,7 @@ function applyTheme(theme, options = {}) {
 }
 
 function initTheme() {
-  let initial = "classic";
+  let initial = "paper";
   try {
     const cached = window.localStorage.getItem("lumina_theme");
     if (THEME_META[cached]) initial = cached;
