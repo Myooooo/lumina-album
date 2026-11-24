@@ -261,6 +261,7 @@
     <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
     <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
     <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
+    <button id="assignPlaceSelectedBtn" class="btn" title="归入自定义地点（仅改数据库，不动原图 EXIF）"><span class="btn-icon" data-icon="pin"></span>归入地点</button>
     <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
     <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
     <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
@@ -384,8 +385,7 @@
     </div>
   </div>
 
-  <!-- 足迹：the places the photos were taken, grouped by city rather than by the
-       street address the geocoder returns. -->
+  <!-- 足迹：auto EXIF places + user-created places, supporting both card grid and iOS-style map mode. -->
   <div id="footprintsView" class="page-view footprints-content hidden">
     <div class="view-inner">
       <header class="view-header">
@@ -396,7 +396,26 @@
           <h2><span class="modal-title-icon" data-icon="pin"></span><span id="footprintsTitle">足迹</span></h2>
           <p class="footprints-lede" id="footprintsLede">正在整理走过的地方…</p>
         </div>
+        <div class="footprints-header-actions" id="footprintsHeaderActions">
+          <div class="footprints-mode-switch" id="footprintsModeSwitch" role="group" aria-label="切换足迹视图">
+            <button type="button" class="footprints-mode-btn active" data-fp-mode="grid" aria-pressed="true">卡片</button>
+            <button type="button" class="footprints-mode-btn" data-fp-mode="map" aria-pressed="false">地图</button>
+          </div>
+          <button id="footprintsCreatePlaceBtn" class="btn primary" type="button" title="创建自定义地点并自动反查坐标">
+            <span class="btn-icon" data-icon="pin"></span>新建地点
+          </button>
+        </div>
       </header>
+      <div id="footprintsDetailBar" class="footprints-detail-bar hidden"></div>
+      <div id="footprintsMapWrap" class="footprints-map-wrap hidden">
+        <div id="footprintsMapCanvas" class="footprints-map-canvas"></div>
+        <div class="footprints-map-controls">
+          <button id="footprintsMapFitBtn" class="btn small footprints-map-float-btn" type="button" title="缩放以完整显示所有有照片的地点">
+            <span class="btn-icon" data-icon="reset"></span>全览足迹
+          </button>
+        </div>
+        <aside id="footprintsMapDrawer" class="footprints-map-drawer hidden" aria-label="地点照片预览"></aside>
+      </div>
       <div id="footprintsBody" class="footprints-body">
         <div class="footprints-empty">正在整理走过的地方…</div>
       </div>
@@ -976,6 +995,67 @@
     </div>
   </div>
 
+  <!-- Create / Edit Custom Place Modal -->
+  <div id="placeEditModal" class="modal hidden">
+    <div class="modal-content place-edit-content">
+      <button class="modal-close" data-close="placeEditModal" title="关闭"><span class="btn-icon" data-icon="close"></span></button>
+      <h2 id="placeEditTitle"><span class="modal-title-icon" data-icon="pin"></span>新建地点</h2>
+      <div class="modal-body">
+        <div class="form-grid">
+          <label class="full-row">地点名称
+            <div class="dir-row">
+              <input id="placeFormName" type="text" maxlength="80" placeholder="例如：杭州西湖、京都清水寺、大理洱海" />
+              <button id="placeGeocodeBtn" class="btn" type="button"><span class="btn-icon" data-icon="search"></span>反查坐标</button>
+            </div>
+          </label>
+          <div id="placeGeocodeStatus" class="place-geocode-status full-row hidden"></div>
+          <div id="placeGeocodeResults" class="place-geocode-results full-row hidden"></div>
+          <label class="full-row">完整地址（添加照片时覆盖数据库地点字段，不改原图 EXIF）
+            <input id="placeFormAddress" type="text" maxlength="200" placeholder="反查后自动填充，也可手工修改" />
+          </label>
+          <label>纬度 (WGS-84)
+            <input id="placeFormLat" type="number" step="0.000001" min="-90" max="90" placeholder="例如：30.248963" />
+          </label>
+          <label>经度 (WGS-84)
+            <input id="placeFormLon" type="number" step="0.000001" min="-180" max="180" placeholder="例如：120.149751" />
+          </label>
+        </div>
+        <p class="place-edit-hint">提示：若直接点击「保存」，系统会自动调用「设置 → 地点」中配置的地理编码服务反查经纬度。</p>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" type="button" data-close="placeEditModal"><span class="btn-icon" data-icon="close"></span>取消</button>
+        <button id="placeFormSaveBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="check"></span>保存地点</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Photos to Place Picker Modal -->
+  <div id="placePhotoPickerModal" class="modal hidden">
+    <div class="modal-content place-picker-content">
+      <button class="modal-close" data-close="placePhotoPickerModal" title="关闭"><span class="btn-icon" data-icon="close"></span></button>
+      <h2 id="placePickerTitle"><span class="modal-title-icon" data-icon="image"></span>添加照片到地点</h2>
+      <div class="place-picker-toolbar">
+        <input id="placePickerSearch" type="search" placeholder="按文件名、标签或简评搜索照片…" />
+        <label class="checkbox-row place-picker-filter">
+          <input id="placePickerUnlocatedOnly" type="checkbox" />
+          <span>仅看暂无地点</span>
+        </label>
+        <button id="placePickerSelectVisibleBtn" class="btn small" type="button">全选当前</button>
+        <button id="placePickerClearBtn" class="btn small" type="button">清空</button>
+      </div>
+      <div id="placePickerGrid" class="place-picker-grid">
+        <div class="footprints-empty">正在加载照片…</div>
+      </div>
+      <div class="modal-actions place-picker-actions">
+        <span id="placePickerCount" class="place-picker-count">已选择 0 张（仅覆盖数据库地点字段，不改原图 EXIF）</span>
+        <div class="settings-row-actions">
+          <button class="btn" type="button" data-close="placePhotoPickerModal">取消</button>
+          <button id="placePickerConfirmBtn" class="btn primary" type="button" disabled><span class="btn-icon" data-icon="check"></span>添加到此地点</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Hidden albums: reachable only from 设置 → 系统. -->
   <div id="hiddenFoldersModal" class="modal hidden">
     <div class="modal-content">
@@ -1221,6 +1301,7 @@
   <script src="/static/js/viewer.js"></script>
   <script src="/static/js/settings.js"></script>
   <script src="/static/js/people.js"></script>
+  <script src="/static/js/footprints.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

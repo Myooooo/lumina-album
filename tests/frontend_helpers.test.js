@@ -1905,6 +1905,16 @@ section("people & pets (人物与宠物)");
       /map_tile_provider:/.test(src),
     true
   );
+  check(
+    "footprints custom place creation, forward geocode, and photo picker are wired",
+    /id="footprintsCreatePlaceBtn"/.test(html) &&
+      /id="footprintsModeSwitch"/.test(html) &&
+      /id="placeEditModal"/.test(html) &&
+      /id="placePhotoPickerModal"/.test(html) &&
+      /\/api\/places\/geocode/.test(src) &&
+      /function openPlacePhotoPicker\(/.test(src),
+    true
+  );
 }
 
 console.log(

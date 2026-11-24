@@ -12653,3 +12653,300 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ==========================================================================
+   Footprints Refactor: Mode Switch, Custom Places, Photo Picker & Map Shell
+   ========================================================================== */
+
+.footprints-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.footprints-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--border);
+  gap: 2px;
+}
+
+.footprints-mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.footprints-mode-btn:hover {
+  color: var(--text);
+}
+
+.footprints-mode-btn.active {
+  background: var(--surface, #fff);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.footprints-detail-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.place-coords-pill {
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.place-auto-hint {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.footprint-source-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(38, 31, 25, 0.72);
+  color: #f9f6f0;
+  backdrop-filter: blur(6px);
+}
+
+.polaroid-card.is-place-removable {
+  cursor: pointer;
+  outline: 2px dashed transparent;
+  transition: outline-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.polaroid-card.is-place-removable:hover {
+  outline-color: var(--danger, #c44536);
+}
+
+.polaroid-card.is-remove-selected {
+  outline: 2px solid var(--danger, #c44536);
+  opacity: 0.72;
+  transform: scale(0.97);
+}
+
+.place-edit-content {
+  max-width: 560px;
+}
+
+.place-edit-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.place-geocode-status {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.place-geocode-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.place-geocode-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--border);
+  background: var(--surface, #fff);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.place-geocode-item:hover,
+.place-geocode-item.active {
+  border-color: var(--primary);
+  background: var(--surface-2, rgba(174, 118, 78, 0.08));
+}
+
+.place-geocode-name {
+  font-size: 13px;
+  line-height: 1.4;
+  flex: 1;
+}
+
+.place-geocode-coords {
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.place-picker-content {
+  max-width: 860px;
+  width: min(92vw, 860px);
+}
+
+.place-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.place-picker-toolbar input[type="search"] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.place-picker-filter {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.place-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 10px;
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.place-picker-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border-radius: var(--radius-md, 10px);
+  border: 2px solid var(--border);
+  background: var(--surface, #fff);
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.place-picker-card.is-selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
+.place-picker-card img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+}
+
+.place-picker-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.place-picker-card.is-selected .place-picker-check {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.place-picker-check svg {
+  width: 13px;
+  height: 13px;
+}
+
+.place-picker-meta {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.place-picker-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.picker-loc-tag {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.place-picker-actions {
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.place-picker-count {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Theme coordination for Vintage & Classic */
+body[data-theme="vintage"] .footprints-mode-switch {
+  background: rgba(255, 245, 230, 0.06);
+  border-color: rgba(235, 146, 52, 0.28);
+}
+
+body[data-theme="vintage"] .footprints-mode-btn.active {
+  background: rgba(235, 146, 52, 0.22);
+  color: #f4b165;
+  box-shadow: none;
+}
+
+body[data-theme="vintage"] .footprint-source-badge {
+  background: rgba(224, 123, 57, 0.88);
+  color: #1a1512;
+}
+
+body[data-theme="classic"] .footprints-mode-switch {
+  background: rgba(120, 120, 128, 0.12);
+  backdrop-filter: blur(12px);
+}
+
