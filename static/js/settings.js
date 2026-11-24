@@ -318,7 +318,7 @@ async function deleteCustomPrompt() {
    Settings dialog: tabs
    ========================================================================== */
 
-const SETTINGS_TABS = ["model", "image", "video", "people", "geo", "places", "data"];
+const SETTINGS_TABS = ["model", "image", "video", "people", "geo", "data"];
 
 /** Slide the "ink" behind the active tab and show its pane. */
 function showSettingsTab(name, options = {}) {

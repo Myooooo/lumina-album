@@ -39,6 +39,15 @@ window.LuminaUI = (() => {
    * its buttons looked broken. Static layers cannot express "whichever opened last",
    * which is the actual rule, so the layer is assigned here.
    */
+  function syncModalScrollLock() {
+    if (typeof document === "undefined") return;
+    const hasOpen = Boolean(
+      document.querySelector(".modal:not(.hidden), #fullscreenModal:not(.hidden)")
+    );
+    document.documentElement.classList.toggle("modal-open", hasOpen);
+    if (document.body) document.body.classList.toggle("modal-open", hasOpen);
+  }
+
   function showModal(el) {
     if (!el) return;
     if (el._luminaExitTimer) {
@@ -54,6 +63,7 @@ window.LuminaUI = (() => {
     el._luminaLayer = MODAL_LAYER_BASE + modalLayerCounter;
     el.classList.remove("closing");
     el.classList.remove("hidden");
+    syncModalScrollLock();
   }
 
   function releaseLayer(layer) {
@@ -69,6 +79,7 @@ window.LuminaUI = (() => {
    */
   function hideModal(el, onHidden) {
     if (!el || el.classList.contains("hidden")) {
+      syncModalScrollLock();
       if (typeof onHidden === "function") onHidden();
       return;
     }
@@ -84,6 +95,7 @@ window.LuminaUI = (() => {
         el._luminaLayer = 0;
         el.style.zIndex = "";
       }
+      syncModalScrollLock();
       if (typeof onHidden === "function") onHidden();
     };
     if (prefersReducedMotion()) {

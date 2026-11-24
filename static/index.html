@@ -77,7 +77,7 @@
              only place that says so, because hidden albums do not appear in
              any path selector. -->
         <span id="folderHiddenBadge" class="folder-hidden-badge hidden"
-              title="这个目录已隐藏，请在「设置 → 数据管理 → 查看隐藏的目录」中重新进入">已隐藏</span>
+              title="这个目录已隐藏，请在「设置 → 系统 → 查看隐藏的目录」中重新进入">已隐藏</span>
         <button id="folderHistoryBtn" class="folder-history-toggle" type="button"
                 title="整理过的文件夹" aria-haspopup="listbox" aria-expanded="false"
                 aria-controls="folderHistory"><span class="btn-icon" data-icon="chevronDown"></span></button>
@@ -574,15 +574,11 @@
         </button>
         <button class="settings-tab" role="tab" data-tab="geo" id="tabBtnGeo"
                 aria-selected="false" aria-controls="tabGeo" tabindex="-1">
-          <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地理</span>
-        </button>
-        <button class="settings-tab" role="tab" data-tab="places" id="tabBtnPlaces"
-                aria-selected="false" aria-controls="tabPlaces" tabindex="-1">
-          <span class="btn-icon" data-icon="folder"></span><span class="tab-label">地点</span>
+          <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地点</span>
         </button>
         <button class="settings-tab" role="tab" data-tab="data" id="tabBtnData"
                 aria-selected="false" aria-controls="tabData" tabindex="-1">
-          <span class="btn-icon" data-icon="archive"></span><span class="tab-label">数据</span>
+          <span class="btn-icon" data-icon="settings"></span><span class="tab-label">系统</span>
         </button>
       </div>
 
@@ -828,7 +824,7 @@
           </div>
         </section>
 
-        <!-- 5. 地理 -->
+        <!-- 5. 地点 -->
         <section class="settings-pane" id="tabGeo" role="tabpanel"
                  aria-labelledby="tabBtnGeo" data-pane="geo" hidden>
           <div class="settings-section">
@@ -859,39 +855,11 @@
           </div>
         </section>
 
-        <!-- 6. 地点 -->
-        <section class="settings-pane" id="tabPlaces" role="tabpanel"
-                 aria-labelledby="tabBtnPlaces" data-pane="places" hidden>
-          <div class="settings-section">
-            <h3 class="settings-section-title">相册目录与隐私位置</h3>
-            <p class="settings-section-desc">管理当前相册目录的可见性与索引记录，所有操作均不会改动照片原图。</p>
-            <div class="settings-danger-zone">
-              <div class="settings-danger-row">
-                <div class="settings-danger-text">
-                  <strong>隐藏当前目录</strong>
-                  <span>隐藏后不会出现在主页的路径选择中，只能从这里重新进入；照片与索引都保留。</span>
-                </div>
-                <div class="settings-row-actions">
-                  <button id="hideFolderBtn" class="btn" type="button"><span class="btn-icon" data-icon="eyeOff"></span>隐藏</button>
-                  <button id="viewHiddenFoldersBtn" class="btn" type="button"><span class="btn-icon" data-icon="eye"></span>查看隐藏的目录</button>
-                </div>
-              </div>
-              <div class="settings-danger-row">
-                <div class="settings-danger-text">
-                  <strong>移除当前目录</strong>
-                  <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
-                </div>
-                <button id="removeFolderBtn" class="btn danger remove-folder-btn" type="button"><span class="btn-icon" data-icon="trash"></span>移除</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- 7. 数据 -->
+        <!-- 6. 系统 -->
         <section class="settings-pane" id="tabData" role="tabpanel"
                  aria-labelledby="tabBtnData" data-pane="data" hidden>
           <div class="settings-section">
-            <h3 class="settings-section-title">界面主题</h3>
+            <h3 class="settings-section-title">主题</h3>
             <div class="theme-picker" id="settingsThemePicker" role="radiogroup" aria-label="选择界面主题">
               <button type="button" class="theme-option active" data-theme-choice="paper" aria-checked="true">
                 <span class="theme-option-swatch swatch-paper" aria-hidden="true"><span class="theme-option-icon" data-icon="themePaper"></span></span>
@@ -918,8 +886,8 @@
           </div>
 
           <div class="settings-section">
-            <h3 class="settings-section-title">缓存维护</h3>
-            <p class="settings-section-desc">只清理无引用的代理图与旧缓存文件，不会碰你的照片原图。</p>
+            <h3 class="settings-section-title">数据</h3>
+            <p class="settings-section-desc">以下操作只管理缓存与目录索引，绝不修改或删除你的照片原图。</p>
             <div class="settings-danger-zone">
               <div class="settings-danger-row">
                 <div class="settings-danger-text">
@@ -927,6 +895,23 @@
                   <span>删除没有被任何照片引用的代理图与缩略图，释放磁盘空间。</span>
                 </div>
                 <button id="cleanCacheBtn" class="btn" type="button"><span class="btn-icon" data-icon="clean"></span>清理</button>
+              </div>
+              <div class="settings-danger-row">
+                <div class="settings-danger-text">
+                  <strong>隐藏当前目录</strong>
+                  <span>隐藏后不会出现在主页的路径选择中，只能从这里重新进入；照片与索引都保留。</span>
+                </div>
+                <div class="settings-row-actions">
+                  <button id="hideFolderBtn" class="btn" type="button"><span class="btn-icon" data-icon="eyeOff"></span>隐藏</button>
+                  <button id="viewHiddenFoldersBtn" class="btn" type="button"><span class="btn-icon" data-icon="eye"></span>查看隐藏的目录</button>
+                </div>
+              </div>
+              <div class="settings-danger-row">
+                <div class="settings-danger-text">
+                  <strong>移除当前目录</strong>
+                  <span>清空这个目录的索引、评分与代理图缓存，原图保留在原处。</span>
+                </div>
+                <button id="removeFolderBtn" class="btn danger remove-folder-btn" type="button"><span class="btn-icon" data-icon="trash"></span>移除</button>
               </div>
             </div>
           </div>
@@ -964,7 +949,7 @@
     </div>
   </div>
 
-  <!-- Hidden albums: reachable only from 设置 → 数据管理. -->
+  <!-- Hidden albums: reachable only from 设置 → 系统. -->
   <div id="hiddenFoldersModal" class="modal hidden">
     <div class="modal-content">
       <button class="modal-close" data-close="hiddenFoldersModal"><span class="btn-icon" data-icon="close"></span></button>

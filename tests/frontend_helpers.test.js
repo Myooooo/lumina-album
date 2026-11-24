@@ -1646,13 +1646,13 @@ section("hidden albums");
   const html = fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
 
-  const hideAt = html.indexOf(">隐藏当前目录<");
-  const removeAt = html.indexOf(">移除当前目录<");
   const themeAt = html.indexOf('id="settingsThemePicker"');
   const cacheAt = html.indexOf(">清理缓存<");
+  const hideAt = html.indexOf(">隐藏当前目录<");
+  const removeAt = html.indexOf(">移除当前目录<");
   check(
-    "places tab runs hide → remove and data tab puts theme picker above cache",
-    hideAt > -1 && hideAt < removeAt && themeAt > -1 && themeAt < cacheAt,
+    "system tab puts theme picker above cache → hide → remove",
+    themeAt > -1 && themeAt < cacheAt && cacheAt < hideAt && hideAt < removeAt,
     true
   );
   check(
@@ -1862,10 +1862,18 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "settings topbar has the seven redesigned tabs in order",
-    /tabBtnModel[\s\S]{0,360}tabBtnImage[\s\S]{0,360}tabBtnVideo[\s\S]{0,360}tabBtnPeople[\s\S]{0,360}tabBtnGeo[\s\S]{0,360}tabBtnPlaces[\s\S]{0,360}tabBtnData/.test(
+    "settings topbar has the six redesigned tabs in order (地点 + 系统)",
+    /tabBtnModel[\s\S]{0,360}tabBtnImage[\s\S]{0,360}tabBtnVideo[\s\S]{0,360}tabBtnPeople[\s\S]{0,360}tabBtnGeo[\s\S]{0,200}地点[\s\S]{0,240}tabBtnData[\s\S]{0,200}系统/.test(
       html
-    ),
+    ) && !/id="tabBtnPlaces"/.test(html),
+    true
+  );
+  check(
+    "modal scroll lock and standalone prompt textarea styles are wired",
+    /html\.modal-open,\s*body\.modal-open/.test(css) &&
+      /overscroll-behavior:\s*contain/.test(css) &&
+      /function syncModalScrollLock\(/.test(src) &&
+      /\.prompt-editor textarea \{[\s\S]{0,240}border:/.test(css),
     true
   );
   check(

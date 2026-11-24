@@ -12414,3 +12414,107 @@ body[data-theme="vintage"] .manual-guide-list code {
 body[data-theme="vintage"] .manual-guide-list a {
   color: #eb9234;
 }
+
+/* ==========================================================================
+   Modal Background Scroll Lock & Standalone Prompt Editor Styling
+   ========================================================================== */
+html.modal-open,
+body.modal-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.modal,
+.modal-content,
+.modal-body,
+.settings-panes,
+.preview-info,
+.dir-list,
+.hidden-folders-list,
+.fs-viewer {
+  overscroll-behavior: contain;
+}
+
+/* Prompt editor inside .settings-section: no nested double card border, and
+   full standalone textarea styling across Classic / Paper / Vintage themes. */
+.settings-section > .prompt-editor {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.settings-section > .prompt-editor .prompt-editor-head label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+.settings-section > .prompt-editor .prompt-editor-head label::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--primary);
+  flex-shrink: 0;
+}
+
+.prompt-editor textarea {
+  width: 100%;
+  min-height: 204px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+  font-size: 13.5px;
+  font-family: inherit;
+  line-height: 1.65;
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.prompt-editor textarea:focus {
+  border-color: var(--primary);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+body[data-theme="paper"] .prompt-editor textarea {
+  background: #fffdf8;
+  border-color: #d5cab5;
+  border-radius: 3px;
+  color: #362e26;
+}
+
+body[data-theme="paper"] .prompt-editor textarea:focus {
+  background: #ffffff;
+  border-color: var(--primary);
+}
+
+body[data-theme="vintage"] .settings-section > .prompt-editor {
+  background: transparent;
+  border: none;
+}
+
+body[data-theme="vintage"] .prompt-editor textarea {
+  background: #1a1816;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+  color: #e9e2d6;
+  font-family: var(--font-sans);
+}
+
+body[data-theme="vintage"] .prompt-editor textarea:focus {
+  background: #121110;
+  border-color: #eb9234;
+  color: #f4eee4;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.24);
+}
