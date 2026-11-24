@@ -174,48 +174,62 @@ function resetFullscreenZoom() {
  * labels itself with the title, instead of falling back to the album's rows, which
  * may not contain the photo at all.
  */
-function openPreview(id, context = null) {
-  let sourceRect = null;
-  if (typeof document !== "undefined" && !prefersReducedMotion()) {
-    const cardThumb =
-      document.querySelector(`.polaroid-card[data-id="${id}"] .polaroid-photo-frame`) ||
-      document.querySelector(`.dup-card[data-id="${id}"] .dup-shot`);
-    if (cardThumb) {
-      const r = cardThumb.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) {
-        sourceRect = r;
-      }
-    }
+function findVisiblePhotoCardRect(id) {
+  if (typeof document === "undefined" || !id) return null;
+  const cardThumb =
+    document.querySelector(`.polaroid-card[data-id="${id}"] .polaroid-photo-frame`) ||
+    document.querySelector(`.dup-card[data-id="${id}"] .dup-shot`);
+  if (!cardThumb) return null;
+  const r = cardThumb.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0 || r.bottom <= 0 || r.top >= window.innerHeight) {
+    return null;
   }
+  return r;
+}
+
+function openPreview(id, context = null) {
+  const modal = $("previewModal");
+  const content = modal ? modal.querySelector(".preview-content") : null;
+  const sourceRect = !prefersReducedMotion() ? findVisiblePhotoCardRect(id) : null;
+
   state.previewNavToken += 1;
   state.currentPreviewId = id;
   state.previewContext = context && context.ids && context.ids.length ? context : null;
-  showModal($("previewModal"));
-  pushModal($("previewModal"));
+  if (modal) modal.classList.remove("is-flip-opening", "is-flip-closing");
+  if (content) {
+    content.style.transition = "";
+    content.style.transform = "";
+    content.style.opacity = "";
+  }
+  showModal(modal);
+  pushModal(modal);
   updatePreview();
 
-  if (sourceRect && typeof requestAnimationFrame === "function") {
-    const stage = document.querySelector("#previewModal .preview-stage");
-    if (stage) {
+  // Single unified directional FLIP on .preview-content (never fights modalPop
+  // and always has deterministic geometry on frame 1 even before image decode).
+  if (sourceRect && modal && content && typeof requestAnimationFrame === "function") {
+    modal.classList.add("is-flip-opening");
+    const target = content.getBoundingClientRect();
+    if (target.width > 0 && target.height > 0) {
+      const rawDx = sourceRect.left + sourceRect.width / 2 - (target.left + target.width / 2);
+      const rawDy = sourceRect.top + sourceRect.height / 2 - (target.top + target.height / 2);
+      const dx = Math.max(-180, Math.min(180, rawDx * 0.36));
+      const dy = Math.max(-140, Math.min(140, rawDy * 0.36));
+      content.style.transition = "none";
+      content.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0) scale(0.92)`;
+      content.style.opacity = "0";
+      void content.offsetWidth;
       requestAnimationFrame(() => {
-        const target = stage.getBoundingClientRect();
-        if (!target.width || !target.height) return;
-        const dx = sourceRect.left + sourceRect.width / 2 - (target.left + target.width / 2);
-        const dy = sourceRect.top + sourceRect.height / 2 - (target.top + target.height / 2);
-        const scale = Math.max(0.25, Math.min(1, sourceRect.width / target.width));
-        stage.style.transition = "none";
-        stage.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${scale.toFixed(3)})`;
-        stage.style.opacity = "0.75";
-        void stage.offsetWidth;
-        stage.style.transition = "transform 260ms var(--ease-out), opacity 200ms var(--ease-out)";
-        stage.style.transform = "";
-        stage.style.opacity = "";
-        setTimeout(() => {
-          stage.style.transition = "";
-          stage.style.transform = "";
-          stage.style.opacity = "";
-        }, 290);
+        content.style.transition = "transform 260ms var(--ease-out), opacity 190ms var(--ease-out)";
+        content.style.transform = "translate3d(0, 0, 0) scale(1)";
+        content.style.opacity = "1";
       });
+      setTimeout(() => {
+        modal.classList.remove("is-flip-opening");
+        content.style.transition = "";
+        content.style.transform = "";
+        content.style.opacity = "";
+      }, 280);
     }
   }
 }
@@ -691,7 +705,36 @@ function hideLiveButton() {
  * dialog that is re-opened mid-animation is handled (see ui-kit.js).
  */
 function closeModal(id, onHidden) {
-  hideModal($(id), onHidden);
+  const modal = $(id);
+  const closingPreviewId = id === "previewModal" ? state.currentPreviewId : null;
+  let previewContent = null;
+  if (id === "previewModal" && modal && !modal.classList.contains("hidden") && !prefersReducedMotion()) {
+    previewContent = modal.querySelector(".preview-content");
+    const targetCard = findVisiblePhotoCardRect(closingPreviewId);
+    if (previewContent && targetCard) {
+      const rect = previewContent.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const rawDx = targetCard.left + targetCard.width / 2 - (rect.left + rect.width / 2);
+        const rawDy = targetCard.top + targetCard.height / 2 - (rect.top + rect.height / 2);
+        const dx = Math.max(-160, Math.min(160, rawDx * 0.34));
+        const dy = Math.max(-120, Math.min(120, rawDy * 0.34));
+        modal.classList.remove("is-flip-opening");
+        modal.classList.add("is-flip-closing");
+        previewContent.style.transition = "transform 170ms var(--ease-out), opacity 150ms var(--ease-out)";
+        previewContent.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0) scale(0.92)`;
+        previewContent.style.opacity = "0";
+      }
+    }
+  }
+  hideModal(modal, () => {
+    if (modal) modal.classList.remove("is-flip-opening", "is-flip-closing");
+    if (previewContent) {
+      previewContent.style.transition = "";
+      previewContent.style.transform = "";
+      previewContent.style.opacity = "";
+    }
+    if (typeof onHidden === "function") onHidden();
+  });
   // Keep the open-order stack honest however the dialog was dismissed - the ×
   // button, Escape or a code path like "cancelling the folder
   // browser returns to the import sheet".

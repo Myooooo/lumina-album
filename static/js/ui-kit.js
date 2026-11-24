@@ -7,8 +7,8 @@ window.LuminaUI = (() => {
   const getEl = (id) => document.getElementById(id);
   const ICONS = window.LuminaIcons || {};
 
-  //: Must match the ``modalPopOut`` / ``dropdownOut`` durations in style.css.
-  const EXIT_MS = 190;
+  //: Must match the ``modalPopOut`` / ``modalBackdropOut`` durations in style.css.
+  const EXIT_MS = 170;
 
   const prefersReducedMotion = () =>
     typeof window.matchMedia === "function" &&

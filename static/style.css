@@ -416,6 +416,14 @@ svg {
   white-space: nowrap;
 }
 
+.btn .btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .btn svg {
   width: 16px;
   height: 16px;
@@ -2518,7 +2526,7 @@ select {
   overflow: hidden;
   user-select: none;
   touch-action: none;
-  animation: modalBackdrop .25s ease both;
+  animation: modalBackdrop 200ms var(--ease-out) both;
 }
 
 .fs-viewer-close {
@@ -2790,7 +2798,7 @@ select {
   display: block;
   height: 100%;
   border-radius: 99px;
-  transition: width .5s ease;
+  transition: width 360ms var(--ease-out);
 }
 
 .dimension-value {
@@ -3023,21 +3031,21 @@ select {
 .preview-side-btn.prev { left: 24px; }
 .preview-side-btn.next { right: 24px; }
 
-/* Image slide animations */
+/* Image slide animations (pure transform + opacity, zero blur overhead) */
 .preview-switch-left {
-  animation: previewSwitchLeft 220ms var(--ease-out) both;
+  animation: previewSwitchLeft 180ms var(--ease-out) both;
 }
 .preview-switch-right {
-  animation: previewSwitchRight 220ms var(--ease-out) both;
+  animation: previewSwitchRight 180ms var(--ease-out) both;
 }
 
 @keyframes previewSwitchLeft {
-  from { opacity: 0; transform: translateX(-16px) scale(0.985); filter: blur(1.5px); }
-  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateX(-14px) scale(0.99); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
 }
 @keyframes previewSwitchRight {
-  from { opacity: 0; transform: translateX(16px) scale(0.985); filter: blur(1.5px); }
-  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateX(14px) scale(0.99); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
 }
 
 /* ---------- Folder Browser Modal ---------- */
@@ -3187,8 +3195,8 @@ select {
 }
 
 @keyframes historyDrop {
-  from { opacity: 0; transform: translateY(-5px) scale(0.975); filter: blur(1px); }
-  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateY(-5px) scale(0.975); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes historyLift {
@@ -3990,8 +3998,8 @@ select {
 .toast.removing { animation: toastOut 150ms var(--ease-out) both; }
 
 @keyframes toastIn {
-  from { opacity: 0; transform: translateX(18px) scale(0.97); filter: blur(1px); }
-  to { opacity: 1; transform: translateX(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateX(16px) scale(0.975); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
 }
 @keyframes toastOut {
   from { opacity: 1; transform: translateX(0) scale(1); }
@@ -4110,29 +4118,38 @@ select {
 /* Menus grow from their trigger's edge, so the vertical scale is anchored at
    the top rather than the middle. */
 @keyframes dropdownIn {
-  from { opacity: 0; transform: translateY(-4px) scale(0.97); filter: blur(1.5px); }
-  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @keyframes dropdownOut {
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(-3px) scale(0.98); }
 }
 
-/* ---------- Exit animations ---------- */
-/* ``hideModal`` / the dropdown helper add ``.closing`` and remove the element
-   from view once the reverse animation has played. Durations here must stay in
-   step with ``EXIT_MS`` in js/ui-kit.js. */
+/* ---------- Exit animations (faster than entrances, synced with EXIT_MS = 170) ---------- */
 .modal.closing {
-  animation: modalBackdropOut .19s var(--ease-out) both;
+  animation: modalBackdropOut 170ms var(--ease-out) both;
   pointer-events: none;
 }
 .modal.closing > .modal-content,
 .modal.closing > .preview-content {
-  animation: modalPopOut .19s var(--ease-out) both;
+  animation: modalPopOut 170ms var(--ease-out) both;
+}
+/* Directional FLIP lightbox open & close: JS drives the single unified transform */
+#previewModal.is-flip-opening > .preview-content,
+#previewModal.is-flip-closing > .preview-content {
+  animation: none;
+}
+#previewModal.is-flip-opening .preview-info {
+  animation: previewInfoIn 240ms var(--ease-out) 40ms both;
+}
+@keyframes previewInfoIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 /* The fullscreen viewer has no dialog box, so only its backdrop fades. */
 .fs-viewer.closing {
-  animation: modalBackdropOut .19s var(--ease-out) both;
+  animation: modalBackdropOut 170ms var(--ease-out) both;
   pointer-events: none;
 }
 .custom-select-menu.closing {
@@ -4421,8 +4438,8 @@ select {
 }
 
 @keyframes viewOut {
-  from { opacity: 1; transform: translateY(0); filter: blur(0px); }
-  to   { opacity: 0; transform: translateY(-4px); filter: blur(1.5px); }
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-4px); }
 }
 
 /* Full-bleed spread: no centered 1180px box constraint. The three views spread
@@ -5409,7 +5426,6 @@ body:not([data-view="album"]) .topbar {
 .footprints-body.is-transitioning-out {
   opacity: 0;
   transform: translateY(-4px) scale(0.992);
-  filter: blur(1.5px);
   pointer-events: none;
 }
 
@@ -7834,7 +7850,7 @@ body[data-theme="classic"] .view-ink {
   box-shadow: 0 2px 10px rgba(38, 31, 25, 0.1), inset 0 1px 0 #ffffff;
 }
 
-body[data-theme="classic"] .btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active),
+body[data-theme="classic"] :where(.btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active)),
 body[data-theme="classic"] .force-label,
 body[data-theme="classic"] .stat,
 body[data-theme="classic"] .folder-row input[type="text"],
@@ -7843,15 +7859,42 @@ body[data-theme="classic"] .custom-select-trigger,
 body[data-theme="classic"] .search-capsule {
   background: rgba(255, 255, 255, 0.78);
   border-color: rgba(125, 95, 65, 0.14);
+  color: var(--text-secondary);
   box-shadow: 0 1px 2px rgba(38, 31, 25, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
-body[data-theme="classic"] .btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active):hover,
+body[data-theme="classic"] :where(.btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active)):hover,
 body[data-theme="classic"] .force-label:hover,
 body[data-theme="classic"] .stat:hover {
   background: rgba(255, 255, 255, 0.94);
   border-color: rgba(125, 95, 65, 0.22);
+  color: var(--text);
   box-shadow: 0 4px 14px rgba(38, 31, 25, 0.08), inset 0 1px 0 #ffffff;
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .btn.small {
+  background: rgba(247, 239, 228, 0.1);
+  border-color: rgba(226, 204, 178, 0.2);
+  color: #dfd3c5;
+  box-shadow: none;
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .btn.small:hover {
+  background: rgba(247, 239, 228, 0.2);
+  border-color: rgba(226, 204, 178, 0.34);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .btn.small.danger {
+  background: rgba(217, 83, 79, 0.12);
+  border-color: rgba(217, 83, 79, 0.36);
+  color: #f0a19c;
+}
+
+body[data-theme="classic"] .polaroid-card.is-video .btn.small.danger:hover {
+  background: rgba(217, 83, 79, 0.28);
+  color: #ffe8e6;
 }
 
 body[data-theme="classic"] .btn.primary {
@@ -8179,7 +8222,7 @@ body[data-theme="paper"] .settings-tab.active svg {
   color: #fbf7ee;
 }
 
-body[data-theme="paper"] .btn,
+body[data-theme="paper"] :where(.btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active)),
 body[data-theme="paper"] .force-label,
 body[data-theme="paper"] .stat,
 body[data-theme="paper"] .folder-row input[type="text"],
@@ -8195,13 +8238,39 @@ body[data-theme="paper"] .search-capsule {
   box-shadow: 2px 2px 0 rgba(70, 55, 35, 0.08);
 }
 
-body[data-theme="paper"] .btn:hover,
+body[data-theme="paper"] :where(.btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active)):hover,
 body[data-theme="paper"] .force-label:hover,
 body[data-theme="paper"] .stat:hover {
   background: #ffffff;
   border-color: #bfb39c;
   color: #2c241d;
   box-shadow: 3px 3px 0 rgba(70, 55, 35, 0.12);
+}
+
+body[data-theme="paper"] .selection-bar .btn {
+  background: rgba(255, 253, 247, 0.14);
+  border-color: rgba(226, 205, 178, 0.2);
+  color: #fbf7ee;
+  box-shadow: none;
+}
+
+body[data-theme="paper"] .selection-bar .btn:hover {
+  background: rgba(255, 253, 247, 0.24);
+  color: #ffffff;
+  box-shadow: none;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .btn.small {
+  background: rgba(247, 239, 228, 0.1);
+  border-color: rgba(226, 204, 178, 0.2);
+  color: #dfd3c5;
+  box-shadow: none;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .btn.small:hover {
+  background: rgba(247, 239, 228, 0.2);
+  color: #ffffff;
+  box-shadow: none;
 }
 
 body[data-theme="paper"] .btn.primary,
@@ -8414,7 +8483,7 @@ body[data-theme="vintage"] .settings-tab.active svg {
 }
 
 /* Unify ALL darkroom controls & panels to #1a1816 / #171513 charcoal */
-body[data-theme="vintage"] .btn,
+body[data-theme="vintage"] :where(.btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active)),
 body[data-theme="vintage"] .force-label,
 body[data-theme="vintage"] .stat,
 body[data-theme="vintage"] .folder-row input[type="text"],
@@ -8435,12 +8504,25 @@ body[data-theme="vintage"] .prompt-save-row input[type="text"] {
   font-family: var(--font-mono), "PingFang SC", monospace;
 }
 
-body[data-theme="vintage"] .btn:hover,
+body[data-theme="vintage"] :where(.btn:not(.primary):not(.danger):not(.search-submit-btn):not(.card-status):not(.active)):hover,
 body[data-theme="vintage"] .force-label:hover,
 body[data-theme="vintage"] .stat:hover {
   background: #221f1c;
   border-color: #eb9234;
   color: #f4eee4;
+}
+
+body[data-theme="vintage"] .btn.danger {
+  background: #1a1816;
+  border: 1px solid rgba(226, 99, 76, 0.42);
+  border-radius: 2px;
+  color: #f08a78;
+}
+
+body[data-theme="vintage"] .btn.danger:hover:not(:disabled) {
+  background: #e2634c;
+  border-color: #e2634c;
+  color: #141210;
 }
 
 body[data-theme="vintage"] .btn.primary,
