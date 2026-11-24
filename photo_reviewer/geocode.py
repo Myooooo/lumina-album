@@ -86,6 +86,28 @@ def wgs84_to_gcj02(lat: float, lon: float) -> tuple[float, float]:
     return lat + d_lat, lon + d_lon
 
 
+def gcj02_to_wgs84(lat: float, lon: float) -> tuple[float, float]:
+    """Convert China GCJ-02 coordinates back to standard WGS-84."""
+    if _out_of_china(lat, lon):
+        return lat, lon
+    g_lat, g_lon = wgs84_to_gcj02(lat, lon)
+    return lat * 2.0 - g_lat, lon * 2.0 - g_lon
+
+
+def _parse_amap_lonlat(raw: str) -> tuple[float, float] | None:
+    """Parse AMap 'lon,lat' (GCJ-02) into standard WGS-84 (lat, lon)."""
+    text = str(raw or "").strip()
+    if "," not in text:
+        return None
+    try:
+        lon_s, lat_s = text.split(",", 1)
+        g_lon = float(lon_s.strip())
+        g_lat = float(lat_s.strip())
+    except ValueError:
+        return None
+    return gcj02_to_wgs84(g_lat, g_lon)
+
+
 def _get_json(
     url: str,
     params: dict,
@@ -208,3 +230,133 @@ def reverse_geocode(
         retries=retries,
     )
     return (data.get("display_name") or data.get("name") or None) if data else None
+
+
+def forward_geocode(
+    query: str,
+    provider: str = "nominatim",
+    api_key: str = "",
+    interval: float = 1.0,
+    retries: int = 3,
+    allow_fallback: bool = False,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Resolve a human-entered place name into WGS-84 coordinate candidates."""
+    text = str(query or "").strip()
+    if not text or not geocoding_enabled(provider):
+        return []
+    limit = max(1, min(int(limit or 5), 10))
+    candidates: list[dict[str, Any]] = []
+
+    if provider == "amap" and api_key:
+        _wait_for_queue_slot(interval)
+        data = _get_json(
+            "https://restapi.amap.com/v3/geocode/geo",
+            {
+                "address": text,
+                "key": api_key,
+                "output": "json",
+            },
+            retries=retries,
+        )
+        if data and str(data.get("status")) == "1":
+            for item in (data.get("geocodes") or [])[:limit]:
+                coords = _parse_amap_lonlat(item.get("location", ""))
+                if not coords:
+                    continue
+                city_val = item.get("city")
+                if isinstance(city_val, list):
+                    city_val = ""
+                province_val = item.get("province") or ""
+                if isinstance(province_val, list):
+                    province_val = ""
+                formatted = str(item.get("formatted_address") or text).strip()
+                candidates.append(
+                    {
+                        "name": text,
+                        "address": formatted,
+                        "city": str(city_val or province_val or "").strip(),
+                        "lat": round(coords[0], 6),
+                        "lon": round(coords[1], 6),
+                        "provider": "amap",
+                    }
+                )
+        if not candidates:
+            _wait_for_queue_slot(interval)
+            poi_data = _get_json(
+                "https://restapi.amap.com/v3/place/text",
+                {
+                    "keywords": text,
+                    "key": api_key,
+                    "offset": limit,
+                    "page": 1,
+                    "output": "json",
+                },
+                retries=retries,
+            )
+            if poi_data and str(poi_data.get("status")) == "1":
+                for poi in (poi_data.get("pois") or [])[:limit]:
+                    coords = _parse_amap_lonlat(poi.get("location", ""))
+                    if not coords:
+                        continue
+                    pname = str(poi.get("name") or text).strip()
+                    cityname = str(poi.get("cityname") or poi.get("pname") or "").strip()
+                    adname = str(poi.get("adname") or "").strip()
+                    addr = str(poi.get("address") or "").strip()
+                    full_addr = "".join(
+                        p for p in (cityname, adname, addr if addr != "[]" else "", pname) if p
+                    ) or pname
+                    candidates.append(
+                        {
+                            "name": pname,
+                            "address": full_addr,
+                            "city": cityname,
+                            "lat": round(coords[0], 6),
+                            "lon": round(coords[1], 6),
+                            "provider": "amap",
+                        }
+                    )
+        if candidates or not allow_fallback:
+            return candidates
+
+    _wait_for_queue_slot(interval)
+    data = _get_json(
+        "https://nominatim.openstreetmap.org/search",
+        {
+            "format": "jsonv2",
+            "q": text,
+            "accept-language": "zh-CN",
+            "addressdetails": 1,
+            "limit": limit,
+        },
+        headers={"User-Agent": "LocalPhotoAlbum/1.0 (personal use)"},
+        retries=retries,
+    )
+    if isinstance(data, list):
+        for item in data[:limit]:
+            try:
+                lat = float(item["lat"])
+                lon = float(item["lon"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            addr_obj = item.get("address") or {}
+            city = (
+                addr_obj.get("city")
+                or addr_obj.get("town")
+                or addr_obj.get("municipality")
+                or addr_obj.get("state")
+                or ""
+            )
+            display = str(item.get("display_name") or item.get("name") or text).strip()
+            name = str(item.get("name") or text).strip() or text
+            candidates.append(
+                {
+                    "name": name,
+                    "address": display,
+                    "city": str(city).strip(),
+                    "lat": round(lat, 6),
+                    "lon": round(lon, 6),
+                    "provider": "nominatim",
+                }
+            )
+    return candidates

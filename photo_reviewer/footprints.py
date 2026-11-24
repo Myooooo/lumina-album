@@ -31,6 +31,12 @@ class Footprint:
     name: str
     city: str
     photos: list[dict[str, Any]] = field(default_factory=list)
+    lat: float | None = None
+    lon: float | None = None
+    place_id: int | None = None
+    address: str = ""
+    source: str = "auto"  # "auto" | "manual"
+    cover_photo_id: int | None = None
 
     @property
     def count(self) -> int:
@@ -41,6 +47,47 @@ class Footprint:
         """Distinct capture years, oldest first."""
         found = {_capture_year(photo) for photo in self.photos}
         return sorted(year for year in found if year)
+
+
+def photo_coords(photo: dict[str, Any]) -> tuple[float, float] | None:
+    """Extract standard WGS-84 (lat, lon) from explicit DB columns or EXIF JSON."""
+    raw_lat = photo.get("lat")
+    raw_lon = photo.get("lon")
+    if raw_lat is not None and raw_lon is not None:
+        try:
+            lat = float(raw_lat)
+            lon = float(raw_lon)
+            if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                return (lat, lon)
+        except (TypeError, ValueError):
+            pass
+    exif = photo.get("exif")
+    if isinstance(exif, str):
+        try:
+            exif = json.loads(exif) if exif.strip() else {}
+        except ValueError:
+            exif = {}
+    if isinstance(exif, dict):
+        elat = exif.get("latitude")
+        elon = exif.get("longitude")
+        if elat is not None and elon is not None:
+            try:
+                lat = float(elat)
+                lon = float(elon)
+                if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0:
+                    return (lat, lon)
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _average_coords(photos: list[dict[str, Any]]) -> tuple[float | None, float | None]:
+    coords = [c for p in photos if (c := photo_coords(p)) is not None]
+    if not coords:
+        return (None, None)
+    lat = sum(c[0] for c in coords) / len(coords)
+    lon = sum(c[1] for c in coords) / len(coords)
+    return (round(lat, 6), round(lon, 6))
 
 
 def _capture_year(photo: dict[str, Any]) -> int | None:
@@ -156,13 +203,69 @@ def group_by_city(photos: list[dict[str, Any]]) -> list[Footprint]:
             continue
         buckets.setdefault(bucket, []).append(photo)
 
-    footprints = [
-        Footprint(
-            name=name,
-            city=name,
-            photos=sorted(items, key=lambda p: p["id"]),
+    footprints = []
+    for name, items in buckets.items():
+        ordered = sorted(items, key=lambda p: p["id"])
+        lat, lon = _average_coords(ordered)
+        footprints.append(
+            Footprint(
+                name=name,
+                city=name,
+                photos=ordered,
+                lat=lat,
+                lon=lon,
+                source="auto",
+            )
         )
-        for name, items in buckets.items()
-    ]
     footprints.sort(key=lambda f: (-f.count, f.city))
     return footprints
+
+
+def merge_places_and_footprints(
+    photos: list[dict[str, Any]],
+    custom_places: list[dict[str, Any]],
+) -> list[Footprint]:
+    """Combine user-created places with auto-detected EXIF city footprints.
+
+    Photos explicitly assigned to a custom place (via ``place_id``) appear under
+    that place and are excluded from auto city buckets to avoid double counting.
+    Empty custom places are preserved so users can create a place first and add
+    photos to it afterwards.
+    """
+    place_map: dict[int, dict[str, Any]] = {
+        int(p["id"]): p for p in custom_places if p.get("id") is not None
+    }
+    manual_buckets: dict[int, list[dict[str, Any]]] = {pid: [] for pid in place_map}
+    auto_photos: list[dict[str, Any]] = []
+
+    for photo in photos:
+        pid = photo.get("place_id")
+        if pid is not None and int(pid) in manual_buckets:
+            manual_buckets[int(pid)].append(photo)
+        else:
+            auto_photos.append(photo)
+
+    merged: list[Footprint] = []
+    for pid, pinfo in place_map.items():
+        items = sorted(manual_buckets.get(pid) or [], key=lambda p: p["id"])
+        lat = pinfo.get("lat")
+        lon = pinfo.get("lon")
+        if lat is None or lon is None:
+            lat, lon = _average_coords(items)
+        merged.append(
+            Footprint(
+                name=str(pinfo.get("name") or "").strip() or "未命名地点",
+                city=str(pinfo.get("city") or pinfo.get("name") or "").strip(),
+                photos=items,
+                lat=float(lat) if lat is not None else None,
+                lon=float(lon) if lon is not None else None,
+                place_id=pid,
+                address=str(pinfo.get("address") or "").strip(),
+                source="manual",
+                cover_photo_id=pinfo.get("cover_photo_id"),
+            )
+        )
+
+    merged.extend(group_by_city(auto_photos))
+    merged.sort(key=lambda f: (0 if f.count > 0 else 1, -f.count, f.name))
+    return merged

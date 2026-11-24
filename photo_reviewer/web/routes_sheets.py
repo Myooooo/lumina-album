@@ -27,7 +27,8 @@ from ..exporter import (
     tall_image_bytes,
 )
 
-from ..footprints import group_by_city
+from ..footprints import city_of, merge_places_and_footprints, photo_coords
+from ..geocode import forward_geocode, geocoding_enabled
 
 from .constants import (
     MAX_EXPORT_PHOTOS,
@@ -164,75 +165,292 @@ def register(app, cfg, database):
 
     @app.get("/api/footprints")
     def api_footprints():
-        """Where the photos were taken, grouped into places rather than addresses.
-
-        The reverse geocoder stores full street addresses, which is right for a
-        photo's caption and useless for a footprint list - every photo of one park
-        would be its own entry. ``city_of`` collapses them to the city, which took
-        404 distinct addresses down to 22 places on this library.
-
-        No map tiles: a coordinate map needs a tile server and an internet
-        connection, and this app is deliberately local. The place list plus a
-        representative photo says the same thing without either.
-        """
+        """Return unified footprints combining user-created places and EXIF cities."""
         folder = request.args.get("folder", "").strip() or None
         rows = database.located_photos(folder)
-        footprints = group_by_city(rows)
+        custom_places = database.list_places()
+        footprints = merge_places_and_footprints(rows, custom_places)
+
+        def _cover_for(item):
+            if not item.photos:
+                return None
+            chosen = None
+            if item.cover_photo_id:
+                chosen = next((p for p in item.photos if p["id"] == item.cover_photo_id), None)
+            if chosen is None:
+                chosen = item.photos[0]
+            return {
+                "id": chosen["id"],
+                "filename": chosen.get("filename") or "",
+                "thumb_version": chosen.get("phash") or "",
+            }
+
+        def _serialize_photo(photo):
+            coords = photo_coords(photo)
+            return {
+                "id": photo["id"],
+                "filename": photo.get("filename") or "",
+                "path": photo.get("path") or "",
+                "raw_path": photo.get("raw_path"),
+                "has_raw": bool(photo.get("raw_path")),
+                "is_raw": _is_raw_file(
+                    photo.get("path") or photo.get("original_path")
+                ),
+                "raw_ext": (
+                    Path(photo["raw_path"]).suffix.lstrip(".").upper()
+                    if photo.get("raw_path")
+                    else ""
+                ),
+                "size": photo.get("size") or 0,
+                "width": photo.get("width") or 0,
+                "height": photo.get("height") or 0,
+                "status": photo.get("status") or "",
+                "media_kind": photo.get("media_kind") or "photo",
+                "score": photo.get("score"),
+                "favorite": bool(photo.get("favorite")),
+                "location": photo.get("location"),
+                "place_id": photo.get("place_id"),
+                "lat": coords[0] if coords else None,
+                "lon": coords[1] if coords else None,
+                "thumb_version": photo.get("phash") or "",
+            }
+
+        active_coords = [
+            (item.lat, item.lon)
+            for item in footprints
+            if item.count > 0 and item.lat is not None and item.lon is not None
+        ]
+        bounds = None
+        if active_coords:
+            bounds = {
+                "min_lat": min(c[0] for c in active_coords),
+                "max_lat": max(c[0] for c in active_coords),
+                "min_lon": min(c[1] for c in active_coords),
+                "max_lon": max(c[1] for c in active_coords),
+            }
+
         return jsonify(
             {
                 "total": sum(item.count for item in footprints),
+                "bounds": bounds,
                 "places": [
                     {
+                        "key": f"place:{item.place_id}" if item.place_id is not None else f"city:{item.city}",
+                        "id": item.place_id,
+                        "name": item.name,
                         "city": item.city,
+                        "address": item.address,
+                        "source": item.source,
+                        "lat": item.lat,
+                        "lon": item.lon,
                         "count": item.count,
                         "years": item.years,
-                        # Only what the cover thumbnail needs: a full photo payload
-                        # carries EXIF, tags and captions the place list never shows.
-                        "cover": {
-                            "id": item.photos[0]["id"],
-                            "filename": item.photos[0].get("filename") or "",
-                            "thumb_version": item.photos[0].get("phash") or "",
-                        },
-                        # The place opens to its own grid, so the rows come with it
-                        # rather than needing a second request per click. Kept to
-                        # the fields a thumbnail and the dialog's first paint read:
-                        # the full payload is thirty fields, and a place with 832
-                        # photos turned that into a two-megabyte response.
-                        "photos": [
-                            {
-                                "id": photo["id"],
-                                "filename": photo.get("filename") or "",
-                                # The dialog draws a path row and a RAW marker from
-                                # these; the trimmed row used to omit them, so a
-                                # photo opened here showed neither.
-                                "path": photo.get("path") or "",
-                                "raw_path": photo.get("raw_path"),
-                                "has_raw": bool(photo.get("raw_path")),
-                                "is_raw": _is_raw_file(
-                                    photo.get("path") or photo.get("original_path")
-                                ),
-                                "raw_ext": (
-                                    Path(photo["raw_path"]).suffix.lstrip(".").upper()
-                                    if photo.get("raw_path")
-                                    else ""
-                                ),
-                                "size": photo.get("size") or 0,
-                                "width": photo.get("width") or 0,
-                                "height": photo.get("height") or 0,
-                                "status": photo.get("status") or "",
-                                "media_kind": photo.get("media_kind") or "photo",
-                                "score": photo.get("score"),
-                                "favorite": bool(photo.get("favorite")),
-                                "location": photo.get("location"),
-                                "thumb_version": photo.get("phash") or "",
-                            }
-                            for photo in item.photos
-                        ],
+                        "cover": _cover_for(item),
+                        "photos": [_serialize_photo(photo) for photo in item.photos],
                     }
                     for item in footprints
                 ],
             }
         )
+
+    @app.get("/api/places")
+    def api_list_places():
+        return jsonify({"places": database.list_places()})
+
+    @app.post("/api/places/geocode")
+    def api_places_geocode():
+        data = request.get_json(force=True, silent=True) or {}
+        query = str(data.get("query") or "").strip()
+        if not query:
+            return jsonify({"error": "请输入要查询的地点名称"}), 400
+        if not geocoding_enabled(cfg.geocoding_provider):
+            return jsonify(
+                {
+                    "candidates": [],
+                    "provider": cfg.geocoding_provider,
+                    "message": "当前已在「设置 → 地点」中关闭外部地理编码服务，可手动填写经纬度。",
+                }
+            )
+        candidates = forward_geocode(
+            query,
+            provider=cfg.geocoding_provider,
+            api_key=cfg.geocoding_api_key,
+            interval=cfg.geocoding_interval,
+            retries=cfg.geocoding_retries,
+            allow_fallback=cfg.geocoding_fallback,
+            limit=5,
+        )
+        return jsonify(
+            {
+                "candidates": candidates,
+                "provider": cfg.geocoding_provider,
+            }
+        )
+
+    @app.post("/api/places")
+    def api_create_place():
+        data = request.get_json(force=True, silent=True) or {}
+        name = str(data.get("name") or "").strip()[:80]
+        if not name:
+            return jsonify({"error": "请输入地点名称"}), 400
+        if database.find_place_by_name(name):
+            return jsonify({"error": f"已存在名为「{name}」的地点"}), 409
+
+        address = str(data.get("address") or "").strip()[:200]
+        city = str(data.get("city") or "").strip()[:80]
+        lat = data.get("lat")
+        lon = data.get("lon")
+        try:
+            lat = float(lat) if lat not in (None, "") else None
+            lon = float(lon) if lon not in (None, "") else None
+        except (TypeError, ValueError):
+            return jsonify({"error": "经纬度格式不正确"}), 400
+        if lat is not None and not (-90.0 <= lat <= 90.0):
+            return jsonify({"error": "纬度需在 -90 到 90 之间"}), 400
+        if lon is not None and not (-180.0 <= lon <= 180.0):
+            return jsonify({"error": "经度需在 -180 到 180 之间"}), 400
+
+        geocoded = False
+        if (lat is None or lon is None) and data.get("auto_geocode", True) and geocoding_enabled(cfg.geocoding_provider):
+            cands = forward_geocode(
+                address or name,
+                provider=cfg.geocoding_provider,
+                api_key=cfg.geocoding_api_key,
+                interval=cfg.geocoding_interval,
+                retries=cfg.geocoding_retries,
+                allow_fallback=cfg.geocoding_fallback,
+                limit=1,
+            )
+            if cands:
+                lat = cands[0]["lat"]
+                lon = cands[0]["lon"]
+                if not address:
+                    address = cands[0].get("address") or name
+                if not city:
+                    city = cands[0].get("city") or city_of(address) or name
+                geocoded = True
+
+        if not city:
+            city = city_of(address or name) or name
+
+        place_id = database.create_place(
+            name=name,
+            city=city,
+            address=address or name,
+            lat=lat,
+            lon=lon,
+            source="manual",
+        )
+        raw_photo_ids = data.get("photo_ids") or []
+        assigned = 0
+        if isinstance(raw_photo_ids, list) and raw_photo_ids:
+            valid_ids = []
+            for pid in raw_photo_ids:
+                try:
+                    valid_ids.append(int(pid))
+                except (TypeError, ValueError):
+                    continue
+            if valid_ids:
+                assigned = database.assign_photos_to_place(place_id, valid_ids)
+        return jsonify(
+            {
+                "ok": True,
+                "place": database.get_place(place_id),
+                "geocoded": geocoded,
+                "assigned": assigned,
+            }
+        ), 201
+
+    @app.patch("/api/places/<int:place_id>")
+    def api_update_place(place_id: int):
+        existing = database.get_place(place_id)
+        if not existing:
+            return jsonify({"error": "地点不存在"}), 404
+        data = request.get_json(force=True, silent=True) or {}
+        name = None
+        if "name" in data:
+            name = str(data.get("name") or "").strip()[:80]
+            if not name:
+                return jsonify({"error": "地点名称不能为空"}), 400
+            if database.find_place_by_name(name, exclude_id=place_id):
+                return jsonify({"error": f"已存在名为「{name}」的地点"}), 409
+        address = str(data.get("address") or "").strip()[:200] if "address" in data else None
+        city = str(data.get("city") or "").strip()[:80] if "city" in data else None
+        update_coords = "lat" in data or "lon" in data
+        lat = existing.get("lat")
+        lon = existing.get("lon")
+        if update_coords:
+            try:
+                lat = float(data["lat"]) if data.get("lat") not in (None, "") else None
+                lon = float(data["lon"]) if data.get("lon") not in (None, "") else None
+            except (TypeError, ValueError):
+                return jsonify({"error": "经纬度格式不正确"}), 400
+            if lat is not None and not (-90.0 <= lat <= 90.0):
+                return jsonify({"error": "纬度需在 -90 到 90 之间"}), 400
+            if lon is not None and not (-180.0 <= lon <= 180.0):
+                return jsonify({"error": "经度需在 -180 到 180 之间"}), 400
+        update_cover = "cover_photo_id" in data
+        cover_photo_id = None
+        if update_cover and data.get("cover_photo_id") is not None:
+            try:
+                cover_photo_id = int(data["cover_photo_id"])
+            except (TypeError, ValueError):
+                return jsonify({"error": "cover_photo_id 不合法"}), 400
+        updated = database.update_place(
+            place_id,
+            name=name,
+            city=city,
+            address=address,
+            lat=lat,
+            lon=lon,
+            update_coords=update_coords,
+            cover_photo_id=cover_photo_id,
+            update_cover=update_cover,
+        )
+        return jsonify({"ok": True, "place": updated})
+
+    @app.delete("/api/places/<int:place_id>")
+    def api_delete_place(place_id: int):
+        if not database.get_place(place_id):
+            return jsonify({"error": "地点不存在"}), 404
+        database.delete_place(place_id, clear_location=True)
+        return jsonify({"ok": True})
+
+    @app.post("/api/places/<int:place_id>/photos")
+    def api_add_place_photos(place_id: int):
+        if not database.get_place(place_id):
+            return jsonify({"error": "地点不存在"}), 404
+        data = request.get_json(force=True, silent=True) or {}
+        raw_ids = data.get("photo_ids") or []
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({"error": "请选择至少一张照片"}), 400
+        valid_ids = []
+        for pid in raw_ids:
+            try:
+                valid_ids.append(int(pid))
+            except (TypeError, ValueError):
+                continue
+        if not valid_ids:
+            return jsonify({"error": "照片 ID 不合法"}), 400
+        updated = database.assign_photos_to_place(place_id, valid_ids)
+        return jsonify({"ok": True, "updated": updated, "place": database.get_place(place_id)})
+
+    @app.delete("/api/places/<int:place_id>/photos")
+    def api_remove_place_photos(place_id: int):
+        if not database.get_place(place_id):
+            return jsonify({"error": "地点不存在"}), 404
+        data = request.get_json(force=True, silent=True) or {}
+        raw_ids = data.get("photo_ids") or []
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({"error": "请选择要移除的照片"}), 400
+        valid_ids = []
+        for pid in raw_ids:
+            try:
+                valid_ids.append(int(pid))
+            except (TypeError, ValueError):
+                continue
+        removed = database.remove_photos_from_place(place_id, valid_ids)
+        return jsonify({"ok": True, "removed": removed, "place": database.get_place(place_id)})
 
     @app.get("/api/memories")
     def api_memories():

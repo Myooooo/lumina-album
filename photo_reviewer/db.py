@@ -389,6 +389,17 @@ class Database:
                     conn.execute(
                         "ALTER TABLE photos ADD COLUMN faces_scanned_model TEXT"
                     )
+                if "place_id" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN place_id INTEGER")
+                if "lat" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN lat REAL")
+                if "lon" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN lon REAL")
+                if "location_source" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN location_source TEXT")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_photos_place_id ON photos(place_id)"
+                )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_photos_media_kind "
                     "ON photos(media_kind)"
@@ -427,6 +438,19 @@ class Database:
                     CREATE INDEX IF NOT EXISTS idx_faces_photo ON faces(photo_id);
                     CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
                     CREATE INDEX IF NOT EXISTS idx_faces_status ON faces(status);
+                    CREATE TABLE IF NOT EXISTS places (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        city TEXT NOT NULL DEFAULT '',
+                        address TEXT NOT NULL DEFAULT '',
+                        lat REAL,
+                        lon REAL,
+                        source TEXT NOT NULL DEFAULT 'manual',
+                        cover_photo_id INTEGER,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_places_name ON places(name);
                     """
                 )
                 conn.commit()
@@ -1661,21 +1685,19 @@ class Database:
                 conn.close()
 
     def located_photos(self, folder: str | None = None) -> list[dict[str, Any]]:
-        """Every photo that carries a place, for the footprint view.
-
-        The selection covers what ``_photo_payload`` reads, because a place now
-        opens to its own grid and the same rows feed the detail dialog - a narrower
-        select raised ``KeyError: 'size'`` the first time a place was opened.
-        """
-        where = ["location IS NOT NULL", "location != ''", "status != 'deleted'"]
+        """Every photo that carries a place or custom place binding, for the footprint view."""
+        where = [
+            "(place_id IS NOT NULL OR (location IS NOT NULL AND location != ''))",
+            "status != 'deleted'",
+        ]
         params: list[Any] = []
         if folder:
             where.append("folder = ?")
             params.append(folder)
         sql = (
-            "SELECT id, path, raw_path, original_path, location, filename, size, "
-            "width, height, thumb_path, proxy_path, phash, exif, tags, reason, "
-            "title, dimensions, score, status, media_kind, "
+            "SELECT id, path, raw_path, original_path, location, place_id, lat, lon, "
+            "location_source, filename, size, width, height, thumb_path, proxy_path, "
+            "phash, exif, tags, reason, title, dimensions, score, status, media_kind, "
             "favorite, analyzed_at, error, model, geocoded, duration_ms, "
             "video_info, live_path "
             f"FROM photos WHERE {' AND '.join(where)}"
@@ -2423,6 +2445,279 @@ class Database:
                 ]
             finally:
                 conn.close()
+
+
+    # ------------------------------------------------------------------
+    # Custom Places (用户自建地点与照片地点覆盖，原图 EXIF 全程不动)
+    # ------------------------------------------------------------------
+
+    def list_places(self) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM places ORDER BY updated_at DESC, id DESC"
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def get_place(self, place_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM places WHERE id=?", (int(place_id),)
+                ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def find_place_by_name(
+        self, name: str, exclude_id: int | None = None
+    ) -> dict[str, Any] | None:
+        clean = name.strip()
+        if not clean:
+            return None
+        with self._lock:
+            conn = self._connect()
+            try:
+                if exclude_id is not None:
+                    row = conn.execute(
+                        "SELECT * FROM places WHERE LOWER(name)=LOWER(?) AND id!=? LIMIT 1",
+                        (clean, int(exclude_id)),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT * FROM places WHERE LOWER(name)=LOWER(?) LIMIT 1",
+                        (clean,),
+                    ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def create_place(
+        self,
+        name: str,
+        city: str = "",
+        address: str = "",
+        lat: float | None = None,
+        lon: float | None = None,
+        source: str = "manual",
+        cover_photo_id: int | None = None,
+    ) -> int:
+        now = utc_now()
+        clean_name = name.strip()
+        clean_city = (city or clean_name).strip()
+        clean_addr = (address or clean_name).strip()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    """
+                    INSERT INTO places (name, city, address, lat, lon, source, cover_photo_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        clean_name,
+                        clean_city,
+                        clean_addr,
+                        lat,
+                        lon,
+                        source or "manual",
+                        cover_photo_id,
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+                return int(cur.lastrowid)
+            finally:
+                conn.close()
+
+    def update_place(
+        self,
+        place_id: int,
+        name: str | None = None,
+        city: str | None = None,
+        address: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
+        update_coords: bool = False,
+        cover_photo_id: int | None = None,
+        update_cover: bool = False,
+    ) -> dict[str, Any] | None:
+        existing = self.get_place(place_id)
+        if not existing:
+            return None
+        new_name = name.strip() if name is not None else existing["name"]
+        new_city = city.strip() if city is not None else (existing.get("city") or new_name)
+        new_address = address.strip() if address is not None else (existing.get("address") or new_name)
+        new_lat = lat if update_coords else existing.get("lat")
+        new_lon = lon if update_coords else existing.get("lon")
+        new_cover = cover_photo_id if update_cover else existing.get("cover_photo_id")
+        now = utc_now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    UPDATE places
+                    SET name=?, city=?, address=?, lat=?, lon=?, cover_photo_id=?, updated_at=?
+                    WHERE id=?
+                    """,
+                    (
+                        new_name,
+                        new_city,
+                        new_address,
+                        new_lat,
+                        new_lon,
+                        new_cover,
+                        now,
+                        int(place_id),
+                    ),
+                )
+                # Keep DB location & coords on assigned photos in sync (never touches file EXIF).
+                display_loc = new_address or new_name
+                conn.execute(
+                    "UPDATE photos SET location=?, lat=?, lon=? WHERE place_id=?",
+                    (display_loc, new_lat, new_lon, int(place_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        return self.get_place(place_id)
+
+    def delete_place(self, place_id: int, clear_location: bool = True) -> bool:
+        """Delete a custom place and unlink its photos without deleting any files."""
+        existing = self.get_place(place_id)
+        if not existing:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                if clear_location:
+                    rows = conn.execute(
+                        "SELECT id, exif FROM photos WHERE place_id=?", (int(place_id),)
+                    ).fetchall()
+                    for r in rows:
+                        exif = {}
+                        if r["exif"]:
+                            try:
+                                exif = json.loads(r["exif"])
+                            except (TypeError, ValueError):
+                                exif = {}
+                        elat = exif.get("latitude") if isinstance(exif, dict) else None
+                        elon = exif.get("longitude") if isinstance(exif, dict) else None
+                        conn.execute(
+                            "UPDATE photos SET place_id=NULL, location=NULL, lat=?, lon=?, location_source=NULL WHERE id=?",
+                            (elat, elon, int(r["id"])),
+                        )
+                else:
+                    conn.execute(
+                        "UPDATE photos SET place_id=NULL, location_source=NULL WHERE place_id=?",
+                        (int(place_id),),
+                    )
+                conn.execute("DELETE FROM places WHERE id=?", (int(place_id),))
+                conn.commit()
+                return True
+            finally:
+                conn.close()
+
+    def assign_photos_to_place(
+        self, place_id: int, photo_ids: Sequence[int]
+    ) -> int:
+        """Assign photos to a custom place, overwriting DB location/coords (never touches EXIF)."""
+        place = self.get_place(place_id)
+        if not place:
+            return 0
+        clean_ids = [int(pid) for pid in photo_ids]
+        if not clean_ids:
+            return 0
+        display_loc = (place.get("address") or place.get("name") or "").strip()
+        lat = place.get("lat")
+        lon = place.get("lon")
+        updated = 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                for pid in clean_ids:
+                    cur = conn.execute(
+                        """
+                        UPDATE photos
+                        SET place_id=?, location=?, lat=?, lon=?, location_source='manual'
+                        WHERE id=? AND status != 'deleted'
+                        """,
+                        (int(place_id), display_loc, lat, lon, pid),
+                    )
+                    updated += max(0, cur.rowcount)
+                if not place.get("cover_photo_id") and clean_ids:
+                    conn.execute(
+                        "UPDATE places SET cover_photo_id=?, updated_at=? WHERE id=?",
+                        (clean_ids[0], utc_now(), int(place_id)),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE places SET updated_at=? WHERE id=?",
+                        (utc_now(), int(place_id)),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        return updated
+
+    def remove_photos_from_place(
+        self, place_id: int, photo_ids: Sequence[int]
+    ) -> int:
+        """Unlink photos from a custom place and clear their manual DB location (never touches EXIF)."""
+        clean_ids = [int(pid) for pid in photo_ids]
+        if not clean_ids:
+            return 0
+        removed = 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                for pid in clean_ids:
+                    row = conn.execute(
+                        "SELECT id, exif FROM photos WHERE id=? AND place_id=?",
+                        (pid, int(place_id)),
+                    ).fetchone()
+                    if not row:
+                        continue
+                    exif = {}
+                    if row["exif"]:
+                        try:
+                            exif = json.loads(row["exif"])
+                        except (TypeError, ValueError):
+                            exif = {}
+                    elat = exif.get("latitude") if isinstance(exif, dict) else None
+                    elon = exif.get("longitude") if isinstance(exif, dict) else None
+                    cur = conn.execute(
+                        """
+                        UPDATE photos
+                        SET place_id=NULL, location=NULL, lat=?, lon=?, location_source=NULL
+                        WHERE id=? AND place_id=?
+                        """,
+                        (elat, elon, pid, int(place_id)),
+                    )
+                    removed += max(0, cur.rowcount)
+                # Refresh cover if the previous cover was removed.
+                place = conn.execute(
+                    "SELECT cover_photo_id FROM places WHERE id=?", (int(place_id),)
+                ).fetchone()
+                if place and place["cover_photo_id"] in clean_ids:
+                    nxt = conn.execute(
+                        "SELECT id FROM photos WHERE place_id=? AND status != 'deleted' ORDER BY id ASC LIMIT 1",
+                        (int(place_id),),
+                    ).fetchone()
+                    conn.execute(
+                        "UPDATE places SET cover_photo_id=?, updated_at=? WHERE id=?",
+                        (int(nxt["id"]) if nxt else None, utc_now(), int(place_id)),
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+        return removed
 
 
 # Global database instance, initialized when the app starts.
