@@ -6267,32 +6267,7 @@ body[data-theme="paper"] .view-tab {
   letter-spacing: 0.03em;
 }
 
-/* Letterpress Buttons, Archival Index Stats & Ruled Inputs */
-body[data-theme="paper"] .btn {
-  background: var(--paper-cotton);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 1px 0 rgba(56, 40, 24, 0.06);
-}
-
-body[data-theme="paper"] .btn:hover {
-  background: #ffffff;
-  border-color: var(--border-strong);
-  box-shadow: 0 2px 8px rgba(56, 40, 24, 0.08);
-}
-
-body[data-theme="paper"] .btn.primary {
-  background: var(--ink-ochre);
-  border: 1px solid #834f2d;
-  color: #fffdf8;
-  box-shadow: 0 2px 6px rgba(130, 82, 46, 0.24), inset 0 1px 0 rgba(255, 250, 240, 0.22);
-}
-
-body[data-theme="paper"] .btn.primary:hover {
-  background: #8d5734;
-  border-color: #744426;
-  box-shadow: 0 4px 12px rgba(130, 82, 46, 0.28);
-}
+/* Danger button & archival inputs for Paper Stationery (base .btn/.stat live in unified theme block) */
 
 body[data-theme="paper"] .btn.danger {
   background: var(--paper-cotton);
@@ -6333,30 +6308,9 @@ body[data-theme="paper"] .search-capsule .search-submit-btn:hover {
   color: #fffdf8;
 }
 
-body[data-theme="paper"] .stat {
-  background: var(--paper-cotton);
-  backdrop-filter: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 5px 12px;
-  box-shadow: 0 1px 0 rgba(56, 40, 24, 0.05);
-  position: relative;
-}
-
-body[data-theme="paper"] .stat.active {
-  background: #fffdf8;
-  border-color: var(--ink-ochre);
-  border-bottom: 2px solid var(--ink-ochre);
-  box-shadow: 0 2px 8px rgba(156, 98, 60, 0.12);
-}
-
 body[data-theme="paper"] .stat-num {
   font-size: 14px;
   color: var(--ink-fountain);
-}
-
-body[data-theme="paper"] .stat.active .stat-num {
-  color: var(--ink-ochre);
 }
 
 body[data-theme="paper"] .custom-select-menu,
@@ -6376,10 +6330,7 @@ body[data-theme="paper"] .footprint-photos {
   gap: 32px 28px;
 }
 
-body[data-theme="paper"] .polaroid-card:nth-child(4n+1) { --rot: -0.75deg; }
-body[data-theme="paper"] .polaroid-card:nth-child(4n+2) { --rot: 0.65deg; }
-body[data-theme="paper"] .polaroid-card:nth-child(4n+3) { --rot: -0.45deg; }
-body[data-theme="paper"] .polaroid-card:nth-child(4n)   { --rot: 0.7deg; }
+
 
 body[data-theme="paper"] .polaroid-inner {
   background: var(--paper-cotton);
@@ -6399,39 +6350,7 @@ body[data-theme="paper"] .polaroid-card:hover .polaroid-inner {
     0 4px 10px rgba(46, 34, 20, 0.06);
 }
 
-body[data-theme="paper"] .tape {
-  top: -16px;
-  left: 50%;
-  width: 82px;
-  height: 22px;
-  border: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  box-shadow: 0 1px 3px rgba(46, 34, 20, 0.1);
-  clip-path: polygon(
-    3% 0%, 97% 0%,
-    100% 14%, 97% 28%, 100% 42%, 97% 56%, 100% 70%, 97% 84%, 100% 100%,
-    3% 100%,
-    0% 84%, 3% 70%, 0% 56%, 3% 42%, 0% 28%, 3% 14%
-  );
-  background: rgba(224, 205, 174, 0.72);
-  transform: translateX(-50%) rotate(-1.6deg);
-}
 
-body[data-theme="paper"] .polaroid-card:nth-child(4n+2) .tape {
-  background: rgba(173, 190, 173, 0.66);
-  transform: translateX(-50%) rotate(1.4deg);
-}
-
-body[data-theme="paper"] .polaroid-card:nth-child(4n+3) .tape {
-  background: rgba(218, 198, 164, 0.7);
-  transform: translateX(-50%) rotate(-1.1deg);
-}
-
-body[data-theme="paper"] .polaroid-card:nth-child(4n) .tape {
-  background: rgba(169, 187, 174, 0.64);
-  transform: translateX(-50%) rotate(1.8deg);
-}
 
 body[data-theme="paper"] .polaroid-photo-frame {
   aspect-ratio: 4 / 3;
@@ -7043,51 +6962,7 @@ body[data-theme="vintage"] .settings-tab.active {
   color: #f3b06b;
 }
 
-body[data-theme="vintage"] .btn,
-body[data-theme="vintage"] .force-label,
-body[data-theme="vintage"] .stat,
-body[data-theme="vintage"] .folder-row input[type="text"],
-body[data-theme="vintage"] .folder-row input:not([type="checkbox"]),
-body[data-theme="vintage"] .filter-group select,
-body[data-theme="vintage"] .filter-group input,
-body[data-theme="vintage"] .custom-select-trigger,
-body[data-theme="vintage"] .search-capsule,
-body[data-theme="vintage"] .form-grid input,
-body[data-theme="vintage"] .form-grid textarea,
-body[data-theme="vintage"] .form-grid select,
-body[data-theme="vintage"] .dir-row input,
-body[data-theme="vintage"] .prompt-save-row input[type="text"] {
-  background: #231c17;
-  border-color: var(--border);
-  color: var(--text);
-}
 
-body[data-theme="vintage"] .btn:hover,
-body[data-theme="vintage"] .force-label:hover,
-body[data-theme="vintage"] .stat:hover {
-  background: #2c231c;
-  border-color: var(--border-strong);
-  color: #fff5e6;
-}
-
-body[data-theme="vintage"] .btn.primary {
-  background: linear-gradient(135deg, #c9722f, #a6571f);
-  border-color: rgba(242, 170, 102, 0.35);
-  color: #fffaf2;
-}
-
-body[data-theme="vintage"] .btn.primary:hover {
-  background: linear-gradient(135deg, #da8039, #b76326);
-}
-
-body[data-theme="vintage"] .stat.active {
-  background: #2b2119;
-  border-color: var(--primary);
-}
-
-body[data-theme="vintage"] .stat.active .stat-label {
-  color: #f2aa66;
-}
 
 body[data-theme="vintage"] .search-capsule .search-mode-segment .custom-select-trigger {
   background: rgba(255, 240, 220, 0.05);
@@ -7122,10 +6997,7 @@ body[data-theme="vintage"] .prompt-custom-option.active {
 }
 
 /* 35mm Analog Film Photo Cards */
-body[data-theme="vintage"] .polaroid-card:nth-child(4n+1) { --rot: -0.35deg; }
-body[data-theme="vintage"] .polaroid-card:nth-child(4n+2) { --rot: 0.3deg; }
-body[data-theme="vintage"] .polaroid-card:nth-child(4n+3) { --rot: -0.25deg; }
-body[data-theme="vintage"] .polaroid-card:nth-child(4n)   { --rot: 0.35deg; }
+
 
 body[data-theme="vintage"] .tape {
   display: none;
@@ -9849,6 +9721,254 @@ body[data-theme="paper"] :where(.btn, .density-btn, .favorite-btn, .preview-side
 
 body[data-theme="vintage"] :where(.btn, .density-btn, .favorite-btn, .preview-side-btn, .modal-close, .theme-menu-item, .theme-option):focus-visible {
   outline-color: #eb9234;
+}
+
+/* ==========================================================================
+   P1 Features: Lightbox Filmstrip, Compare Synchronized Zoom & Theme Flourishes
+   ========================================================================== */
+
+/* --- Lightbox Header Frame Counter (Darkroom FRAME XX / NN in Vintage) --- */
+.preview-header-top {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.preview-frame-counter {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme="vintage"] .preview-frame-counter {
+  color: #eb9234;
+  letter-spacing: 0.12em;
+}
+
+body[data-theme="vintage"] .preview-frame-counter::before {
+  content: "FRAME ";
+  opacity: 0.78;
+}
+
+/* --- Lightbox Bottom Filmstrip Thumbnail Navigator --- */
+.preview-filmstrip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+  border-radius: var(--radius-md);
+  background: rgba(125, 95, 65, 0.06);
+  border: 1px solid var(--border);
+  scrollbar-width: none;
+}
+
+.preview-filmstrip::-webkit-scrollbar {
+  display: none;
+}
+
+#previewModal:has(#previewFilmstrip:not(.hidden)) .preview-stage,
+#previewModal:has(#previewFilmstrip:not(.hidden)) .preview-body img,
+#previewModal:has(#previewFilmstrip:not(.hidden)) .preview-video,
+#previewModal:has(#previewFilmstrip:not(.hidden)) .preview-info {
+  max-height: calc(96vh - 152px);
+}
+
+.filmstrip-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 40px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  background: rgba(30, 24, 18, 0.12);
+  overflow: hidden;
+  cursor: pointer;
+  opacity: 0.56;
+  transition: opacity var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.filmstrip-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+
+.filmstrip-thumb:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.filmstrip-thumb.is-active {
+  opacity: 1;
+  border-color: var(--primary);
+  box-shadow: 0 2px 10px var(--primary-glow);
+}
+
+body[data-theme="paper"] .preview-filmstrip {
+  background: #f5efe2;
+  border: 1px dashed #d5cab5;
+  border-radius: 3px;
+}
+
+body[data-theme="paper"] .filmstrip-thumb {
+  border-radius: 2px;
+}
+
+body[data-theme="paper"] .filmstrip-thumb.is-active {
+  border-color: #362e26;
+  box-shadow: 2px 2px 0 rgba(199, 125, 88, 0.55);
+}
+
+body[data-theme="vintage"] .preview-filmstrip {
+  background: #0f0e0d;
+  border: 1px solid #2b2723;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .filmstrip-thumb {
+  border-radius: 2px;
+  opacity: 0.48;
+}
+
+body[data-theme="vintage"] .filmstrip-thumb.is-active {
+  opacity: 1;
+  border-color: #eb9234;
+  box-shadow: 0 0 10px rgba(235, 146, 52, 0.45);
+}
+
+/* --- Duplicate Compare Synchronized 1x / 2x / 4x Zoom & Pan --- */
+.compare-zoom-group {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(125, 95, 65, 0.06);
+}
+
+.compare-zoom-btn {
+  height: 26px;
+  padding: 0 9px;
+  border: none;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+
+.compare-zoom-btn:hover {
+  color: var(--text);
+}
+
+.compare-zoom-btn.active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+body[data-theme="vintage"] .compare-zoom-group {
+  background: #1a1816;
+  border-color: #2b2723;
+}
+
+body[data-theme="vintage"] .compare-zoom-btn.active {
+  background: #eb9234;
+  color: #141210;
+}
+
+.compare-img {
+  transform-origin: center center;
+  transition: none;
+}
+
+.compare-img.is-smooth {
+  transition: transform 200ms var(--ease-out);
+}
+
+.compare-stage.is-zoomed {
+  cursor: grab;
+}
+
+.compare-stage.is-zoomed.is-panning {
+  cursor: grabbing;
+}
+
+.compare-stage.is-zoomed .compare-range {
+  pointer-events: none;
+}
+
+.compare-stage.is-zoomed .compare-handle {
+  pointer-events: auto;
+  cursor: ew-resize;
+}
+
+/* --- Theme Craft Flourishes --- */
+/* 1. Paper Stationery: Subtle Vermilion High-Score Seal (score >= 8.5) */
+body[data-theme="paper"] .polaroid-card:not(.is-video) .polaroid-inner[data-high-score="1"]::after {
+  content: "佳作";
+  position: absolute;
+  right: 14px;
+  bottom: 52px;
+  z-index: 4;
+  padding: 2px 5px;
+  border: 1.5px solid rgba(184, 74, 57, 0.68);
+  border-radius: 2px;
+  color: rgba(184, 74, 57, 0.78);
+  background: rgba(255, 253, 248, 0.84);
+  font-family: var(--font-serif);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  transform: rotate(-7deg);
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(184, 74, 57, 0.16);
+}
+
+body[data-theme="paper"][data-density="wall"] .polaroid-card .polaroid-inner[data-high-score="1"]::after {
+  display: none;
+}
+
+/* 2. Classic Glass Gallery: Lighter Borderless Stat Pills */
+body[data-theme="classic"] .stat {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  border-radius: 999px;
+  padding: 5px 13px;
+}
+
+body[data-theme="classic"] .stat:hover {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 2px 8px rgba(38, 31, 25, 0.05);
+}
+
+body[data-theme="classic"] .stat.active {
+  background: #ffffff;
+  border-color: rgba(174, 118, 78, 0.35);
+  box-shadow: 0 2px 10px rgba(38, 31, 25, 0.08), inset 0 1px 0 #ffffff;
 }
 
 

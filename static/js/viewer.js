@@ -912,10 +912,19 @@ function updatePreview(options = {}) {
 
   const captureTime = formatCaptureTime(exif.datetime_original);
   const rawBadge = rawBadgeHtml(photo, "detail");
+  const order = state.previewContext ? state.previewContext.ids : visiblePhotoOrder();
+  const frameIdx = order.indexOf(id);
+  const frameTotal = !state.previewContext && state.totalCount > order.length ? state.totalCount : order.length;
+  const frameCounterHtml = frameIdx >= 0 && frameTotal > 1
+    ? `<span class="preview-frame-counter">${String(frameIdx + 1).padStart(2, "0")} / ${String(frameTotal).padStart(2, "0")}</span>`
+    : "";
 
   $("previewInfo").innerHTML = `
     <div class="preview-header-block">
-      <h3>${escapeHtml(photo.title || photo.filename)}</h3>
+      <div class="preview-header-top">
+        <h3>${escapeHtml(photo.title || photo.filename)}</h3>
+        ${frameCounterHtml}
+      </div>
       ${rawBadge}
     </div>
 
@@ -986,5 +995,68 @@ function updatePreview(options = {}) {
       </div>
     ` : ""}
   `;
+
+  renderPreviewFilmstrip(order, frameIdx);
 }
+
+function renderPreviewFilmstrip(order, activeIdx) {
+  const strip = $("previewFilmstrip");
+  if (!strip) return;
+  if (!Array.isArray(order) || order.length <= 1 || activeIdx < 0) {
+    strip.classList.add("hidden");
+    strip.innerHTML = "";
+    return;
+  }
+  const windowHalf = 12;
+  const start = Math.max(0, activeIdx - windowHalf);
+  const end = Math.min(order.length, activeIdx + windowHalf + 1);
+  const items = [];
+  for (let i = start; i < end; i += 1) {
+    const pid = order[i];
+    const p = photoById(pid);
+    if (!p) continue;
+    const isActive = i === activeIdx;
+    items.push(`
+      <button type="button" class="filmstrip-thumb${isActive ? " is-active" : ""}"
+              data-photo-id="${pid}" role="option" aria-selected="${isActive ? "true" : "false"}"
+              title="${escapeHtml(p.title || p.filename)}">
+        <img src="${thumbnailUrl(p)}" alt="" loading="lazy" decoding="async" />
+      </button>
+    `);
+  }
+  if (items.length <= 1) {
+    strip.classList.add("hidden");
+    strip.innerHTML = "";
+    return;
+  }
+  strip.innerHTML = items.join("");
+  strip.classList.remove("hidden");
+  const activeBtn = strip.querySelector(".filmstrip-thumb.is-active");
+  if (activeBtn && typeof activeBtn.scrollIntoView === "function") {
+    activeBtn.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", inline: "center", block: "nearest" });
+  }
+}
+
+async function jumpToPreview(targetId) {
+  if (!targetId || targetId === state.currentPreviewId) return;
+  const order = state.previewContext ? state.previewContext.ids : visiblePhotoOrder();
+  const curIdx = order.indexOf(state.currentPreviewId);
+  const nextIdx = order.indexOf(targetId);
+  const delta = nextIdx >= 0 && curIdx >= 0 ? nextIdx - curIdx : 1;
+  const token = ++state.previewNavToken;
+  const url = `/api/proxy/${targetId}`;
+  await preloadImage(url);
+  if (token !== state.previewNavToken) return;
+  state.currentPreviewId = targetId;
+  const img = $("previewImage");
+  if (img) {
+    const animClass = delta < 0 ? "preview-switch-left" : "preview-switch-right";
+    img.classList.remove("preview-switch-left", "preview-switch-right");
+    img.src = url;
+    void img.offsetWidth;
+    img.classList.add(animClass);
+  }
+  updatePreview({ skipImage: true });
+}
+
 

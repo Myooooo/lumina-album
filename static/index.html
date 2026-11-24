@@ -300,6 +300,7 @@
         </div>
         <div id="previewInfo" class="preview-info"></div>
       </div>
+      <div id="previewFilmstrip" class="preview-filmstrip hidden" role="listbox" aria-label="邻近照片缩略图"></div>
       <div class="preview-actions">
         <button id="previewDeleteBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
         <button id="previewRestoreBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
@@ -939,6 +940,11 @@
       <div class="compare-header">
         <h2><span class="modal-title-icon" data-icon="compare"></span>暗房细节对比</h2>
         <div class="compare-pickers">
+          <div class="compare-zoom-group" id="compareZoomGroup" role="group" aria-label="同步放大倍率">
+            <button type="button" class="compare-zoom-btn active" data-compare-zoom="1">1×</button>
+            <button type="button" class="compare-zoom-btn" data-compare-zoom="2">2×</button>
+            <button type="button" class="compare-zoom-btn" data-compare-zoom="4">4×</button>
+          </div>
           <label class="compare-picker-label">左图
             <select id="compareLeftSelect" data-no-custom></select>
           </label>
@@ -951,14 +957,14 @@
         <img id="compareRightImg" class="compare-img compare-img-right" alt="右图" />
         <img id="compareLeftImg" class="compare-img compare-img-left" alt="左图" />
         <div class="compare-divider" id="compareDivider" aria-hidden="true">
-          <span class="compare-handle" data-icon="compare"></span>
+          <span class="compare-handle" id="compareHandle" data-icon="compare"></span>
         </div>
         <div class="compare-tag compare-tag-left" id="compareLeftMeta"></div>
         <div class="compare-tag compare-tag-right" id="compareRightMeta"></div>
         <input id="compareSlider" class="compare-range" type="range" min="0" max="100" value="50" aria-label="拖动对比分割线" />
       </div>
       <div class="compare-footer">
-        <span class="compare-tip">左右拖动分割线对比锐度与细节，按住 <kbd>Space</kbd> 快速切换右图</span>
+        <span class="compare-tip">左右拖动分割线对比锐度与细节 · 切换 <kbd>2×</kbd>/<kbd>4×</kbd> 可同步拖拽平移 · 按住 <kbd>Space</kbd> 速切右图</span>
       </div>
     </div>
   </div>

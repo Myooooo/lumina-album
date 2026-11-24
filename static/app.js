@@ -114,6 +114,15 @@ function init() {
 
   $("previewPrevBtn").addEventListener("click", () => navigatePreview(-1));
   $("previewNextBtn").addEventListener("click", () => navigatePreview(1));
+  const previewFilmstrip = $("previewFilmstrip");
+  if (previewFilmstrip) {
+    previewFilmstrip.addEventListener("click", (e) => {
+      const thumb = e.target.closest(".filmstrip-thumb");
+      if (!thumb) return;
+      const targetId = Number(thumb.dataset.photoId);
+      if (Number.isFinite(targetId)) jumpToPreview(targetId);
+    });
+  }
   $("previewEditBtn").addEventListener("click", openEditPreview);
   $("previewDeleteBtn").addEventListener("click", () => deletePhotos([state.currentPreviewId]));
   $("previewRestoreBtn").addEventListener("click", () => restorePhotos([state.currentPreviewId]));
@@ -1704,6 +1713,13 @@ const compareState = {
   rightId: null,
   split: 50,
   savedSplit: null,
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+  isPanning: false,
+  isDraggingHandle: false,
+  panStartX: 0,
+  panStartY: 0,
 };
 
 function setCompareSplit(pct) {
@@ -1713,6 +1729,45 @@ function setCompareSplit(pct) {
   const slider = $("compareSlider");
   if (stage) stage.style.setProperty("--split", `${clamped}%`);
   if (slider) slider.value = String(Math.round(clamped));
+}
+
+function applyCompareTransform(smooth = false) {
+  const stage = $("compareStage");
+  const leftImg = $("compareLeftImg");
+  const rightImg = $("compareRightImg");
+  const z = compareState.zoom;
+  if (z <= 1) {
+    compareState.panX = 0;
+    compareState.panY = 0;
+  } else if (stage) {
+    const maxX = (stage.clientWidth * (z - 1)) / 2;
+    const maxY = (stage.clientHeight * (z - 1)) / 2;
+    compareState.panX = Math.max(-maxX, Math.min(maxX, compareState.panX));
+    compareState.panY = Math.max(-maxY, Math.min(maxY, compareState.panY));
+  }
+  const tf = z <= 1 ? "" : `translate3d(${compareState.panX.toFixed(1)}px, ${compareState.panY.toFixed(1)}px, 0) scale(${z})`;
+  for (const img of [leftImg, rightImg]) {
+    if (!img) continue;
+    img.classList.toggle("is-smooth", !!smooth && !compareState.isPanning);
+    img.style.transform = tf;
+  }
+  if (stage) {
+    stage.classList.toggle("is-zoomed", z > 1);
+    stage.classList.toggle("is-panning", compareState.isPanning);
+  }
+  document.querySelectorAll("#compareZoomGroup .compare-zoom-btn").forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.compareZoom) === z);
+  });
+}
+
+function setCompareZoom(zoom) {
+  const next = [1, 2, 4].includes(Number(zoom)) ? Number(zoom) : 1;
+  compareState.zoom = next;
+  if (next === 1) {
+    compareState.panX = 0;
+    compareState.panY = 0;
+  }
+  applyCompareTransform(true);
 }
 
 function paintCompareImages() {
@@ -1756,6 +1811,7 @@ function openCompareModal(groupIndex) {
     rightSel.value = String(other.id);
   }
   setCompareSplit(50);
+  setCompareZoom(1);
   paintCompareImages();
   showModal($("compareModal"));
   pushModal($("compareModal"));
@@ -1763,9 +1819,59 @@ function openCompareModal(groupIndex) {
 
 function initCompareModal() {
   const slider = $("compareSlider");
+  const stage = $("compareStage");
+  const handle = $("compareHandle");
   if (slider) {
     slider.addEventListener("input", () => setCompareSplit(slider.value));
   }
+  const zoomGroup = $("compareZoomGroup");
+  if (zoomGroup) {
+    zoomGroup.addEventListener("click", (e) => {
+      const btn = e.target.closest(".compare-zoom-btn");
+      if (!btn) return;
+      setCompareZoom(Number(btn.dataset.compareZoom));
+    });
+  }
+  if (handle && stage) {
+    handle.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      compareState.isDraggingHandle = true;
+    });
+  }
+  if (stage) {
+    stage.addEventListener("mousedown", (e) => {
+      if (compareState.zoom <= 1 || e.button !== 0 || e.target.closest("#compareHandle")) return;
+      compareState.isPanning = true;
+      compareState.panStartX = e.clientX - compareState.panX;
+      compareState.panStartY = e.clientY - compareState.panY;
+      stage.classList.add("is-panning");
+      e.preventDefault();
+    });
+    stage.addEventListener("dblclick", () => {
+      setCompareZoom(compareState.zoom === 1 ? 2 : 1);
+    });
+  }
+  window.addEventListener("mousemove", (e) => {
+    if (compareState.isDraggingHandle && stage) {
+      const rect = stage.getBoundingClientRect();
+      if (rect.width > 0) {
+        setCompareSplit(((e.clientX - rect.left) / rect.width) * 100);
+      }
+      return;
+    }
+    if (!compareState.isPanning) return;
+    compareState.panX = e.clientX - compareState.panStartX;
+    compareState.panY = e.clientY - compareState.panStartY;
+    applyCompareTransform(false);
+  });
+  window.addEventListener("mouseup", () => {
+    compareState.isDraggingHandle = false;
+    if (compareState.isPanning) {
+      compareState.isPanning = false;
+      if (stage) stage.classList.remove("is-panning");
+    }
+  });
   const leftSel = $("compareLeftSelect");
   const rightSel = $("compareRightSelect");
   if (leftSel) {
