@@ -74,6 +74,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         routes_index,
         routes_jobs,
         routes_media,
+        routes_people,
         routes_photos,
         routes_sheets,
     )
@@ -83,6 +84,7 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
         routes_config,
         routes_files,
         routes_jobs,
+        routes_people,
         routes_sheets,
         routes_photos,
         routes_media,

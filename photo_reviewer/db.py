@@ -385,9 +385,49 @@ class Database:
                 }
                 if "volume_key" not in card_cols:
                     conn.execute("ALTER TABLE card_albums ADD COLUMN volume_key TEXT")
+                if "faces_scanned_model" not in cols:
+                    conn.execute(
+                        "ALTER TABLE photos ADD COLUMN faces_scanned_model TEXT"
+                    )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_photos_media_kind "
                     "ON photos(media_kind)"
+                )
+                conn.executescript(
+                    """
+                    CREATE TABLE IF NOT EXISTS people (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL DEFAULT '',
+                        kind TEXT NOT NULL DEFAULT 'person',
+                        cover_face_id INTEGER,
+                        is_hidden INTEGER NOT NULL DEFAULT 0,
+                        is_favorite INTEGER NOT NULL DEFAULT 0,
+                        centroid BLOB,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_people_kind ON people(kind);
+                    CREATE TABLE IF NOT EXISTS faces (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                        person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+                        entity_kind TEXT NOT NULL DEFAULT 'person',
+                        bbox_x REAL NOT NULL,
+                        bbox_y REAL NOT NULL,
+                        bbox_w REAL NOT NULL,
+                        bbox_h REAL NOT NULL,
+                        det_score REAL NOT NULL DEFAULT 0.0,
+                        embedding BLOB,
+                        model_name TEXT NOT NULL DEFAULT 'buffalo_l',
+                        status TEXT NOT NULL DEFAULT 'auto',
+                        thumb_path TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_faces_photo ON faces(photo_id);
+                    CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id);
+                    CREATE INDEX IF NOT EXISTS idx_faces_status ON faces(status);
+                    """
                 )
                 conn.commit()
             finally:
@@ -1872,6 +1912,517 @@ class Database:
             # Rows written before video support existed are photos.
             d["media_kind"] = "photo"
         return d
+
+    # ------------------------------------------------------------------
+    # People & Pets (local face + cat/dog recognition & clustering)
+    # ------------------------------------------------------------------
+
+    def photos_needing_face_scan(
+        self, folder: str | None = None, model_name: str = "buffalo_l", force: bool = False
+    ) -> list[dict[str, Any]]:
+        clauses = [
+            "status != 'deleted'",
+            "COALESCE(media_kind, 'photo') != 'video'",
+        ]
+        params: list[Any] = []
+        if folder:
+            clauses.append("folder = ?")
+            params.append(folder)
+        if not force:
+            clauses.append("(faces_scanned_model IS NULL OR faces_scanned_model != ?)")
+            params.append(model_name)
+        sql = (
+            "SELECT id, path, proxy_path, thumb_path, folder, filename "
+            f"FROM photos WHERE {' AND '.join(clauses)} ORDER BY id ASC"
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def mark_photo_faces_scanned(self, photo_id: int, model_name: str) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE photos SET faces_scanned_model=? WHERE id=?",
+                    (model_name, int(photo_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def replace_auto_faces_for_photo(
+        self, photo_id: int, detections: Sequence[dict[str, Any]], model_name: str
+    ) -> list[int]:
+        """Replace auto-detected faces for a photo while keeping manual/ignored labels."""
+        now = utc_now()
+        inserted_ids: list[int] = []
+        with self._lock:
+            conn = self._connect()
+            try:
+                # Keep manual and ignored detections untouched.
+                kept = conn.execute(
+                    "SELECT bbox_x, bbox_y, bbox_w, bbox_h, entity_kind "
+                    "FROM faces WHERE photo_id=? AND status IN ('manual', 'ignored')",
+                    (int(photo_id),),
+                ).fetchall()
+                conn.execute(
+                    "DELETE FROM faces WHERE photo_id=? AND status IN ('auto', 'pending')",
+                    (int(photo_id),),
+                )
+                for det in detections:
+                    # Skip detections overlapping an already manual/ignored box.
+                    bx, by, bw, bh = (
+                        float(det["bbox_x"]),
+                        float(det["bbox_y"]),
+                        float(det["bbox_w"]),
+                        float(det["bbox_h"]),
+                    )
+                    overlap = False
+                    for k in kept:
+                        ix1 = max(bx, float(k["bbox_x"]))
+                        iy1 = max(by, float(k["bbox_y"]))
+                        ix2 = min(bx + bw, float(k["bbox_x"]) + float(k["bbox_w"]))
+                        iy2 = min(by + bh, float(k["bbox_y"]) + float(k["bbox_h"]))
+                        inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+                        union = bw * bh + float(k["bbox_w"]) * float(k["bbox_h"]) - inter
+                        if union > 1e-9 and (inter / union) >= 0.45:
+                            overlap = True
+                            break
+                    if overlap:
+                        continue
+                    cur = conn.execute(
+                        """
+                        INSERT INTO faces
+                            (photo_id, person_id, entity_kind, bbox_x, bbox_y, bbox_w, bbox_h,
+                             det_score, embedding, model_name, status, thumb_path, created_at, updated_at)
+                        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'auto', NULL, ?, ?)
+                        """,
+                        (
+                            int(photo_id),
+                            str(det.get("entity_kind") or "person"),
+                            bx,
+                            by,
+                            bw,
+                            bh,
+                            float(det.get("det_score") or 0.0),
+                            det.get("embedding"),
+                            str(det.get("model_name") or model_name),
+                            now,
+                            now,
+                        ),
+                    )
+                    inserted_ids.append(int(cur.lastrowid))
+                conn.commit()
+            finally:
+                conn.close()
+        return inserted_ids
+
+    def update_face_thumb(self, face_id: int, thumb_path: str) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE faces SET thumb_path=?, updated_at=? WHERE id=?",
+                    (thumb_path, utc_now(), int(face_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def create_person(
+        self,
+        name: str = "",
+        kind: str = "person",
+        cover_face_id: int | None = None,
+        centroid: bytes | None = None,
+    ) -> int:
+        now = utc_now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    """
+                    INSERT INTO people (name, kind, cover_face_id, is_hidden, is_favorite, centroid, created_at, updated_at)
+                    VALUES (?, ?, ?, 0, 0, ?, ?, ?)
+                    """,
+                    (name.strip(), kind or "person", cover_face_id, centroid, now, now),
+                )
+                conn.commit()
+                return int(cur.lastrowid)
+            finally:
+                conn.close()
+
+    def get_person(self, person_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT id, name, kind, cover_face_id, is_hidden, is_favorite, created_at, updated_at "
+                    "FROM people WHERE id=?",
+                    (int(person_id),),
+                ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def all_people_raw(self) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute("SELECT * FROM people ORDER BY id ASC").fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def find_person_by_name(
+        self, name: str, exclude_id: int | None = None
+    ) -> dict[str, Any] | None:
+        clean = name.strip()
+        if not clean:
+            return None
+        with self._lock:
+            conn = self._connect()
+            try:
+                if exclude_id is not None:
+                    row = conn.execute(
+                        "SELECT id, name, kind, cover_face_id, is_hidden, is_favorite "
+                        "FROM people WHERE LOWER(name)=LOWER(?) AND id!=? LIMIT 1",
+                        (clean, int(exclude_id)),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT id, name, kind, cover_face_id, is_hidden, is_favorite "
+                        "FROM people WHERE LOWER(name)=LOWER(?) LIMIT 1",
+                        (clean,),
+                    ).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def rename_person(self, person_id: int, name: str) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE people SET name=?, updated_at=? WHERE id=?",
+                    (name.strip(), utc_now(), int(person_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def set_person_flags(
+        self,
+        person_id: int,
+        is_hidden: bool | None = None,
+        is_favorite: bool | None = None,
+        cover_face_id: int | None = None,
+    ) -> None:
+        sets: list[str] = []
+        params: list[Any] = []
+        if is_hidden is not None:
+            sets.append("is_hidden=?")
+            params.append(1 if is_hidden else 0)
+        if is_favorite is not None:
+            sets.append("is_favorite=?")
+            params.append(1 if is_favorite else 0)
+        if cover_face_id is not None:
+            sets.append("cover_face_id=?")
+            params.append(int(cover_face_id))
+        if not sets:
+            return
+        sets.append("updated_at=?")
+        params.append(utc_now())
+        params.append(int(person_id))
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(f"UPDATE people SET {', '.join(sets)} WHERE id=?", params)
+                conn.commit()
+            finally:
+                conn.close()
+
+    def update_person_centroid(self, person_id: int, centroid: bytes | None) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE people SET centroid=?, updated_at=? WHERE id=?",
+                    (centroid, utc_now(), int(person_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def merge_people(self, source_ids: Sequence[int], target_id: int) -> None:
+        sources = [int(s) for s in source_ids if int(s) != int(target_id)]
+        if not sources:
+            return
+        placeholders = ",".join("?" for _ in sources)
+        now = utc_now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    f"UPDATE faces SET person_id=?, status='manual', updated_at=? "
+                    f"WHERE person_id IN ({placeholders}) AND status != 'ignored'",
+                    [int(target_id), now, *sources],
+                )
+                # Preserve favorite if any merged person was favorited.
+                fav_row = conn.execute(
+                    f"SELECT MAX(is_favorite) f FROM people WHERE id IN ({placeholders}, ?)",
+                    [*sources, int(target_id)],
+                ).fetchone()
+                if fav_row and fav_row["f"]:
+                    conn.execute(
+                        "UPDATE people SET is_favorite=1, updated_at=? WHERE id=?",
+                        (now, int(target_id)),
+                    )
+                conn.execute(
+                    f"DELETE FROM people WHERE id IN ({placeholders})", sources
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_face(self, face_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute("SELECT * FROM faces WHERE id=?", (int(face_id),)).fetchone()
+                return dict(row) if row else None
+            finally:
+                conn.close()
+
+    def get_face_public(self, face_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT f.id, f.photo_id, f.person_id, f.entity_kind,
+                           f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h, f.det_score, f.status,
+                           COALESCE(p.name, '') AS person_name,
+                           COALESCE(p.kind, f.entity_kind) AS person_kind
+                    FROM faces f
+                    LEFT JOIN people p ON p.id = f.person_id
+                    WHERE f.id = ?
+                    """,
+                    (int(face_id),),
+                ).fetchone()
+                if not row:
+                    return None
+                d = dict(row)
+                d["thumb_url"] = f"/api/faces/{d['id']}/thumb"
+                return d
+            finally:
+                conn.close()
+
+    def set_face_assignment(
+        self, face_id: int, person_id: int | None, status: str = "auto"
+    ) -> None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "UPDATE faces SET person_id=?, status=?, updated_at=? WHERE id=?",
+                    (person_id, status, utc_now(), int(face_id)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def unassigned_faces(
+        self, model_name: str = "buffalo_l", entity_kind: str | None = None
+    ) -> list[dict[str, Any]]:
+        clauses = [
+            "f.person_id IS NULL",
+            "f.status = 'auto'",
+            "f.embedding IS NOT NULL",
+            "p.status != 'deleted'",
+        ]
+        params: list[Any] = []
+        if entity_kind:
+            clauses.append("f.entity_kind = ?")
+            params.append(entity_kind)
+        if entity_kind == "person" and model_name:
+            clauses.append("f.model_name = ?")
+            params.append(model_name)
+        sql = (
+            "SELECT f.* FROM faces f JOIN photos p ON p.id = f.photo_id "
+            f"WHERE {' AND '.join(clauses)} ORDER BY f.id ASC"
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def faces_for_person(
+        self, person_id: int, include_pending: bool = False
+    ) -> list[dict[str, Any]]:
+        statuses = "('manual', 'auto', 'pending')" if include_pending else "('manual', 'auto')"
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"SELECT f.* FROM faces f JOIN photos p ON p.id = f.photo_id "
+                    f"WHERE f.person_id=? AND f.status IN {statuses} AND p.status != 'deleted' "
+                    f"ORDER BY f.det_score DESC, f.id ASC",
+                    (int(person_id),),
+                ).fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                conn.close()
+
+    def faces_for_photo(self, photo_id: int) -> list[dict[str, Any]]:
+        """Return detected people & pets for one photo (used by detail lightbox)."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT f.id, f.photo_id, f.person_id, f.entity_kind,
+                           f.bbox_x, f.bbox_y, f.bbox_w, f.bbox_h, f.det_score, f.status,
+                           COALESCE(p.name, '') AS person_name,
+                           COALESCE(p.kind, f.entity_kind) AS person_kind
+                    FROM faces f
+                    LEFT JOIN people p ON p.id = f.person_id
+                    WHERE f.photo_id = ? AND f.status != 'ignored'
+                    ORDER BY f.bbox_x ASC, f.id ASC
+                    """,
+                    (int(photo_id),),
+                ).fetchall()
+                result = []
+                for r in rows:
+                    d = dict(r)
+                    d["thumb_url"] = f"/api/faces/{d['id']}/thumb"
+                    result.append(d)
+                return result
+            finally:
+                conn.close()
+
+    def list_people(
+        self,
+        folder: str | None = None,
+        include_hidden: bool = False,
+        kind: str | None = None,
+        min_unnamed_count: int = 2,
+    ) -> list[dict[str, Any]]:
+        clauses = ["ph.status != 'deleted'", "f.status IN ('manual', 'auto')"]
+        params: list[Any] = []
+        if folder:
+            clauses.append("ph.folder = ?")
+            params.append(folder)
+        where_faces = " AND ".join(clauses)
+        people_clauses = []
+        if not include_hidden:
+            people_clauses.append("pe.is_hidden = 0")
+        if kind == "pet":
+            people_clauses.append("pe.kind IN ('cat', 'dog')")
+        elif kind in ("person", "cat", "dog"):
+            people_clauses.append("pe.kind = ?")
+            params.append(kind)
+        where_people = ("WHERE " + " AND ".join(people_clauses)) if people_clauses else ""
+        sql = f"""
+            SELECT pe.id, pe.name, pe.kind, pe.cover_face_id, pe.is_hidden, pe.is_favorite,
+                   COUNT(DISTINCT f.photo_id) AS photo_count,
+                   COALESCE((
+                       SELECT COUNT(*) FROM faces fp
+                       JOIN photos php ON php.id = fp.photo_id
+                       WHERE fp.person_id = pe.id AND fp.status = 'pending' AND php.status != 'deleted'
+                       {'AND php.folder = ?' if folder else ''}
+                   ), 0) AS pending_count,
+                   MIN(f.id) AS fallback_face_id
+            FROM people pe
+            JOIN faces f ON f.person_id = pe.id
+            JOIN photos ph ON ph.id = f.photo_id AND {where_faces}
+            {where_people}
+            GROUP BY pe.id
+            HAVING (pe.name != '' OR COUNT(DISTINCT f.photo_id) >= ?)
+            ORDER BY pe.is_favorite DESC, (pe.name = '') ASC, photo_count DESC, pe.id ASC
+        """
+        query_params = ([folder] if folder else []) + params + [max(1, int(min_unnamed_count))]
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, query_params).fetchall()
+                out = []
+                for r in rows:
+                    cover_id = r["cover_face_id"] or r["fallback_face_id"]
+                    out.append(
+                        {
+                            "id": int(r["id"]),
+                            "name": r["name"] or "",
+                            "kind": r["kind"] or "person",
+                            "cover_face_id": cover_id,
+                            "thumb_url": f"/api/faces/{cover_id}/thumb" if cover_id else "",
+                            "is_hidden": bool(r["is_hidden"]),
+                            "is_favorite": bool(r["is_favorite"]),
+                            "count": int(r["photo_count"]),
+                            "pending_count": int(r["pending_count"]),
+                        }
+                    )
+                return out
+            finally:
+                conn.close()
+
+    def person_photos(
+        self, person_id: int, folder: str | None = None, pending: bool = False
+    ) -> list[dict[str, Any]]:
+        status_clause = "f.status = 'pending'" if pending else "f.status IN ('manual', 'auto')"
+        clauses = ["f.person_id = ?", status_clause, "ph.status != 'deleted'"]
+        params: list[Any] = [int(person_id)]
+        if folder:
+            clauses.append("ph.folder = ?")
+            params.append(folder)
+        capture_time = _capture_time_sql_expr()
+        sql = (
+            "SELECT DISTINCT ph.* FROM photos ph "
+            "JOIN faces f ON f.photo_id = ph.id "
+            f"WHERE {' AND '.join(clauses)} "
+            f"ORDER BY ({capture_time}) IS NULL ASC, {capture_time} DESC, ph.id DESC"
+        )
+        return self._query_photos(sql, params)
+
+    def person_pending_faces(
+        self, person_id: int, folder: str | None = None
+    ) -> list[dict[str, Any]]:
+        clauses = ["f.person_id = ?", "f.status = 'pending'", "ph.status != 'deleted'"]
+        params: list[Any] = [int(person_id)]
+        if folder:
+            clauses.append("ph.folder = ?")
+            params.append(folder)
+        sql = (
+            "SELECT f.id AS face_id, f.photo_id, f.det_score, f.entity_kind, ph.filename, ph.title "
+            "FROM faces f JOIN photos ph ON ph.id = f.photo_id "
+            f"WHERE {' AND '.join(clauses)} ORDER BY f.det_score DESC, f.id DESC LIMIT 60"
+        )
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                return [
+                    {
+                        "face_id": int(r["face_id"]),
+                        "photo_id": int(r["photo_id"]),
+                        "det_score": float(r["det_score"] or 0.0),
+                        "entity_kind": r["entity_kind"] or "person",
+                        "filename": r["filename"] or "",
+                        "title": r["title"] or "",
+                        "thumb_url": f"/api/faces/{r['face_id']}/thumb",
+                    }
+                    for r in rows
+                ]
+            finally:
+                conn.close()
 
 
 # Global database instance, initialized when the app starts.

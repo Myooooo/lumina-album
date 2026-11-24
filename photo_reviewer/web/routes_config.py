@@ -234,6 +234,12 @@ def register(app, cfg, database):
             as_bool("video_pregenerate"),
             as_bool("merge_live_photos"),
             as_bool("geocoding_fallback"),
+            as_int("memory_window_days", 0, 30),
+            as_bool("face_recognition_enabled"),
+            as_bool("face_auto_scan"),
+            as_bool("face_detect_pets"),
+            as_float("face_match_threshold", 0.25, 0.75),
+            as_int("face_min_cluster_size", 1, 10),
         )
         for error in checks:
             if error:
@@ -250,6 +256,15 @@ def register(app, cfg, database):
             if processing not in VIDEO_PROCESSING:
                 return jsonify({"error": "video_processing 参数不合法"}), 400
             staged["video_processing"] = processing
+
+        if "face_model" in data:
+            fm = str(data["face_model"]).strip().lower()
+            if fm not in ("buffalo_l", "buffalo_s"):
+                return jsonify({"error": "face_model 仅支持 buffalo_l 或 buffalo_s"}), 400
+            staged["face_model"] = fm
+
+        if "face_models_dir" in data:
+            staged["face_models_dir"] = str(data["face_models_dir"] or "").strip()[:512]
 
         if "api_base_url" in data:
             staged["api_base_url"] = (

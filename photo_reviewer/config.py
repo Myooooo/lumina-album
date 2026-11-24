@@ -65,6 +65,13 @@ PERSISTED_FIELDS = (
     "live_volume",
     "merge_live_photos",
     "memory_window_days",
+    "face_recognition_enabled",
+    "face_auto_scan",
+    "face_model",
+    "face_detect_pets",
+    "face_match_threshold",
+    "face_min_cluster_size",
+    "face_models_dir",
 )
 
 # Fields the web UI is allowed to change through ``POST /api/config``. The UI
@@ -325,6 +332,29 @@ class Config:
     #: machine, not the album, so it must not be pinned by a database row.
     ffmpeg_path: str = field(default_factory=lambda: os.getenv("PHOTO_FFMPEG_PATH", ""))
 
+    # Local People & Pets (face + cat/dog) recognition settings.
+    face_recognition_enabled: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_FACE_ENABLED", True)
+    )
+    face_auto_scan: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_FACE_AUTO_SCAN", True)
+    )
+    face_model: str = field(
+        default_factory=lambda: os.getenv("PHOTO_FACE_MODEL", "buffalo_l")
+    )
+    face_detect_pets: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_FACE_DETECT_PETS", True)
+    )
+    face_match_threshold: float = field(
+        default_factory=lambda: float(os.getenv("PHOTO_FACE_MATCH_THRESHOLD", "0.50"))
+    )
+    face_min_cluster_size: int = field(
+        default_factory=lambda: int(os.getenv("PHOTO_FACE_MIN_CLUSTER_SIZE", "2"))
+    )
+    face_models_dir: str = field(
+        default_factory=lambda: os.getenv("PHOTO_FACE_MODELS_DIR", "")
+    )
+
     def __post_init__(self) -> None:
         data = Path(self.data_dir)
         data.mkdir(parents=True, exist_ok=True)
@@ -367,6 +397,14 @@ class Config:
             "video_preview_mode": self.video_preview_mode,
             "live_volume": self.live_volume,
             "merge_live_photos": self.merge_live_photos,
+            "memory_window_days": self.memory_window_days,
+            "face_recognition_enabled": self.face_recognition_enabled,
+            "face_auto_scan": self.face_auto_scan,
+            "face_model": self.face_model,
+            "face_detect_pets": self.face_detect_pets,
+            "face_match_threshold": self.face_match_threshold,
+            "face_min_cluster_size": self.face_min_cluster_size,
+            "face_models_dir": self.face_models_dir,
         }
 
 

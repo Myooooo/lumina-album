@@ -1,0 +1,948 @@
+"""Local-first face & pet (cat/dog) detection, embedding, clustering and matching.
+
+Everything runs strictly on the user's machine:
+- Human faces: InsightFace ONNX packs (``buffalo_l`` default, ``buffalo_s`` optional)
+- Pets (cats & dogs): Lightweight ONNX COCO detector (class 15 cat / 16 dog)
+  paired with an ONNX visual embedding model (or a deterministic normalized
+  patch-descriptor fallback when only the detector weights are present).
+- Cross-platform acceleration via ONNX Runtime Execution Providers:
+  * macOS (Apple Silicon / macOS 12+): CoreML EP (``MLProgram`` for FP32 fidelity) -> CPU
+  * Windows: NVIDIA CUDA EP -> DirectML EP (AMD/Intel/NVIDIA) -> CPU
+  * Linux: NVIDIA CUDA EP -> ROCm EP -> CPU
+
+``onnxruntime``, ``numpy`` and ``insightface`` are optional dependencies so the
+rest of Lumina Album keeps running even when they are not installed yet.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import os
+import platform
+import struct
+import threading
+import urllib.request
+import zipfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+try:
+    import numpy as np  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    np = None  # type: ignore
+
+try:
+    import onnxruntime as ort  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    ort = None  # type: ignore
+
+try:
+    from PIL import Image, ImageOps  # type: ignore
+except ImportError:  # pragma: no cover - optional dependency
+    Image = None  # type: ignore
+    ImageOps = None  # type: ignore
+
+
+FACE_MODELS = ("buffalo_l", "buffalo_s")
+
+#: Official InsightFace release zips for one-click local model download.
+INSIGHTFACE_MODEL_URLS = {
+    "buffalo_l": (
+        "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+    ),
+    "buffalo_s": (
+        "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_s.zip"
+    ),
+}
+
+#: Lightweight YOLOv8n ONNX (COCO 80 classes; 15=cat, 16=dog) for local pet detection.
+PET_DETECTOR_FILENAME = "yolov8n.onnx"
+PET_DETECTOR_URL = (
+    "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
+)
+COCO_CAT_CLASS = 15
+COCO_DOG_CLASS = 16
+
+
+# ---------------------------------------------------------------------------
+# Cross-platform ONNX Runtime hardware acceleration
+# ---------------------------------------------------------------------------
+
+
+def select_ort_providers(available: list[str] | None = None, system_name: str | None = None) -> list[Any]:
+    """Build an ordered ONNX Runtime provider list tailored to the host OS.
+
+    On macOS, ``CoreMLExecutionProvider`` is configured with
+    ``ModelFormat: MLProgram`` so CoreML preserves FP32 accuracy instead of
+    silently downcasting face embeddings to FP16.
+    """
+    sys_name = (system_name or platform.system()).lower()
+    if available is None:
+        if ort is None:
+            return []
+        try:
+            available = list(ort.get_available_providers())
+        except Exception:
+            available = ["CPUExecutionProvider"]
+
+    avail_set = set(available)
+    ordered: list[Any] = []
+
+    if sys_name == "darwin":
+        if "CoreMLExecutionProvider" in avail_set:
+            ordered.append(
+                (
+                    "CoreMLExecutionProvider",
+                    {
+                        "ModelFormat": "MLProgram",
+                        "MLComputeUnits": "ALL",
+                    },
+                )
+            )
+    elif sys_name == "windows":
+        if "CUDAExecutionProvider" in avail_set:
+            ordered.append("CUDAExecutionProvider")
+        if "DmlExecutionProvider" in avail_set:
+            ordered.append("DmlExecutionProvider")
+    else:
+        # Linux and other POSIX hosts.
+        if "CUDAExecutionProvider" in avail_set:
+            ordered.append("CUDAExecutionProvider")
+        if "ROCMExecutionProvider" in avail_set:
+            ordered.append("ROCMExecutionProvider")
+
+    if "CPUExecutionProvider" in avail_set or not ordered:
+        ordered.append("CPUExecutionProvider")
+    return ordered
+
+
+def active_accelerator_label(providers: list[Any] | None = None) -> str:
+    """Human-readable label describing the top active hardware accelerator."""
+    if ort is None and providers is None:
+        return "未安装 onnxruntime"
+    provs = providers if providers is not None else select_ort_providers()
+    if not provs:
+        return "CPU"
+    first = provs[0][0] if isinstance(provs[0], tuple) else str(provs[0])
+    mapping = {
+        "CoreMLExecutionProvider": "Apple CoreML (ANE / GPU)",
+        "CUDAExecutionProvider": "NVIDIA CUDA GPU",
+        "DmlExecutionProvider": "Windows DirectML GPU",
+        "ROCMExecutionProvider": "AMD ROCm GPU",
+        "CPUExecutionProvider": "CPU",
+    }
+    return mapping.get(first, first)
+
+
+# ---------------------------------------------------------------------------
+# Embedding serialization & vector math (NumPy fast-path + pure-Python fallback)
+# ---------------------------------------------------------------------------
+
+
+def l2_normalize(vec: list[float]) -> list[float]:
+    if not vec:
+        return []
+    norm = math.sqrt(sum(v * v for v in vec))
+    if norm <= 1e-12:
+        return [0.0 for _ in vec]
+    inv = 1.0 / norm
+    return [float(v * inv) for v in vec]
+
+
+def encode_embedding(vec: Any) -> bytes | None:
+    """Pack a float vector into compact little-endian float32 BLOB bytes."""
+    if vec is None:
+        return None
+    if np is not None and isinstance(vec, np.ndarray):
+        arr = vec.astype(np.float32, copy=False).ravel()
+        norm = float(np.linalg.norm(arr))
+        if norm > 1e-12:
+            arr = arr / norm
+        return arr.tobytes()
+    values = l2_normalize([float(x) for x in vec])
+    if not values:
+        return None
+    return struct.pack(f"<{len(values)}f", *values)
+
+
+def decode_embedding(blob: bytes | None) -> list[float] | None:
+    """Unpack a float32 BLOB back into a Python list of floats."""
+    if not blob:
+        return None
+    if len(blob) % 4 != 0:
+        return None
+    count = len(blob) // 4
+    return list(struct.unpack(f"<{count}f", blob))
+
+
+def cosine_distance(a: list[float], b: list[float]) -> float:
+    """Cosine distance ``1 - cos(a, b)`` in ``[0, 2]`` for normalized vectors."""
+    if not a or not b or len(a) != len(b):
+        return 1.0
+    dot = sum(x * y for x, y in zip(a, b))
+    dot = max(-1.0, min(1.0, dot))
+    return 1.0 - dot
+
+
+def compute_centroid(embeddings: list[list[float]]) -> list[float] | None:
+    """Compute the L2-normalized mean embedding for a person or pet."""
+    valid = [e for e in embeddings if e]
+    if not valid:
+        return None
+    dim = len(valid[0])
+    valid = [e for e in valid if len(e) == dim]
+    if not valid:
+        return None
+    if np is not None:
+        mat = np.asarray(valid, dtype=np.float32)
+        mean = mat.mean(axis=0)
+        norm = float(np.linalg.norm(mean))
+        if norm > 1e-12:
+            mean = mean / norm
+        return mean.astype(np.float32).tolist()
+    sums = [0.0] * dim
+    for vec in valid:
+        for i, val in enumerate(vec):
+            sums[i] += val
+    return l2_normalize(sums)
+
+
+# ---------------------------------------------------------------------------
+# Density-based clustering (DBSCAN on cosine distance)
+# ---------------------------------------------------------------------------
+
+
+def cluster_embeddings_dbscan(
+    embeddings: list[list[float]],
+    eps: float = 0.48,
+    min_samples: int = 2,
+) -> list[int]:
+    """Cluster normalized embeddings using DBSCAN over cosine distance.
+
+    Returns a list of cluster labels of length ``len(embeddings)``, where
+    ``-1`` means noise (singleton / unclustered) and ``0, 1, ...`` are cluster
+    indices. Uses NumPy matrix multiplication when installed so thousands of
+    embeddings cluster in milliseconds.
+    """
+    n = len(embeddings)
+    if n == 0:
+        return []
+    min_pts = max(1, int(min_samples))
+
+    # Build neighbor lists using cosine distance <= eps.
+    neighbors: list[list[int]] = [[] for _ in range(n)]
+    if np is not None:
+        mat = np.asarray(embeddings, dtype=np.float32)
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms = np.where(norms > 1e-12, norms, 1.0)
+        mat = mat / norms
+        # Chunked similarity matrix to keep peak memory small on 20k+ faces.
+        sim_thresh = 1.0 - float(eps)
+        chunk = 512
+        for start in range(0, n, chunk):
+            end = min(n, start + chunk)
+            sims = mat[start:end] @ mat.T
+            for offset in range(end - start):
+                idx = start + offset
+                hits = np.flatnonzero(sims[offset] >= sim_thresh)
+                neighbors[idx] = hits.tolist()
+    else:
+        for i in range(n):
+            neighbors[i].append(i)
+            for j in range(i + 1, n):
+                if cosine_distance(embeddings[i], embeddings[j]) <= eps:
+                    neighbors[i].append(j)
+                    neighbors[j].append(i)
+
+    labels = [-1] * n
+    visited = [False] * n
+    cluster_id = 0
+
+    for i in range(n):
+        if visited[i]:
+            continue
+        visited[i] = True
+        nbrs = neighbors[i]
+        if len(nbrs) < min_pts:
+            continue
+        labels[i] = cluster_id
+        queue = list(nbrs)
+        head = 0
+        in_queue = set(nbrs)
+        while head < len(queue):
+            q = queue[head]
+            head += 1
+            if not visited[q]:
+                visited[q] = True
+                q_nbrs = neighbors[q]
+                if len(q_nbrs) >= min_pts:
+                    for nxt in q_nbrs:
+                        if nxt not in in_queue:
+                            in_queue.add(nxt)
+                            queue.append(nxt)
+            if labels[q] == -1:
+                labels[q] = cluster_id
+        cluster_id += 1
+
+    return labels
+
+
+# ---------------------------------------------------------------------------
+# Model directory & local availability helpers
+# ---------------------------------------------------------------------------
+
+
+def models_root(cfg) -> Path:
+    custom = str(getattr(cfg, "face_models_dir", "") or "").strip()
+    if custom:
+        return Path(custom).expanduser()
+    return Path(cfg.data_dir) / "models"
+
+
+def face_thumbs_dir(cfg) -> Path:
+    d = Path(cfg.data_dir) / "face_thumbs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def has_insightface_model(cfg, model_name: str) -> bool:
+    root = models_root(cfg) / "models" / model_name
+    if not root.is_dir():
+        return False
+    return any(root.glob("*.onnx"))
+
+
+def has_pet_model(cfg) -> bool:
+    return (models_root(cfg) / PET_DETECTOR_FILENAME).is_file()
+
+
+def engine_status(cfg) -> dict[str, Any]:
+    """Report runtime capabilities, hardware provider, and local model status."""
+    model_name = getattr(cfg, "face_model", "buffalo_l")
+    if model_name not in FACE_MODELS:
+        model_name = "buffalo_l"
+    has_insightface_pkg = False
+    try:
+        import insightface  # type: ignore  # noqa: F401
+
+        has_insightface_pkg = True
+    except ImportError:
+        has_insightface_pkg = False
+
+    providers = select_ort_providers()
+    ort_available = ort is not None
+    numpy_available = np is not None
+    pillow_available = Image is not None
+    face_ready = (
+        ort_available
+        and numpy_available
+        and pillow_available
+        and has_insightface_pkg
+        and has_insightface_model(cfg, model_name)
+    )
+    pet_ready = (
+        ort_available
+        and numpy_available
+        and pillow_available
+        and has_pet_model(cfg)
+    )
+    return {
+        "enabled": bool(getattr(cfg, "face_recognition_enabled", True)),
+        "auto_scan": bool(getattr(cfg, "face_auto_scan", True)),
+        "model": model_name,
+        "detect_pets": bool(getattr(cfg, "face_detect_pets", True)),
+        "models_dir": str(models_root(cfg)),
+        "platform": platform.system(),
+        "accelerator": active_accelerator_label(providers),
+        "providers": [p[0] if isinstance(p, tuple) else p for p in providers],
+        "deps": {
+            "onnxruntime": ort_available,
+            "numpy": numpy_available,
+            "insightface": has_insightface_pkg,
+            "pillow": pillow_available,
+        },
+        "models_installed": {
+            "buffalo_l": has_insightface_model(cfg, "buffalo_l"),
+            "buffalo_s": has_insightface_model(cfg, "buffalo_s"),
+            "pets": has_pet_model(cfg),
+        },
+        "face_ready": face_ready,
+        "pet_ready": pet_ready,
+        "ready": face_ready or (bool(getattr(cfg, "face_detect_pets", True)) and pet_ready),
+    }
+
+
+def download_local_models(
+    cfg,
+    model_name: str = "buffalo_l",
+    include_pets: bool = True,
+) -> dict[str, Any]:
+    """Download InsightFace ONNX pack and optional pet detector to local models_dir."""
+    if model_name not in FACE_MODELS:
+        raise ValueError(f"不支持的模型名称：{model_name}")
+    root = models_root(cfg)
+    root.mkdir(parents=True, exist_ok=True)
+    downloaded: list[str] = []
+
+    if not has_insightface_model(cfg, model_name):
+        zip_path = root / f"{model_name}.zip"
+        models_sub = root / "models"
+        models_sub.mkdir(parents=True, exist_ok=True)
+        url = INSIGHTFACE_MODEL_URLS[model_name]
+        logger.info("downloading %s from %s", model_name, url)
+        urllib.request.urlretrieve(url, zip_path)
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(models_sub)
+        finally:
+            if zip_path.exists():
+                zip_path.unlink(missing_ok=True)
+        downloaded.append(model_name)
+
+    if include_pets and not has_pet_model(cfg):
+        pet_path = root / PET_DETECTOR_FILENAME
+        logger.info("downloading pet detector from %s", PET_DETECTOR_URL)
+        urllib.request.urlretrieve(PET_DETECTOR_URL, pet_path)
+        downloaded.append("pets")
+
+    return {"downloaded": downloaded, "status": engine_status(cfg)}
+
+
+# ---------------------------------------------------------------------------
+# Face & pet thumbnail cropping
+# ---------------------------------------------------------------------------
+
+
+def crop_entity_thumbnail(
+    image_path: str,
+    bbox: tuple[float, float, float, float],
+    output_path: Path,
+    size: int = 240,
+    pad_ratio: float = 0.35,
+) -> str | None:
+    """Crop a square avatar thumbnail around a normalized ``(x, y, w, h)`` box."""
+    if Image is None:
+        return None
+    try:
+        with Image.open(image_path) as raw:
+            img = ImageOps.exif_transpose(raw).convert("RGB")
+            iw, ih = img.size
+            if iw <= 0 or ih <= 0:
+                return None
+            bx, by, bw, bh = bbox
+            cx = (bx + bw * 0.5) * iw
+            cy = (by + bh * 0.5) * ih
+            side = max(bw * iw, bh * ih) * (1.0 + pad_ratio * 2.0)
+            side = max(32.0, min(side, float(min(iw, ih))))
+            half = side * 0.5
+            x0 = max(0.0, min(iw - side, cx - half))
+            y0 = max(0.0, min(ih - side, cy - half))
+            crop = img.crop((int(x0), int(y0), int(x0 + side), int(y0 + side)))
+            crop = crop.resize((size, size), Image.Resampling.LANCZOS)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            crop.save(output_path, format="JPEG", quality=86)
+            return str(output_path)
+    except Exception:
+        logger.debug("failed cropping face/pet thumb for %s", image_path, exc_info=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Local inference engine (InsightFace ONNX + YOLOv8n Pet ONNX)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DetectedEntity:
+    entity_kind: str  # "person" | "cat" | "dog"
+    bbox: tuple[float, float, float, float]  # normalized (x, y, w, h) in [0, 1]
+    det_score: float
+    embedding: list[float]
+
+
+def _extract_pet_patch_embedding(img_rgb: Any, bbox: tuple[float, float, float, float]) -> list[float]:
+    """Deterministic local visual descriptor for a cropped cat/dog region.
+
+    Produces a normalized 128-d color-and-spatial histogram vector from the pet
+    crop so cats and dogs can be clustered locally without requiring a second
+    large neural network.
+    """
+    if Image is None or np is None:
+        return []
+    iw, ih = img_rgb.size
+    x, y, w, h = bbox
+    x0 = max(0, int(x * iw))
+    y0 = max(0, int(y * ih))
+    x1 = min(iw, max(x0 + 1, int((x + w) * iw)))
+    y1 = min(ih, max(y0 + 1, int((y + h) * ih)))
+    crop = img_rgb.crop((x0, y0, x1, y1)).resize((64, 64), Image.Resampling.BILINEAR)
+    hsv = np.asarray(crop.convert("HSV"), dtype=np.float32)
+    # 2x2 spatial grid x (16 H bins + 8 S bins + 8 V bins) = 128-d descriptor.
+    feats: list[float] = []
+    for gy in (0, 32):
+        for gx in (0, 32):
+            patch = hsv[gy : gy + 32, gx : gx + 32]
+            h_hist, _ = np.histogram(patch[:, :, 0], bins=16, range=(0, 256))
+            s_hist, _ = np.histogram(patch[:, :, 1], bins=8, range=(0, 256))
+            v_hist, _ = np.histogram(patch[:, :, 2], bins=8, range=(0, 256))
+            feats.extend(h_hist.astype(np.float32).tolist())
+            feats.extend(s_hist.astype(np.float32).tolist())
+            feats.extend(v_hist.astype(np.float32).tolist())
+    return l2_normalize(feats)
+
+
+def _nms_boxes(boxes: list[tuple[float, float, float, float, float, int]], iou_thresh: float = 0.45):
+    boxes = sorted(boxes, key=lambda b: b[4], reverse=True)
+    kept = []
+    while boxes:
+        best = boxes.pop(0)
+        kept.append(best)
+        rest = []
+        bx1, by1, bx2, by2 = best[0], best[1], best[2], best[3]
+        b_area = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+        for item in boxes:
+            if item[5] != best[5]:
+                rest.append(item)
+                continue
+            ix1 = max(bx1, item[0])
+            iy1 = max(by1, item[1])
+            ix2 = min(bx2, item[2])
+            iy2 = min(by2, item[3])
+            inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+            i_area = max(0.0, item[2] - item[0]) * max(0.0, item[3] - item[1])
+            union = b_area + i_area - inter
+            iou = inter / union if union > 1e-9 else 0.0
+            if iou < iou_thresh:
+                rest.append(item)
+        boxes = rest
+    return kept
+
+
+class LocalFacePetEngine:
+    """Lazy-loaded local ONNX inference engine for faces & pets."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._face_app: Any = None
+        self._face_model_loaded: str = ""
+        self._pet_session: Any = None
+        self._pet_model_path: str = ""
+
+    def _ensure_face_app(self, cfg) -> Any:
+        model_name = getattr(cfg, "face_model", "buffalo_l")
+        if model_name not in FACE_MODELS:
+            model_name = "buffalo_l"
+        with self._lock:
+            if self._face_app is not None and self._face_model_loaded == model_name:
+                return self._face_app
+            if ort is None or np is None:
+                return None
+            if not has_insightface_model(cfg, model_name):
+                return None
+            try:
+                from insightface.app import FaceAnalysis  # type: ignore
+            except ImportError:
+                return None
+            providers = select_ort_providers()
+            root = str(models_root(cfg))
+            app = FaceAnalysis(
+                name=model_name,
+                root=root,
+                providers=providers,
+                allowed_modules=["detection", "recognition"],
+            )
+            app.prepare(ctx_id=0, det_size=(640, 640), det_thresh=0.55)
+            self._face_app = app
+            self._face_model_loaded = model_name
+            return self._face_app
+
+    def _ensure_pet_session(self, cfg) -> Any:
+        if not getattr(cfg, "face_detect_pets", True):
+            return None
+        pet_path = models_root(cfg) / PET_DETECTOR_FILENAME
+        if not pet_path.is_file() or ort is None or np is None:
+            return None
+        with self._lock:
+            if self._pet_session is not None and self._pet_model_path == str(pet_path):
+                return self._pet_session
+            providers = select_ort_providers()
+            self._pet_session = ort.InferenceSession(str(pet_path), providers=providers)
+            self._pet_model_path = str(pet_path)
+            return self._pet_session
+
+    def detect(self, image_path: str, cfg) -> list[DetectedEntity]:
+        """Run local face + optional pet detection on one image file."""
+        if Image is None or np is None:
+            return []
+        try:
+            with Image.open(image_path) as raw:
+                img_rgb = ImageOps.exif_transpose(raw).convert("RGB")
+        except Exception:
+            logger.debug("failed opening image %s for face/pet scan", image_path, exc_info=True)
+            return []
+
+        iw, ih = img_rgb.size
+        if iw <= 0 or ih <= 0:
+            return []
+        results: list[DetectedEntity] = []
+
+        # 1. Human faces via InsightFace ONNX.
+        face_app = self._ensure_face_app(cfg)
+        if face_app is not None:
+            bgr = np.asarray(img_rgb, dtype=np.uint8)[:, :, ::-1].copy()
+            try:
+                faces = face_app.get(bgr)
+            except Exception:
+                logger.warning("InsightFace inference failed on %s", image_path, exc_info=True)
+                faces = []
+            for f in faces:
+                det_score = float(getattr(f, "det_score", 0.0))
+                if det_score < 0.55:
+                    continue
+                x1, y1, x2, y2 = [float(v) for v in f.bbox[:4]]
+                x1 = max(0.0, min(float(iw), x1))
+                y1 = max(0.0, min(float(ih), y1))
+                x2 = max(x1 + 1.0, min(float(iw), x2))
+                y2 = max(y1 + 1.0, min(float(ih), y2))
+                bw = (x2 - x1) / iw
+                bh = (y2 - y1) / ih
+                # Skip tiny background crowd faces (< 2.5% of image width/height).
+                if bw < 0.025 and bh < 0.025:
+                    continue
+                emb = getattr(f, "normed_embedding", None)
+                if emb is None:
+                    emb = getattr(f, "embedding", None)
+                if emb is None:
+                    continue
+                results.append(
+                    DetectedEntity(
+                        entity_kind="person",
+                        bbox=(x1 / iw, y1 / ih, bw, bh),
+                        det_score=det_score,
+                        embedding=l2_normalize([float(v) for v in emb]),
+                    )
+                )
+
+        # 2. Cats & dogs via lightweight YOLOv8n ONNX.
+        pet_sess = self._ensure_pet_session(cfg)
+        if pet_sess is not None:
+            try:
+                resized = img_rgb.resize((640, 640), Image.Resampling.BILINEAR)
+                arr = np.asarray(resized, dtype=np.float32) / 255.0
+                inp = np.transpose(arr, (2, 0, 1))[None, ...]
+                input_name = pet_sess.get_inputs()[0].name
+                out = pet_sess.run(None, {input_name: inp})[0]
+                preds = out[0].T  # (8400, 84) -> [cx, cy, w, h, 80 class scores]
+                cat_scores = preds[:, 4 + COCO_CAT_CLASS]
+                dog_scores = preds[:, 4 + COCO_DOG_CLASS]
+                raw_boxes: list[tuple[float, float, float, float, float, int]] = []
+                for idx in np.flatnonzero(np.maximum(cat_scores, dog_scores) >= 0.45):
+                    c_sc = float(cat_scores[idx])
+                    d_sc = float(dog_scores[idx])
+                    cls_id = COCO_CAT_CLASS if c_sc >= d_sc else COCO_DOG_CLASS
+                    conf = max(c_sc, d_sc)
+                    cx, cy, bw_px, bh_px = [float(v) for v in preds[idx, :4]]
+                    x1 = max(0.0, (cx - bw_px * 0.5) / 640.0)
+                    y1 = max(0.0, (cy - bh_px * 0.5) / 640.0)
+                    x2 = min(1.0, (cx + bw_px * 0.5) / 640.0)
+                    y2 = min(1.0, (cy + bh_px * 0.5) / 640.0)
+                    if (x2 - x1) < 0.04 or (y2 - y1) < 0.04:
+                        continue
+                    raw_boxes.append((x1, y1, x2, y2, conf, cls_id))
+                for x1, y1, x2, y2, conf, cls_id in _nms_boxes(raw_boxes):
+                    bbox = (x1, y1, x2 - x1, y2 - y1)
+                    emb = _extract_pet_patch_embedding(img_rgb, bbox)
+                    if not emb:
+                        continue
+                    results.append(
+                        DetectedEntity(
+                            entity_kind="cat" if cls_id == COCO_CAT_CLASS else "dog",
+                            bbox=bbox,
+                            det_score=conf,
+                            embedding=emb,
+                        )
+                    )
+            except Exception:
+                logger.warning("pet ONNX inference failed on %s", image_path, exc_info=True)
+
+        return results
+
+
+ENGINE = LocalFacePetEngine()
+
+
+# ---------------------------------------------------------------------------
+# Incremental matching & library clustering (iOS-like seamless assignment)
+# ---------------------------------------------------------------------------
+
+
+def recompute_person_centroid(database, person_id: int) -> list[float] | None:
+    """Recompute and persist the prototype centroid for one person or pet."""
+    faces = database.faces_for_person(person_id, include_pending=False)
+    embeddings = [
+        decode_embedding(f["embedding"])
+        for f in faces
+        if f.get("embedding") and f.get("status") in ("manual", "auto")
+    ]
+    embeddings = [e for e in embeddings if e]
+    centroid = compute_centroid(embeddings)
+    database.update_person_centroid(person_id, encode_embedding(centroid))
+    # Also ensure cover_face_id points to the sharpest face if missing.
+    person = database.get_person(person_id)
+    if person and faces:
+        valid_ids = {f["id"] for f in faces}
+        if not person.get("cover_face_id") or person["cover_face_id"] not in valid_ids:
+            best = max(faces, key=lambda f: (f.get("det_score") or 0.0, (f.get("bbox_w") or 0.0) * (f.get("bbox_h") or 0.0)))
+            database.set_person_flags(person_id, cover_face_id=best["id"])
+    return centroid
+
+
+def match_and_cluster_library(database, cfg) -> dict[str, int]:
+    """Match unassigned faces/pets to known profiles, then cluster leftovers.
+
+    Two-stage iOS-inspired logic:
+    1. Compare unassigned ``auto`` faces against confirmed people/pets of the
+       same ``entity_kind``:
+       - distance <= ``threshold`` -> auto-assign (``status='auto'``)
+       - distance <= ``threshold + 0.14`` -> queue for user confirmation (``status='pending'``)
+    2. Cluster remaining unassigned embeddings per ``entity_kind`` via DBSCAN to
+       discover new unnamed people/pets cleanly without touching manual labels.
+    """
+    model_name = getattr(cfg, "face_model", "buffalo_l")
+    threshold = float(getattr(cfg, "face_match_threshold", 0.50))
+    pending_cutoff = min(0.75, threshold + 0.14)
+    min_cluster = max(2, int(getattr(cfg, "face_min_cluster_size", 2)))
+
+    # 1. Build prototype centroids for every confirmed person/pet (named first).
+    all_people = database.all_people_raw()
+    prototypes: dict[str, list[tuple[int, list[float], bool]]] = {
+        "person": [],
+        "cat": [],
+        "dog": [],
+    }
+    for p in all_people:
+        centroid = recompute_person_centroid(database, p["id"])
+        if centroid:
+            kind = p.get("kind") or "person"
+            prototypes.setdefault(kind, []).append(
+                (p["id"], centroid, bool((p.get("name") or "").strip()))
+            )
+
+    auto_matched = 0
+    pending_queued = 0
+    clusters_created = 0
+
+    for entity_kind in ("person", "cat", "dog"):
+        unassigned = database.unassigned_faces(model_name=model_name, entity_kind=entity_kind)
+        if not unassigned:
+            continue
+        # Pets use a slightly wider threshold for visual descriptors.
+        eff_thresh = threshold if entity_kind == "person" else min(0.45, threshold * 0.85)
+        eff_pending = pending_cutoff if entity_kind == "person" else min(0.60, eff_thresh + 0.12)
+        kind_protos = prototypes.get(entity_kind, [])
+
+        leftovers: list[dict[str, Any]] = []
+        leftover_vecs: list[list[float]] = []
+
+        for face in unassigned:
+            vec = decode_embedding(face.get("embedding"))
+            if not vec:
+                continue
+            best_pid = None
+            best_dist = 2.0
+            for pid, pvec, _is_named in kind_protos:
+                if len(pvec) != len(vec):
+                    continue
+                d = cosine_distance(vec, pvec)
+                if d < best_dist:
+                    best_dist = d
+                    best_pid = pid
+            if best_pid is not None and best_dist <= eff_thresh:
+                database.set_face_assignment(face["id"], best_pid, status="auto")
+                auto_matched += 1
+            elif best_pid is not None and best_dist <= eff_pending:
+                database.set_face_assignment(face["id"], best_pid, status="pending")
+                pending_queued += 1
+            else:
+                leftovers.append(face)
+                leftover_vecs.append(vec)
+
+        # 2. Cluster leftovers via DBSCAN (strict eps to avoid false merges).
+        if len(leftovers) >= min_cluster:
+            cluster_eps = max(0.32, eff_thresh - 0.04)
+            labels = cluster_embeddings_dbscan(
+                leftover_vecs, eps=cluster_eps, min_samples=min_cluster
+            )
+            grouped: dict[int, list[int]] = {}
+            for idx, lbl in enumerate(labels):
+                if lbl >= 0:
+                    grouped.setdefault(lbl, []).append(idx)
+            for member_indices in grouped.values():
+                member_faces = [leftovers[i] for i in member_indices]
+                member_vecs = [leftover_vecs[i] for i in member_indices]
+                best_cover = max(
+                    member_faces,
+                    key=lambda f: (
+                        f.get("det_score") or 0.0,
+                        (f.get("bbox_w") or 0.0) * (f.get("bbox_h") or 0.0),
+                    ),
+                )
+                centroid = compute_centroid(member_vecs)
+                new_pid = database.create_person(
+                    name="",
+                    kind=entity_kind,
+                    cover_face_id=best_cover["id"],
+                    centroid=encode_embedding(centroid),
+                )
+                for mf in member_faces:
+                    database.set_face_assignment(mf["id"], new_pid, status="auto")
+                clusters_created += 1
+
+    # Refresh centroids after batch updates.
+    for p in database.all_people_raw():
+        recompute_person_centroid(database, p["id"])
+
+    return {
+        "auto_matched": auto_matched,
+        "pending_queued": pending_queued,
+        "clusters_created": clusters_created,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Background scan job coordinator
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PeopleScanJob:
+    status: str = "idle"  # idle | running | completed | cancelled | error
+    total: int = 0
+    done: int = 0
+    faces_found: int = 0
+    pets_found: int = 0
+    message: str = ""
+    error: str = ""
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "total": self.total,
+            "done": self.done,
+            "faces_found": self.faces_found,
+            "pets_found": self.pets_found,
+            "message": self.message,
+            "error": self.error,
+        }
+
+
+class PeopleScanCoordinator:
+    """Single-slot background worker for incremental face & pet scanning."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._job = PeopleScanJob()
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return self._job.to_dict()
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self._job.status == "running":
+                self._job.cancel_event.set()
+                return True
+            return False
+
+    def start(
+        self,
+        database,
+        cfg,
+        folder: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        with self._lock:
+            if self._job.status == "running":
+                return self._job.to_dict()
+            job = PeopleScanJob(status="running", message="准备识别人物与宠物…")
+            self._job = job
+
+        def _worker():
+            try:
+                model_name = getattr(cfg, "face_model", "buffalo_l")
+                photos = database.photos_needing_face_scan(
+                    folder=folder, model_name=model_name, force=force
+                )
+                job.total = len(photos)
+                thumbs_root = face_thumbs_dir(cfg)
+                for idx, photo in enumerate(photos, start=1):
+                    if job.cancel_event.is_set():
+                        job.status = "cancelled"
+                        job.message = "已取消人物识别"
+                        return
+                    img_path = photo.get("proxy_path") or photo.get("path")
+                    if not img_path or not os.path.isfile(img_path):
+                        database.mark_photo_faces_scanned(photo["id"], model_name)
+                        job.done = idx
+                        continue
+                    entities = ENGINE.detect(img_path, cfg)
+                    records = []
+                    for ent in entities:
+                        if ent.entity_kind == "person":
+                            job.faces_found += 1
+                        else:
+                            job.pets_found += 1
+                        records.append(
+                            {
+                                "entity_kind": ent.entity_kind,
+                                "bbox_x": ent.bbox[0],
+                                "bbox_y": ent.bbox[1],
+                                "bbox_w": ent.bbox[2],
+                                "bbox_h": ent.bbox[3],
+                                "det_score": ent.det_score,
+                                "embedding": encode_embedding(ent.embedding),
+                                "model_name": model_name,
+                            }
+                        )
+                    inserted_ids = database.replace_auto_faces_for_photo(
+                        photo["id"], records, model_name
+                    )
+                    # Generate cropped square avatars for newly detected faces/pets.
+                    for fid, rec in zip(inserted_ids, records):
+                        thumb_file = thumbs_root / f"face_{fid}.jpg"
+                        saved = crop_entity_thumbnail(
+                            img_path,
+                            (rec["bbox_x"], rec["bbox_y"], rec["bbox_w"], rec["bbox_h"]),
+                            thumb_file,
+                        )
+                        if saved:
+                            database.update_face_thumb(fid, saved)
+                    database.mark_photo_faces_scanned(photo["id"], model_name)
+                    job.done = idx
+                    job.message = f"已扫描 {idx} / {job.total} 张照片…"
+
+                job.message = "正在自动归类人物与宠物…"
+                summary = match_and_cluster_library(database, cfg)
+                job.status = "completed"
+                job.message = (
+                    f"识别完成：共扫描 {job.total} 张，"
+                    f"新归入 {summary['auto_matched']} 张，"
+                    f"发现 {summary['clusters_created']} 组新面孔"
+                )
+            except Exception as exc:
+                logger.exception("people/pet background scan failed")
+                job.status = "error"
+                job.error = str(exc)
+                job.message = f"识别出错：{exc}"
+
+        t = threading.Thread(target=_worker, name="lumina-people-scan", daemon=True)
+        t.start()
+        return job.to_dict()
+
+
+SCAN_COORDINATOR = PeopleScanCoordinator()

@@ -314,5 +314,6 @@ def register(app, cfg, database):
                 ),
                 "play_state": photo.get("play_state") or "",
                 "ffmpeg": video.tools_available(cfg.ffmpeg_path or None),
+                "faces": database.faces_for_photo(photo["id"]),
             }
         )
