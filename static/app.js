@@ -95,6 +95,10 @@ function init() {
   }
   $("loadMoreBtn").addEventListener("click", loadMorePhotos);
   $("cancelScanBtn").addEventListener("click", async () => {
+    if (typeof peopleState !== "undefined" && peopleState.homeTracking) {
+      try { await api("/api/people/scan/cancel", { method: "POST" }); } catch (e) {}
+      return;
+    }
     if (state.currentJobId) {
       try { await api(`/api/scan/cancel/${state.currentJobId}`, { method: "POST" }); } catch (e) {}
     }

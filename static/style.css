@@ -14137,3 +14137,75 @@ body[data-theme="vintage"] .force-label input[type="checkbox"]:checked {
 body[data-theme="vintage"] .force-label input[type="checkbox"]:checked::after {
   border-color: #141210;
 }
+
+/* A quiet "background scan is still working" marker in the people header. The
+   progress card below carries the numbers; this only says why a scan is running
+   without the user having started it. */
+.people-silent-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 99px;
+  background: rgba(125, 95, 65, 0.06);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.people-silent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light);
+  animation: cardPulse 2.6s ease-in-out infinite;
+}
+
+body[data-theme="paper"] .people-silent-badge {
+  border: 1px dashed #cbbda5;
+  border-radius: 3px;
+  background: #f3ecdf;
+  color: #7b6551;
+  font-family: var(--font-mono);
+}
+
+body[data-theme="paper"] .people-silent-dot {
+  background: #8a5a36;
+  box-shadow: 0 0 0 3px rgba(154, 96, 44, 0.12);
+}
+
+body[data-theme="classic"] .people-silent-badge {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.46);
+  color: #716355;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+body[data-theme="classic"] .people-silent-dot {
+  background: #7d6b59;
+  box-shadow: 0 0 0 3px rgba(125, 95, 65, 0.1);
+}
+
+body[data-theme="vintage"] .people-silent-badge {
+  border: 1px dashed rgba(235, 146, 52, 0.35);
+  border-radius: 2px;
+  background: rgba(20, 16, 13, 0.78);
+  color: #d8b78d;
+  box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.04);
+}
+
+body[data-theme="vintage"] .people-silent-dot {
+  border-radius: 1px;
+  background: #eb9234;
+  box-shadow: 0 0 7px rgba(235, 146, 52, 0.35);
+}
+
+.people-scan-progress #peopleScanEta {
+  margin-left: 2px;
+}

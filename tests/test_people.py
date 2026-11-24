@@ -309,6 +309,8 @@ class PeopleAndPetsTest(unittest.TestCase):
                         time.sleep(0.02)
                 st = coord.status()
                 self.assertEqual(st["status"], "completed")
+                self.assertIn("elapsed", st)
+                self.assertGreaterEqual(float(st["elapsed"]), 0.0)
                 # Photo #5 triggers mid-scan cluster_version=1, final pass bumps to >=2.
                 self.assertGreaterEqual(st["cluster_version"], 2)
                 self.assertEqual(len(db.list_people(folder=str(folder))), 1)

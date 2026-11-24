@@ -1534,9 +1534,17 @@ class PeopleScanJob:
     cluster_version: int = 0
     message: str = ""
     error: str = ""
+    started_at: float = 0.0
+    finished_at: float = 0.0
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
     def to_dict(self) -> dict[str, Any]:
+        now = time.monotonic()
+        if self.started_at:
+            end = self.finished_at or now
+            elapsed = max(0.0, end - self.started_at)
+        else:
+            elapsed = 0.0
         return {
             "status": self.status,
             "total": self.total,
@@ -1546,6 +1554,7 @@ class PeopleScanJob:
             "cluster_version": self.cluster_version,
             "message": self.message,
             "error": self.error,
+            "elapsed": round(elapsed, 2),
         }
 
 
@@ -1577,7 +1586,11 @@ class PeopleScanCoordinator:
         with self._lock:
             if self._job.status == "running":
                 return self._job.to_dict()
-            job = PeopleScanJob(status="running", message="准备识别人物与宠物…")
+            job = PeopleScanJob(
+                status="running",
+                message="准备识别人物与宠物…",
+                started_at=time.monotonic(),
+            )
             self._job = job
 
         def _worker():
@@ -1672,6 +1685,9 @@ class PeopleScanCoordinator:
                 job.status = "error"
                 job.error = str(exc)
                 job.message = f"识别出错：{exc}"
+            finally:
+                if not job.finished_at:
+                    job.finished_at = time.monotonic()
 
         t = threading.Thread(target=_worker, name="lumina-people-scan", daemon=True)
         t.start()

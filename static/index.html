@@ -346,6 +346,9 @@
           <p class="people-lede" id="peopleLede">本地离线识别照片中的人物与宠物猫狗，数据不出本机。</p>
         </div>
         <div class="people-header-actions">
+          <span id="peopleSilentBadge" class="people-silent-badge hidden" role="status">
+            <span class="people-silent-dot" aria-hidden="true"></span>后台静默扫描中
+          </span>
           <button id="peopleScanBtn" class="btn primary" type="button" title="后台增量扫描新照片中的人物与宠物">
             <span class="btn-icon" data-icon="sparkles"></span>扫描识别
           </button>
@@ -368,6 +371,7 @@
         <div class="progress-text">
           <span id="peopleScanProgressText">正在识别人物与宠物…</span>
           <span id="peopleScanProgressPct" class="progress-eta">0%</span>
+          <span id="peopleScanEta" class="progress-eta hidden"></span>
         </div>
         <div class="progress-bar"><div id="peopleScanProgressFill" class="progress-fill"></div></div>
         <button id="peopleCancelScanBtn" class="btn small" type="button"><span class="btn-icon" data-icon="close"></span>取消</button>

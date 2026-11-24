@@ -2010,6 +2010,25 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
+    "people scan progress reuses the album ETA and can run silently",
+    /id="peopleScanEta"/.test(html) &&
+      /id="peopleSilentBadge"/.test(html) &&
+      /updateEta\(done, total, Number\(job\.elapsed\)/.test(src) &&
+      /holder: peopleState/.test(src) &&
+      /function paintAutoPeopleHome\(/.test(src) &&
+      /function startAutoPeopleScanTracking\(/.test(src) &&
+      /paintJobProgress\(\{/.test(src) &&
+      /body\[data-theme="vintage"\] \.people-silent-badge/.test(css),
+    true
+  );
+  check(
+    "the auto people scan takes over the album progress strip",
+    /if \(autoPeople\) startAutoPeopleScanTracking\(\)/.test(src) &&
+      /state\.progressHideTimer/.test(src) &&
+      /startPeoplePoll\(\{ auto: true, home: true \}\)/.test(src),
+    true
+  );
+  check(
     "pending faces adopt pending_photos and open preview in pending context",
     /adoptPhotos\(pendingPhotos\)/.test(src) &&
       /title:\s*`\$\{personDisplayName\(cur\.person\)\} · 待确认`/.test(src),

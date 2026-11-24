@@ -50,6 +50,8 @@ const state = {
   memoriesData: null,
   previewNavToken: 0,
   pollingTimer: null,
+  //: Pending timeout that hides the toolbar job strip after a summary.
+  progressHideTimer: null,
   pollTick: 0,
   //: Ids of the dialogs currently open, oldest first. Escape closes the last one,
   //: which is the one on top - and "on top" has to follow the order they were

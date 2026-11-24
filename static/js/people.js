@@ -16,6 +16,11 @@ const peopleState = {
   pollTimer: null,
   lastClusterVersion: 0,
   silentRefreshing: false,
+  //: ETA state for the people progress card; uses the same estimator as the
+  //: album scan, but writes to its own element.
+  eta: null,
+  //: True while the automatic scan is mirrored into the toolbar progress bar.
+  homeTracking: false,
 };
 
 function kindBadgeLabel(kind) {
@@ -33,15 +38,19 @@ function personDisplayName(person) {
   return "未命名人物";
 }
 
-function renderPeopleScanStatus(job) {
+function renderPeopleScanStatus(job, options = {}) {
   const bar = $("peopleScanProgress");
   const textEl = $("peopleScanProgressText");
   const pctEl = $("peopleScanProgressPct");
+  const etaEl = $("peopleScanEta");
   const fillEl = $("peopleScanProgressFill");
+  const badge = $("peopleSilentBadge");
   const scanBtn = $("peopleScanBtn");
   if (!bar || !textEl) return;
   const running = Boolean(job && job.status === "running");
+  const auto = Boolean(options.auto && running);
   bar.classList.toggle("hidden", !running);
+  if (badge) badge.classList.toggle("hidden", !auto);
   if (running) {
     const total = Number(job.total) || 0;
     const done = Number(job.done) || 0;
@@ -56,6 +65,25 @@ function renderPeopleScanStatus(job) {
       fillEl.style.width = total > 0 ? `${pct}%` : "18%";
       fillEl.classList.toggle("is-indeterminate", total === 0);
     }
+    // Share the album progress ETA estimator, but keep its own state and pill.
+    if (etaEl) {
+      if (total > 0) {
+        updateEta(done, total, Number(job.elapsed) || 0, {
+          holder: peopleState,
+          el: etaEl,
+        });
+      } else {
+        etaEl.classList.add("hidden");
+        etaEl.textContent = "";
+        peopleState.eta = null;
+      }
+    }
+  } else {
+    if (etaEl) {
+      etaEl.classList.add("hidden");
+      etaEl.textContent = "";
+    }
+    peopleState.eta = null;
   }
   if (scanBtn) {
     scanBtn.disabled = running;
@@ -69,14 +97,56 @@ function stopPeoplePoll() {
   }
 }
 
-function startPeoplePoll() {
+/** Mirror the automatic people scan into the toolbar progress strip. */
+function paintAutoPeopleHome(job) {
+  if (!job) return;
+  const total = Number(job.total) || 0;
+  const done = Number(job.done) || 0;
+  const found = [];
+  if (job.faces_found) found.push(`${job.faces_found} 人脸`);
+  if (job.pets_found) found.push(`${job.pets_found} 宠物`);
+  const suffix = found.length ? ` · 已发现 ${found.join(" / ")}` : "";
+  $("progressText").textContent = `后台识别人物与宠物 ${total ? `${done}/${total}` : "…"}${suffix}`;
+  // Reuse the album job painter for the bar width and ETA pill.
+  paintJobProgress({
+    processed: done,
+    total,
+    elapsed: Number(job.elapsed) || 0,
+    status: job.status,
+  });
+}
+
+function finishAutoPeopleHome(job) {
+  if (!peopleState.homeTracking) return;
+  peopleState.homeTracking = false;
+  const done = Number(job.done) || 0;
+  const total = Number(job.total) || 0;
+  $("progressText").textContent = job.message || "人物与宠物识别完成";
+  paintJobProgress({
+    processed: done,
+    total: total || done,
+    elapsed: Number(job.elapsed) || 0,
+    status: "completed",
+  });
+  if (state.progressHideTimer) clearTimeout(state.progressHideTimer);
+  state.progressHideTimer = setTimeout(hideProgress, 3500);
+  if (job.status === "error" && job.error) {
+    showToast(`自动识别人物失败：${job.error}`, "error");
+  }
+}
+
+function startPeoplePoll(options = {}) {
   stopPeoplePoll();
-  peopleState.pollTimer = setInterval(async () => {
+  const auto = Boolean(options.auto);
+  const home = Boolean(options.home);
+
+  const tick = async () => {
     try {
       const st = await api("/api/people/status");
       peopleState.status = st;
       const job = st.job || {};
-      renderPeopleScanStatus(job);
+      renderPeopleScanStatus(job, { auto });
+      if (home && peopleState.homeTracking) paintAutoPeopleHome(job);
       const clusterVer = Number(job.cluster_version) || 0;
       if (job.status === "running") {
         if (clusterVer > peopleState.lastClusterVersion) {
@@ -89,8 +159,10 @@ function startPeoplePoll() {
       }
       stopPeoplePoll();
       peopleState.lastClusterVersion = clusterVer;
+      renderPeopleScanStatus(job, { auto: false });
+      if (home) finishAutoPeopleHome(job);
       if (job.status === "completed") {
-        showToast(job.message || "人物与宠物识别完成", "success");
+        if (!auto) showToast(job.message || "人物与宠物识别完成", "success");
         if (state.view === "people") {
           if (peopleState.currentPerson) {
             openPersonDetail(peopleState.currentPerson.person.id);
@@ -103,13 +175,55 @@ function startPeoplePoll() {
           refreshPeopleGridSilent();
         }
       } else if (job.status === "error" && job.error) {
-        showToast(`识别失败：${job.error}`, "error");
+        if (!auto) showToast(`识别失败：${job.error}`, "error");
       }
     } catch (e) {
       stopPeoplePoll();
+      renderPeopleScanStatus({ status: "error" }, { auto: false });
+      if (home && peopleState.homeTracking) {
+        peopleState.homeTracking = false;
+        $("progressText").textContent = "读取人物识别进度失败";
+        if (state.progressHideTimer) clearTimeout(state.progressHideTimer);
+        state.progressHideTimer = setTimeout(hideProgress, 2500);
+      }
     }
-  }, 800);
+  };
+
+  peopleState.pollTimer = setInterval(tick, 800);
+  tick();
 }
+
+/**
+ * Start the automatic people scan that follows an album sync/organize.
+ *
+ * The album scan summary gets a short beat on the toolbar, then the same strip
+ * switches to the people job. The people page is kept in sync by the shared
+ * poller, so opening that tab while this runs still shows its progress card and
+ * the "后台静默扫描中" badge.
+ */
+async function startAutoPeopleScanTracking() {
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  if (state.currentJobId) return;
+  try {
+    const data = await api("/api/people/scan", {
+      method: "POST",
+      body: JSON.stringify({ folder: state.folder || "" }),
+    });
+    const job = data.job || {};
+    peopleState.homeTracking = true;
+    peopleState.eta = null;
+    peopleState.lastClusterVersion = 0;
+    showProgress("正在后台识别人物与宠物…");
+    renderPeopleScanStatus(job, { auto: true });
+    paintAutoPeopleHome(job);
+    startPeoplePoll({ auto: true, home: true });
+  } catch (e) {
+    peopleState.homeTracking = false;
+    if (state.progressHideTimer) clearTimeout(state.progressHideTimer);
+    state.progressHideTimer = setTimeout(hideProgress, 2500);
+  }
+}
+
 
 async function startPeopleScan(force = false) {
   try {
@@ -117,9 +231,11 @@ async function startPeopleScan(force = false) {
       method: "POST",
       body: JSON.stringify({ folder: state.folder || "", force: !!force }),
     });
-    renderPeopleScanStatus(data.job);
+    peopleState.homeTracking = false;
+    peopleState.eta = null;
+    renderPeopleScanStatus(data.job, { auto: false });
     showToast("已在后台静默扫描人物与宠物，可继续浏览相册", "info");
-    startPeoplePoll();
+    startPeoplePoll({ auto: false, home: false });
   } catch (e) {
     showToast(e.message || "无法启动人物识别", "warning");
     if (e.message && e.message.includes("设置")) {

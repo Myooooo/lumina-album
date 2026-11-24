@@ -432,6 +432,38 @@ async function main() {
     1
   );
 
+  // --- people scan ETA + auto scan mirroring -----------------------------
+  window.renderPeopleScanStatus(
+    { status: "running", total: 10, done: 5, elapsed: 10, faces_found: 2 },
+    { auto: true }
+  );
+  const peopleEta = document.getElementById("peopleScanEta");
+  check(
+    "the people scan card shows a remaining-time pill",
+    peopleEta && !peopleEta.classList.contains("hidden") && peopleEta.textContent.includes("预计"),
+    true
+  );
+  check(
+    "an automatic people scan shows the silent badge",
+    document.getElementById("peopleSilentBadge").classList.contains("hidden"),
+    false
+  );
+  window.showProgress("准备");
+  window.paintAutoPeopleHome({ status: "running", total: 10, done: 5, elapsed: 10 });
+  check(
+    "the automatic people scan mirrors into the toolbar",
+    document.getElementById("progressText").textContent.includes("后台识别人物") &&
+      !document.getElementById("progressEta").classList.contains("hidden"),
+    true
+  );
+  window.hideProgress();
+  window.renderPeopleScanStatus({ status: "completed" });
+  check(
+    "the silent badge clears when the people scan finishes",
+    document.getElementById("peopleSilentBadge").classList.contains("hidden"),
+    true
+  );
+
   // --- map source fields keep custom values while hidden -----------------
   const mapProvider = document.getElementById("setMapTileProvider");
   const mapUrlRow = document.getElementById("setMapTileUrlRow");

@@ -516,9 +516,14 @@ async function startRebuildIndex() {
 }
 
 function showProgress(text) {
+  if (state.progressHideTimer) {
+    clearTimeout(state.progressHideTimer);
+    state.progressHideTimer = null;
+  }
   showStrip($("scanProgress"));
   $("progressText").textContent = text;
   $("progressFill").style.width = "0%";
+  $("progressEta").classList.add("hidden");
   state.pollTick = 0;
   // A new job must not inherit the previous run's speed estimate.
   state.eta = null;
@@ -529,6 +534,11 @@ function hideProgress() {
   $("progressEta").classList.add("hidden");
   state.eta = null;
   state.currentJobId = null;
+  if (state.progressHideTimer) {
+    clearTimeout(state.progressHideTimer);
+    state.progressHideTimer = null;
+  }
+  if (typeof peopleState !== "undefined") peopleState.homeTracking = false;
   if (state.pollingTimer) {
     clearTimeout(state.pollingTimer);
     state.pollingTimer = null;
@@ -568,23 +578,26 @@ const ETA_MIN_SAMPLE_SECONDS = 0.75;
  * Progress only ever moves forward, so a stale sample can never push the
  * estimate back up.
  */
-function updateEta(processed, total, elapsedSeconds) {
+function updateEta(processed, total, elapsedSeconds, options) {
+  options = options || {};
+  const holder = options.holder || state;
+  const el = options.el || (typeof $ === "function" ? $("progressEta") : null);
   const now = performance.now();
-  const previous = state.eta;
+  const previous = holder.eta;
   const overallElapsed = Number(elapsedSeconds);
 
   if (!previous || !Number.isFinite(previous.processed) || processed < previous.processed) {
-    state.eta = seedEta(processed, total, now, overallElapsed);
-    const seeded = state.eta.rate;
+    holder.eta = seedEta(processed, total, now, overallElapsed, holder);
+    const seeded = holder.eta.rate;
     if (total > 0 && processed >= total) {
       // Already done: say so rather than leave a stale estimate standing.
-      paintEta(0);
+      paintEta(0, el, holder);
     } else if (seeded > 0 && total > 0 && processed > 0) {
       // A resumed job already knows how fast it has been going, so the estimate
       // appears on the first poll after a refresh instead of a tick later.
-      paintEta(smoothEta((total - processed) / seeded));
+      paintEta(smoothEta((total - processed) / seeded, holder), el, holder);
     } else {
-      paintEta(null);
+      paintEta(null, el, holder);
     }
     return;
   }
@@ -618,7 +631,7 @@ function updateEta(processed, total, elapsedSeconds) {
     combined = overall || recent || rate || 0;
   }
 
-  state.eta = {
+  holder.eta = {
     processed,
     total,
     at: now,
@@ -629,14 +642,14 @@ function updateEta(processed, total, elapsedSeconds) {
   };
 
   if (!combined || !total || processed <= 0 || processed >= total) {
-    paintEta(processed >= total ? 0 : null);
+    paintEta(processed >= total ? 0 : null, el, holder);
     return;
   }
-  paintEta(smoothEta((total - processed) / combined));
+  paintEta(smoothEta((total - processed) / combined, holder), el, holder);
 }
 
 /** First sample for a job: reuse whatever the server knows about its speed. */
-function seedEta(processed, total, now, elapsedSeconds) {
+function seedEta(processed, total, now, elapsedSeconds, holder = state) {
   let rate = 0;
   if (Number.isFinite(elapsedSeconds) && elapsedSeconds > 0 && processed > 0) {
     rate = processed / elapsedSeconds;
@@ -647,14 +660,14 @@ function seedEta(processed, total, now, elapsedSeconds) {
     at: now,
     rate,
     recent: 0,
-    shown: state.eta ? state.eta.shown : null,
-    shownSeconds: state.eta ? state.eta.shownSeconds : null,
+    shown: holder.eta ? holder.eta.shown : null,
+    shownSeconds: holder.eta ? holder.eta.shownSeconds : null,
   };
 }
 
 /** Ease the displayed seconds towards the new estimate. */
-function smoothEta(seconds) {
-  const previous = state.eta && state.eta.shownSeconds;
+function smoothEta(seconds, holder = state) {
+  const previous = holder.eta && holder.eta.shownSeconds;
   if (!Number.isFinite(previous)) return seconds;
   return previous + (seconds - previous) * ETA_DISPLAY_ALPHA;
 }
@@ -683,15 +696,14 @@ function formatEta(seconds) {
  * rather than as a live number. The text itself is compared against what is
  * already on screen, so the pill never re-renders the same string.
  */
-function paintEta(seconds) {
-  const el = $("progressEta");
+function paintEta(seconds, el = $("progressEta"), holder = state) {
   if (!el) return;
   const value = seconds === 0 ? 0 : seconds;
   const text = value === 0 ? "即将完成" : formatEta(value);
 
-  if (state.eta) {
-    state.eta.shown = text || null;
-    if (Number.isFinite(value)) state.eta.shownSeconds = value;
+  if (holder.eta) {
+    holder.eta.shown = text || null;
+    if (Number.isFinite(value)) holder.eta.shownSeconds = value;
   }
 
   if (!text) {
@@ -739,8 +751,21 @@ function pollScan() {
       if (job.status === "completed" || job.status === "cancelled" || job.status === "error") {
         paintJobProgress(job);
         $("progressText").textContent = jobSummaryText(job);
-        setTimeout(hideProgress, job.report ? 6000 : 1500);
         state.currentJobId = null;
+        const autoPeople =
+          job.status === "completed" &&
+          job.phase !== "trash" &&
+          state.faceRecognitionEnabled &&
+          state.faceAutoScan &&
+          typeof startAutoPeopleScanTracking === "function";
+        // When the people scan follows, the same strip is handed over to it;
+        // do not schedule the normal summary hide or it would wipe that job.
+        if (!autoPeople) {
+          state.progressHideTimer = setTimeout(
+            hideProgress,
+            job.report ? 6000 : 1500
+          );
+        }
         loadPhotos().then(() => {
           // The photos that were on screen may be gone now; whichever view is
           // open has to follow. loadPhotos already re-reads the gallery, so this
@@ -757,13 +782,9 @@ function pollScan() {
         refreshCardStatus().then(() => {
           if (imported && imported.source) offerCardSync(imported.source);
         });
-        // Quietly trigger incremental local face/pet scan after album sync/organize.
-        if (job.status === "completed" && job.phase !== "trash" && state.faceRecognitionEnabled && state.faceAutoScan) {
-          api("/api/people/scan", {
-            method: "POST",
-            body: JSON.stringify({ folder: state.folder || "" }),
-          }).catch(() => {});
-        }
+        // Quietly trigger incremental local face/pet scan after album
+        // sync/organize, and let it take over the toolbar progress strip.
+        if (autoPeople) startAutoPeopleScanTracking();
         return;
       }
       paintJobProgress(job);
@@ -778,7 +799,8 @@ function pollScan() {
     .catch((e) => {
       $("progressText").textContent = "读取进度失败：" + e.message;
       paintEta(null);
-      setTimeout(hideProgress, 2000);
+      if (state.progressHideTimer) clearTimeout(state.progressHideTimer);
+      state.progressHideTimer = setTimeout(hideProgress, 2000);
     });
 }
 
