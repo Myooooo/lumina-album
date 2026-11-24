@@ -375,6 +375,17 @@ async function main() {
     liveBadge.includes("live-badge-label") && liveBadge.includes("Live"),
     true
   );
+  const rawBadge = window.rawBadgeHtml({ has_raw: true, raw_ext: "ARW" });
+  check(
+    "the RAW card badge carries its material/class and extension",
+    rawBadge.includes("raw-badge-card") && rawBadge.includes("RAW") && rawBadge.includes("ARW"),
+    true
+  );
+  check(
+    "a raw-only photo gets the distinct raw-only marker",
+    window.rawBadgeHtml({ is_raw: true, filename: "IMG_1.CR3" }).includes("raw-only"),
+    true
+  );
 
   // --- fullscreen switch clears its transform animation before zoom ------
   const appState = window.eval("state");
@@ -403,6 +414,12 @@ async function main() {
     );
     window.closeFullscreenViewer();
   }
+
+  check(
+    "the map key hint is a single element",
+    document.querySelectorAll("#footprintsMapKeyHint").length,
+    1
+  );
 
   // --- map source fields keep custom values while hidden -----------------
   const mapProvider = document.getElementById("setMapTileProvider");

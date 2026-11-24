@@ -13759,3 +13759,371 @@ body[data-theme="classic"] .tag-filter-btn:focus-visible {
   background: rgba(174, 118, 78, 0.13);
   border-color: rgba(174, 118, 78, 0.28);
 }
+
+/* ==========================================================================
+   SD card status / banner: theme-native, not a pasted-on white pill
+   The state badge is excluded from the generic button theme rules so it can
+   carry connection semantics. These overrides give each theme its own material
+   and keep the disconnected state quiet instead of leaving the base white chip
+   glaring on paper, glass or film stock.
+   ========================================================================== */
+body[data-theme="paper"] .card-status {
+  border: 1px dashed #cbbda5;
+  border-radius: 3px;
+  background: #f7f1e5;
+  color: #7b6551;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+body[data-theme="paper"] .card-status::before {
+  width: 6px;
+  height: 6px;
+  border: 1px solid #b9a58b;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 50%;
+  animation: none;
+}
+
+body[data-theme="paper"] .card-status.state-connected {
+  border-color: rgba(96, 141, 109, 0.42);
+  background: #f1f5ec;
+  color: #547151;
+}
+
+body[data-theme="paper"] .card-status.state-connected::before {
+  border-color: #6f8f64;
+  background: #6f8f64;
+  box-shadow: 0 0 0 2px rgba(96, 141, 109, 0.14);
+  animation: cardPulse 2.6s ease-in-out infinite;
+}
+
+body[data-theme="paper"] .card-status.state-disconnected {
+  border-color: #cbbda5;
+  background: #f3ecdf;
+  color: #8e7b66;
+}
+
+body[data-theme="paper"] .card-status.state-disconnected::before {
+  border-color: #b3a18a;
+  background: transparent;
+}
+
+body[data-theme="paper"] .card-status.state-read_only {
+  border-color: rgba(199, 141, 70, 0.45);
+  background: #fbf1de;
+  color: #8a6122;
+}
+
+body[data-theme="paper"] .card-status.state-read_only::before {
+  border-color: #c78d46;
+  background: #c78d46;
+}
+
+body[data-theme="paper"] .card-status.state-volume_mismatch {
+  border-color: rgba(194, 89, 83, 0.42);
+  background: #fbefec;
+  color: #a24d48;
+}
+
+body[data-theme="paper"] .card-status.state-volume_mismatch::before {
+  border-color: #c25953;
+  background: #c25953;
+}
+
+body[data-theme="paper"] .card-status.state-disconnected:hover {
+  background: #fffaf0;
+  border-color: #bfae96;
+}
+
+body[data-theme="classic"] .card-status {
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.42);
+  color: #716355;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+body[data-theme="classic"] .card-status::before {
+  width: 6px;
+  height: 6px;
+  border: none;
+  background: #a59685;
+  box-shadow: 0 0 0 2px rgba(125, 95, 65, 0.1);
+  border-radius: 50%;
+  animation: none;
+}
+
+body[data-theme="classic"] .card-status.state-connected {
+  border-color: rgba(96, 141, 109, 0.28);
+  background: rgba(236, 245, 234, 0.58);
+  color: #52704f;
+}
+
+body[data-theme="classic"] .card-status.state-connected::before {
+  background: #6f8f64;
+  box-shadow: 0 0 0 2px rgba(96, 141, 109, 0.14);
+  animation: cardPulse 2.6s ease-in-out infinite;
+}
+
+body[data-theme="classic"] .card-status.state-disconnected {
+  border-style: dashed;
+  border-color: rgba(125, 95, 65, 0.24);
+  background: rgba(255, 255, 255, 0.34);
+  color: #81715f;
+}
+
+body[data-theme="classic"] .card-status.state-disconnected::before {
+  background: transparent;
+  border: 1px solid #b3a18a;
+}
+
+body[data-theme="vintage"] .card-status {
+  border: 1px dashed rgba(235, 146, 52, 0.3);
+  border-radius: 2px;
+  background: rgba(20, 16, 13, 0.78);
+  color: #b9a894;
+  box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.04);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+body[data-theme="vintage"] .card-status::before {
+  width: 6px;
+  height: 6px;
+  border: 1px solid #80684e;
+  background: transparent;
+  border-radius: 1px;
+  box-shadow: none;
+  animation: none;
+}
+
+body[data-theme="vintage"] .card-status.state-connected {
+  border-color: rgba(159, 189, 140, 0.38);
+  background: rgba(35, 45, 30, 0.5);
+  color: #a9c49b;
+}
+
+body[data-theme="vintage"] .card-status.state-connected::before {
+  border-color: #9fbd8c;
+  background: #9fbd8c;
+  box-shadow: 0 0 6px rgba(159, 189, 140, 0.4);
+  animation: cardPulse 2.6s ease-in-out infinite;
+}
+
+body[data-theme="vintage"] .card-status.state-disconnected {
+  border-color: rgba(235, 146, 52, 0.22);
+  background: rgba(15, 11, 8, 0.72);
+  color: #9b8b7a;
+}
+
+body[data-theme="vintage"] .card-status.state-disconnected .btn-icon {
+  opacity: 0.62;
+}
+
+body[data-theme="vintage"] .card-status.state-read_only {
+  border-color: rgba(235, 146, 52, 0.45);
+  background: rgba(235, 146, 52, 0.08);
+  color: #f4b165;
+}
+
+body[data-theme="vintage"] .card-status.state-read_only::before {
+  border-color: #eb9234;
+  background: #eb9234;
+  box-shadow: 0 0 6px rgba(235, 146, 52, 0.35);
+}
+
+body[data-theme="vintage"] .card-status.state-volume_mismatch {
+  border-color: rgba(233, 110, 74, 0.45);
+  background: rgba(120, 45, 30, 0.18);
+  color: #f08a63;
+}
+
+body[data-theme="vintage"] .card-status.state-volume_mismatch::before {
+  border-color: #e06e4a;
+  background: #e06e4a;
+}
+
+body[data-theme="vintage"] .card-status.state-disconnected:hover {
+  border-color: rgba(235, 146, 52, 0.42);
+  background: rgba(28, 22, 17, 0.84);
+  color: #d0b99e;
+}
+
+body[data-theme="paper"] .card-pending-dot {
+  background: #8a5a36;
+  border: 1px solid #6b4f38;
+  border-radius: 3px;
+  color: #fffdf8;
+  font-family: var(--font-mono);
+}
+
+body[data-theme="classic"] .card-pending-dot {
+  background: #7d6b59;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fffdf8;
+}
+
+body[data-theme="vintage"] .card-pending-dot {
+  background: #eb9234;
+  border: 1px solid rgba(255, 189, 116, 0.55);
+  border-radius: 2px;
+  color: #141210;
+  font-family: var(--font-mono);
+  box-shadow: 0 0 7px rgba(235, 146, 52, 0.3);
+}
+
+body[data-theme="paper"] .card-banner {
+  border: 1px dashed #c9a06a;
+  border-radius: 3px;
+  background: #fbf1e0;
+  color: #7c5718;
+  box-shadow: 0 2px 8px rgba(50, 34, 18, 0.06);
+}
+
+body[data-theme="classic"] .card-banner {
+  border: 1px solid rgba(125, 95, 65, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.56);
+  color: #6a5d4f;
+  box-shadow: 0 4px 14px rgba(38, 31, 25, 0.08);
+}
+
+body[data-theme="vintage"] .card-banner {
+  border-style: dashed;
+  border-radius: 2px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+body[data-theme="classic"] .footprints-map-key-hint {
+  border-radius: 10px;
+  border-color: rgba(125, 95, 65, 0.28);
+  background: rgba(255, 255, 255, 0.66);
+  color: #6a5d4f;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Hover states for the connected/read-only variants stay on the same material
+   as their resting state. The base rules used a single green wash for every
+   theme, which looked pasted onto paper and film. */
+body[data-theme="paper"] .card-status.state-connected:hover {
+  background: #edf3e8;
+  border-color: rgba(96, 141, 109, 0.55);
+}
+
+body[data-theme="paper"] .card-status.state-read_only:hover {
+  background: #f7ead2;
+  border-color: rgba(199, 141, 70, 0.58);
+}
+
+body[data-theme="paper"] .card-status.state-volume_mismatch:hover {
+  background: #f8e9e5;
+  border-color: rgba(194, 89, 83, 0.55);
+}
+
+body[data-theme="classic"] .card-status.state-connected:hover {
+  background: rgba(236, 245, 234, 0.78);
+}
+
+body[data-theme="classic"] .card-status.state-read_only:hover,
+body[data-theme="classic"] .card-status.state-volume_mismatch:hover {
+  background: rgba(255, 247, 236, 0.78);
+}
+
+body[data-theme="vintage"] .card-status.state-connected:hover {
+  border-color: rgba(159, 189, 140, 0.58);
+  background: rgba(42, 54, 36, 0.68);
+  color: #bdd6ad;
+}
+
+body[data-theme="vintage"] .card-status.state-read_only:hover {
+  border-color: rgba(235, 146, 52, 0.65);
+  background: rgba(235, 146, 52, 0.14);
+}
+
+body[data-theme="vintage"] .card-status.state-volume_mismatch:hover {
+  border-color: rgba(233, 110, 74, 0.65);
+  background: rgba(120, 45, 30, 0.28);
+}
+
+/* ==========================================================================
+   RAW markers: a stamped photo label, not a white pill pasted on the card
+   ========================================================================== */
+body[data-theme="paper"] .raw-badge {
+  border: 1px dashed #c9a06a;
+  border-radius: 3px;
+  background: #fbf1e0;
+  color: #7c5718;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75), 0 2px 7px rgba(50, 34, 18, 0.08);
+}
+
+body[data-theme="paper"] .raw-badge.raw-only {
+  border-color: #b8864f;
+  background: #f3e3c9;
+  color: #6d4514;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.55), 0 2px 7px rgba(50, 34, 18, 0.1);
+}
+
+body[data-theme="classic"] .raw-badge {
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.52);
+  color: #5d5043;
+  box-shadow: 0 2px 9px rgba(38, 31, 25, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+body[data-theme="classic"] .raw-badge.raw-only {
+  border-color: rgba(199, 141, 70, 0.38);
+  background: rgba(199, 141, 70, 0.16);
+  color: #7a5316;
+}
+
+body[data-theme="vintage"] .raw-badge {
+  border: 1px solid rgba(235, 146, 52, 0.38);
+  border-radius: 2px;
+  background: rgba(20, 16, 13, 0.86);
+  color: #e0b57d;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+body[data-theme="vintage"] .raw-badge svg {
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .raw-badge.raw-only {
+  border-color: rgba(235, 146, 52, 0.62);
+  background: rgba(235, 146, 52, 0.16);
+  color: #ffc27d;
+  box-shadow: 0 0 10px rgba(235, 146, 52, 0.14), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="vintage"] .raw-badge-detail {
+  background: rgba(235, 146, 52, 0.1);
+  color: #e0b57d;
+}
+
+/* The "重新整理全部" checkbox lives in a dark toolbar in the vintage theme,
+   so its white native square needs the same film-stock treatment. */
+body[data-theme="vintage"] .force-label input[type="checkbox"] {
+  background: #16120f;
+  border-color: #4a4035;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+body[data-theme="vintage"] .force-label input[type="checkbox"]:checked {
+  background: #eb9234;
+  border-color: #eb9234;
+  box-shadow: 0 0 8px rgba(235, 146, 52, 0.25);
+}
+
+body[data-theme="vintage"] .force-label input[type="checkbox"]:checked::after {
+  border-color: #141210;
+}

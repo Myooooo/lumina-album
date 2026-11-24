@@ -1484,6 +1484,36 @@ section("photobook layout and motion system");
     true
   );
   check(
+    "SD disconnected badge and pending strip are painted for every theme",
+    /body\[data-theme="paper"\] \.card-status \{/.test(css) &&
+      /body\[data-theme="classic"\] \.card-status\.state-disconnected/.test(css) &&
+      /body\[data-theme="vintage"\] \.card-status\.state-disconnected/.test(css) &&
+      /body\[data-theme="paper"\] \.card-banner \{/.test(css) &&
+      /body\[data-theme="classic"\] \.card-banner \{/.test(css) &&
+      /body\[data-theme="vintage"\] \.card-banner \{/.test(css) &&
+      /body\[data-theme="vintage"\] \.card-pending-dot/.test(css),
+    true
+  );
+  check(
+    "RAW badges follow paper, glass and film materials",
+    /body\[data-theme="paper"\] \.raw-badge \{/.test(css) &&
+      /body\[data-theme="classic"\] \.raw-badge \{/.test(css) &&
+      /body\[data-theme="vintage"\] \.raw-badge \{/.test(css) &&
+      /body\[data-theme="vintage"\] \.raw-badge\.raw-only/.test(css),
+    true
+  );
+  check(
+    "the vintage toolbar force-label checkbox is repainted too",
+    /body\[data-theme="vintage"\] \.force-label input\[type="checkbox"\]/.test(css) &&
+      /body\[data-theme="vintage"\] \.force-label input\[type="checkbox"\]:checked/.test(css),
+    true
+  );
+  check(
+    "the duplicate footprints map-key hint was removed",
+    (html.match(/id="footprintsMapKeyHint"/g) || []).length === 1,
+    true
+  );
+  check(
     "selection bar, scan progress, and card banner have paired exit animations",
     /\.selection-bar\.closing/.test(css) &&
       /\.scan-progress\.closing/.test(css) &&
