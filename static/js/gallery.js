@@ -333,6 +333,115 @@ function cardDateText(photo) {
   return match ? `${match[1]}.${match[2]}.${match[3]}` : "";
 }
 
+/**
+ * Parse a verbose geocoded address (Amap / Nominatim / manual / GPS) into a
+ * concise, editorial 1-to-2-part place label for photo cards (e.g. "杭州 · 西湖",
+ * "京都 · 东山", "Sydney · Opera House"). The detail lightbox still shows the full address.
+ */
+function formatShortLocation(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return "";
+
+  // Raw GPS coordinates fallback (e.g. "30.2589, 120.1456")
+  const gps = /^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/.exec(text);
+  if (gps) {
+    const lat = Number(gps[1]);
+    const lon = Number(gps[2]);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
+    }
+  }
+
+  const stripCnSuffix = (s) =>
+    s.replace(/(特别行政区|维吾尔自治区|回族自治区|壮族自治区|自治区|自治州|地区|盟|市|省|区|县|旗)$/, "");
+  const isPostal = (s) => /^\d{3,6}(?:-\d{3,4})?$/.test(s);
+  const isCountry = (s) =>
+    /^(中国|中华人民共和国|China|People's Republic of China|PR China)$/i.test(s);
+  const isRoadOrNumber = (s) =>
+    /^\d+[号弄栋幢楼室]?$/.test(s) || /(路|街|大道|巷|弄|胡同|街道|镇|乡|村|社区)\d*号?$/.test(s);
+
+  // Already concise manual label (e.g. "京都 · 西芳寺", "杭州，西湖")
+  if (text.length <= 12 && !text.includes(",") && !/[省市区县]/.test(text)) {
+    return text.replace(/[，、/]+/g, " · ").replace(/\s*·\s*/g, " · ");
+  }
+
+  // Case 1: Comma-separated (Nominatim display_name or manual comma list)
+  if (/[,，]/.test(text)) {
+    const parts = text
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter((s) => s && !isPostal(s) && !isCountry(s));
+    if (!parts.length) return text;
+
+    // Detect Chinese Nominatim (specific -> district -> city -> province)
+    const hasChinese = /[\u4e00-\u9fff]/.test(text);
+    if (hasChinese) {
+      const cityIdx = parts.findIndex((p) => /(市|自治州|地区|盟|特别行政区)$/.test(p));
+      const distIdx = parts.findIndex((p) => /(区|县|旗)$/.test(p) && !/(自治区|特别行政区)$/.test(p));
+      if (cityIdx >= 0) {
+        const city = stripCnSuffix(parts[cityIdx]);
+        const subRaw =
+          distIdx >= 0 && distIdx !== cityIdx
+            ? parts[distIdx]
+            : parts.find((p, i) => i < cityIdx && !isRoadOrNumber(p));
+        const sub = subRaw ? stripCnSuffix(subRaw) : "";
+        if (sub && sub !== city) return `${city} · ${sub}`;
+        return city;
+      }
+      const clean = parts.filter((p) => !isRoadOrNumber(p)).map(stripCnSuffix).filter(Boolean);
+      const uniq = [...new Set(clean)];
+      if (uniq.length >= 2) return `${uniq[uniq.length - 1]} · ${uniq[0]}`;
+      return uniq[0] || parts[0];
+    }
+
+    // Non-Chinese Nominatim (e.g. "Opera House, Sydney, New South Wales, Australia")
+    const filtered = parts.filter(
+      (p) => !/^Council of /i.test(p) && !/^City of /i.test(p) && !/^\d+$/.test(p)
+    );
+    if (filtered.length >= 3) {
+      const country = filtered[filtered.length - 1];
+      const city = filtered.length >= 4 ? filtered[filtered.length - 3] : filtered[filtered.length - 2];
+      const spot = filtered[0];
+      if (spot && city && spot.toLowerCase().includes(city.toLowerCase()) && spot.length <= 22) {
+        return spot;
+      }
+      if (spot && city && spot !== city && spot.length <= 18) return `${city} · ${spot}`;
+      if (city && country && city !== country) return `${city} · ${country}`;
+      return city || spot;
+    }
+    return filtered.slice(0, 2).join(" · ");
+  }
+
+  // Case 2: Continuous Chinese address (Amap formatted_address)
+  // e.g. "浙江省杭州市西湖区北山街道断桥残雪" or "北京市朝阳区三里屯街道..."
+  let rest = text;
+  let prov = "";
+  const provMatch = /^(.{2,8}?(?:特别行政区|维吾尔自治区|回族自治区|壮族自治区|自治区|省))/.exec(rest);
+  if (provMatch) {
+    prov = stripCnSuffix(provMatch[1]);
+    rest = rest.slice(provMatch[1].length);
+  }
+  let city = "";
+  const cityMatch = /^(.{2,10}?(?:自治州|地区|盟|市))/.exec(rest);
+  if (cityMatch) {
+    city = stripCnSuffix(cityMatch[1]);
+    rest = rest.slice(cityMatch[1].length);
+  }
+  let dist = "";
+  const distMatch = /^(.{2,8}?(?:区|县|旗|市))/.exec(rest);
+  if (distMatch) {
+    dist = stripCnSuffix(distMatch[1]);
+  }
+  if (prov || city || dist) {
+    const primary = city || prov;
+    const secondary = dist && dist !== primary ? dist : "";
+    if (primary && secondary) return `${primary} · ${secondary}`;
+    if (primary) return primary;
+  }
+
+  return text.length > 16 ? `${text.slice(0, 15)}…` : text;
+}
+
 const VINTAGE_FILM_STOCKS = [
   "KODAK PORTRA 400",
   "FUJIFILM SUPERIA 400",
@@ -427,7 +536,7 @@ function cardHtml(photo) {
           ${
             hasMetaRow
               ? `<div class="card-meta-row">
-                  ${photo.location ? `<div class="photo-location"><span class="classic-icon" aria-hidden="true">${ICONS.pin}</span><span>${escapeHtml(photo.location)}</span></div>` : '<span class="photo-location-spacer"></span>'}
+                  ${photo.location ? `<div class="photo-location" title="${escapeHtml(photo.location)}"><span class="location-pin-icon" aria-hidden="true">${ICONS.pin}</span><span>${escapeHtml(formatShortLocation(photo.location))}</span></div>` : '<span class="photo-location-spacer"></span>'}
                   ${dateStr ? `<span class="card-date">${escapeHtml(dateStr)}</span>` : ""}
                 </div>`
               : ""
@@ -497,7 +606,7 @@ function memoryPolaroidHtml(photo, options = {}) {
             ${
               hasMetaRow
                 ? `<div class="card-meta-row">
-                    ${photo.location ? `<div class="photo-location"><span class="classic-icon" aria-hidden="true">${ICONS.pin}</span><span>${escapeHtml(photo.location)}</span></div>` : '<span class="photo-location-spacer"></span>'}
+                    ${photo.location ? `<div class="photo-location" title="${escapeHtml(photo.location)}"><span class="location-pin-icon" aria-hidden="true">${ICONS.pin}</span><span>${escapeHtml(formatShortLocation(photo.location))}</span></div>` : '<span class="photo-location-spacer"></span>'}
                     ${dateStr ? `<span class="card-date">${escapeHtml(dateStr)}</span>` : ""}
                   </div>`
                 : ""

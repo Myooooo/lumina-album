@@ -9515,6 +9515,193 @@ body[data-theme="vintage"] .shortcut-row kbd {
   color: #eb9234;
 }
 
+/* ==========================================================================
+   Card Location Pin SVG & Theme-Matched Lightbox Prev / Next Navigation
+   ========================================================================== */
+
+/* Concise editorial location badge with crisp SVG pin across ALL 3 themes */
+.photo-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.photo-location .location-pin-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  color: var(--primary);
+  opacity: 0.85;
+}
+
+.photo-location .location-pin-icon svg {
+  width: 12px;
+  height: 12px;
+  margin-top: 0;
+  color: currentColor;
+}
+
+.photo-location span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: none;
+}
+
+body[data-theme="paper"] .photo-location .location-pin-icon {
+  color: #b46a47;
+}
+
+body[data-theme="classic"] .photo-location .location-pin-icon {
+  color: var(--primary);
+}
+
+body[data-theme="vintage"] .photo-location .location-pin-icon {
+  color: #eb9234;
+}
+
+body[data-theme="paper"] .polaroid-card.is-video .photo-location .location-pin-icon,
+body[data-theme="classic"] .polaroid-card.is-video .photo-location .location-pin-icon {
+  color: #d8a678;
+}
+
+/* Lightbox Side Prev / Next Navigation — Directional Motion & Theme Skins */
+@keyframes previewSideInLeft {
+  from { opacity: 0; transform: translate3d(-12px, -50%, 0) scale(0.94); }
+  to   { opacity: 1; transform: translate3d(0, -50%, 0) scale(1); }
+}
+
+@keyframes previewSideInRight {
+  from { opacity: 0; transform: translate3d(12px, -50%, 0) scale(0.94); }
+  to   { opacity: 1; transform: translate3d(0, -50%, 0) scale(1); }
+}
+
+@keyframes previewSideOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+#previewModal .preview-side-btn {
+  width: 44px;
+  height: 44px;
+  z-index: 120;
+  transition: transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              opacity var(--dur-fast) var(--ease-out);
+}
+
+#previewModal .preview-side-btn.prev {
+  left: 16px;
+  animation: previewSideInLeft 220ms var(--ease-out) 60ms both;
+}
+
+#previewModal .preview-side-btn.next {
+  right: 16px;
+  animation: previewSideInRight 220ms var(--ease-out) 60ms both;
+}
+
+#previewModal.closing .preview-side-btn {
+  animation: previewSideOut 130ms var(--ease-out) both;
+}
+
+#previewModal .preview-side-btn .btn-icon {
+  transition: transform 180ms var(--ease-out);
+}
+
+#previewModal .preview-side-btn:active {
+  transform: translateY(-50%) scale(0.93);
+  transition-duration: var(--dur-press);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  #previewModal .preview-side-btn.prev:hover .btn-icon {
+    transform: translateX(-2.5px);
+  }
+  #previewModal .preview-side-btn.next:hover .btn-icon {
+    transform: translateX(2.5px);
+  }
+}
+
+/* 1. Classic: Apple Frosted Glass Orb */
+body[data-theme="classic"] #previewModal .preview-side-btn {
+  border-radius: 50%;
+  background: rgba(255, 253, 249, 0.78);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(28, 22, 16, 0.16), inset 0 1px 0 #ffffff;
+}
+
+body[data-theme="classic"] #previewModal .preview-side-btn:hover {
+  transform: translateY(-50%) scale(1.06);
+  background: rgba(255, 255, 255, 0.96);
+  border-color: #ffffff;
+  color: var(--primary);
+  box-shadow: 0 12px 30px rgba(28, 22, 16, 0.22), inset 0 1px 0 #ffffff;
+}
+
+/* 2. Paper · Stationery: Cotton-Paper Letterpress Tab with Terracotta Offset */
+body[data-theme="paper"] #previewModal .preview-side-btn {
+  border-radius: 3px;
+  background: #fffdf8;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #d5cab5;
+  color: #362e26;
+  box-shadow: 3px 3px 0 rgba(54, 42, 26, 0.16);
+}
+
+body[data-theme="paper"] #previewModal .preview-side-btn:hover {
+  transform: translateY(-50%) translate(-1px, -1px);
+  background: #362e26;
+  border-color: #362e26;
+  color: #fbf7ee;
+  box-shadow: 4px 4px 0 rgba(199, 125, 88, 0.55);
+}
+
+body[data-theme="paper"] #previewModal .preview-side-btn:active {
+  transform: translateY(-50%) translate(1px, 1px) scale(0.96);
+  box-shadow: 1px 1px 0 rgba(199, 125, 88, 0.45);
+}
+
+/* 3. Vintage Analog: Darkroom Mechanical Amber Film-Advance Switch */
+body[data-theme="vintage"] #previewModal .preview-side-btn {
+  border-radius: 2px;
+  background: rgba(23, 21, 19, 0.92);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(235, 146, 52, 0.38);
+  color: #eb9234;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+}
+
+body[data-theme="vintage"] #previewModal .preview-side-btn:hover {
+  transform: translateY(-50%) scale(1.04);
+  background: #eb9234;
+  border-color: #eb9234;
+  color: #141210;
+  box-shadow: 0 0 20px rgba(235, 146, 52, 0.42), 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #previewModal .preview-side-btn,
+  #previewModal.closing .preview-side-btn,
+  #previewModal .preview-side-btn .btn-icon {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+
 
 
 
