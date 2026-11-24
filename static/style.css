@@ -11128,6 +11128,126 @@ body[data-theme="classic"] .preview-quote-card {
   letter-spacing: 0.01em;
 }
 
+/* ==========================================================================
+   Vintage Analog Typography Refinement (Showa Mincho / Songti + Archival Mono)
+   Distinct 3-theme typographic identity:
+   - Paper:   Cormorant + LXGW WenKai (handwritten stationery notebook)
+   - Classic: SF Pro / PingFang SC (modern Apple glass gallery)
+   - Vintage: Songti / Mincho + IBM Plex Mono (analog film magazine & darkroom)
+   ========================================================================== */
+
+body[data-theme="vintage"] {
+  --font-vintage-serif: "Lumina Editorial Serif", "Cormorant Garamond", "Songti SC", "Noto Serif SC", "Source Han Serif SC", "STSong", "Hiragino Mincho ProN", "SimSun", Georgia, serif;
+  --font-vintage-mono-cjk: "Lumina Archival Mono", "IBM Plex Mono", "Songti SC", "Noto Serif SC", "Source Han Serif SC", "STSong", "Hiragino Mincho ProN", monospace;
+  --font-vintage-prose: "Hiragino Sans GB", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--font-vintage-mono-cjk);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Editorial Masthead & Chapter Headings */
+body[data-theme="vintage"] .brand h1 {
+  font-family: var(--font-vintage-serif);
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #f6efe4;
+}
+
+body[data-theme="vintage"] .brand h1 .sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .page-view h2,
+body[data-theme="vintage"] .modal-content h2,
+body[data-theme="vintage"] .preview-header-block h3,
+body[data-theme="vintage"] .empty-state-title,
+body[data-theme="vintage"] .memory-year-title,
+body[data-theme="vintage"] .footprint-city,
+body[data-theme="vintage"] .dup-group-title,
+body[data-theme="vintage"] .shortcuts-group h3 {
+  font-family: var(--font-vintage-serif);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+/* Film Frame Titles & Poetic Print Captions */
+body[data-theme="vintage"] .photo-title,
+body[data-theme="vintage"] .fs-info-title {
+  font-family: var(--font-vintage-serif);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1.44;
+  color: #f5efe6;
+}
+
+body[data-theme="vintage"] .photo-comment {
+  font-family: var(--font-vintage-serif);
+  font-size: 13.5px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  line-height: 1.78;
+  color: #c2b6a6;
+}
+
+body[data-theme="vintage"] .preview-quote-card {
+  font-family: var(--font-vintage-serif);
+  font-size: 15.5px;
+  font-weight: 400;
+  letter-spacing: 0.035em;
+  line-height: 1.82;
+  color: #f1e7d9;
+}
+
+/* Darkroom Controls, Tabs, Tags & Locations (Archival Mono Latin + Songti CJK) */
+body[data-theme="vintage"] .btn,
+body[data-theme="vintage"] .view-tab,
+body[data-theme="vintage"] .settings-tab,
+body[data-theme="vintage"] .stat,
+body[data-theme="vintage"] .stat-label,
+body[data-theme="vintage"] .tag,
+body[data-theme="vintage"] .photo-location,
+body[data-theme="vintage"] .filter-chip,
+body[data-theme="vintage"] .force-label,
+body[data-theme="vintage"] .custom-select-trigger,
+body[data-theme="vintage"] .fs-viewer-toolbar {
+  font-family: var(--font-vintage-mono-cjk);
+  letter-spacing: 0.04em;
+}
+
+body[data-theme="vintage"] .photo-location {
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+}
+
+body[data-theme="vintage"] .tag {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+/* Dense Technical & Settings Copy (Crisp Classic Hiragino Sans for Readability) */
+body[data-theme="vintage"] .settings-pane,
+body[data-theme="vintage"] .settings-hint,
+body[data-theme="vintage"] .meta-item-row,
+body[data-theme="vintage"] .confirm-content p,
+body[data-theme="vintage"] .export-choice-hint,
+body[data-theme="vintage"] .empty-state-desc,
+body[data-theme="vintage"] .footprints-empty-hint,
+body[data-theme="vintage"] .memories-empty-hint,
+body[data-theme="vintage"] .duplicates-empty-hint,
+body[data-theme="vintage"] .export-lede,
+body[data-theme="vintage"] .import-note,
+body[data-theme="vintage"] .duplicates-lede,
+body[data-theme="vintage"] .memories-lede,
+body[data-theme="vintage"] .footprints-lede {
+  font-family: var(--font-vintage-prose);
+  letter-spacing: 0.015em;
+}
+
 
 
 
