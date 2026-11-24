@@ -45,6 +45,8 @@ function init() {
   });
   $("settingsBtn").addEventListener("click", openSettings);
   initTheme();
+  initDensity();
+  initTopbarAutoCollapse();
   $("searchBtn").addEventListener("click", loadPhotos);
   $("resetFiltersBtn").addEventListener("click", resetFilters);
   if ($("emptyResetFiltersBtn")) {

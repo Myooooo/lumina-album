@@ -156,6 +156,12 @@ def register(app, cfg, database):
                 return jsonify({"error": "不支持的主题名称"}), 400
             staged["theme"] = theme
 
+        if "density" in data:
+            density = str(data["density"] or "").strip().lower()
+            if density not in {"comfortable", "compact", "wall"}:
+                return jsonify({"error": "不支持的视图密度"}), 400
+            staged["density"] = density
+
         if not staged:
             return jsonify({"error": "没有可保存的字段"}), 400
         database.save_ui_state(staged)

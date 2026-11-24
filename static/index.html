@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/fonts/fonts.css" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body data-view="album" data-theme="paper">
+<body data-view="album" data-theme="paper" data-density="comfortable">
   <header class="topbar">
     <div class="view-switcher-row">
       <div class="brand">
@@ -202,6 +202,11 @@
           <button id="searchBtn" class="btn search-submit-btn" title="搜索"><span class="btn-icon" data-icon="search"></span>搜索</button>
         </div>
         <button id="resetFiltersBtn" class="btn" title="重置筛选"><span class="btn-icon" data-icon="reset"></span>重置</button>
+        <div class="density-switcher" id="densitySwitcher" role="radiogroup" aria-label="卡片视图密度">
+          <button type="button" class="density-btn active" data-density="comfortable" aria-checked="true" title="舒适视图：标准卡片与完整评语"><span class="btn-icon" data-icon="densityComfortable"></span></button>
+          <button type="button" class="density-btn" data-density="compact" aria-checked="false" title="紧凑视图：更多列数与精简信息"><span class="btn-icon" data-icon="densityCompact"></span></button>
+          <button type="button" class="density-btn" data-density="wall" aria-checked="false" title="纯图墙：隐藏文字沉浸浏览"><span class="btn-icon" data-icon="densityWall"></span></button>
+        </div>
       </section>
     </div>
 

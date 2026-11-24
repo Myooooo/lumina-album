@@ -8706,4 +8706,272 @@ body[data-theme="vintage"] .preview-content {
   }
 }
 
+/* ==========================================================================
+   Phase 1: Density Switcher, Auto-Collapsing Topbar & Theme Micro-Details
+   ========================================================================== */
+
+/* --- 3-Tier Density Switcher --- */
+.density-switcher {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.78);
+  flex-shrink: 0;
+}
+
+.density-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform var(--dur-press) var(--ease-out);
+}
+
+.density-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.density-btn:hover {
+  color: var(--text);
+  background: rgba(125, 95, 65, 0.08);
+}
+
+.density-btn:active {
+  transform: scale(0.94);
+}
+
+.density-btn.active {
+  background: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 2px 6px var(--primary-glow);
+}
+
+body[data-theme="paper"] .density-switcher {
+  background: #fffdf8;
+  border: 1px solid #d5cab5;
+  border-radius: 3px;
+  box-shadow: 2px 2px 0 rgba(70, 55, 35, 0.08);
+}
+
+body[data-theme="paper"] .density-btn {
+  border-radius: 2px;
+  color: #7a6b5b;
+}
+
+body[data-theme="paper"] .density-btn.active {
+  background: #362e26;
+  color: #fbf7ee;
+  box-shadow: 1.5px 1.5px 0 rgba(199, 125, 88, 0.45);
+}
+
+body[data-theme="vintage"] .density-switcher {
+  background: #1a1816;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .density-btn {
+  border-radius: 2px;
+  color: #9e9486;
+}
+
+body[data-theme="vintage"] .density-btn:hover {
+  background: #25221f;
+  color: #f4eee4;
+}
+
+body[data-theme="vintage"] .density-btn.active {
+  background: #eb9234;
+  color: #141210;
+  box-shadow: none;
+}
+
+/* --- Compact Density Mode --- */
+body[data-density="compact"] .gallery,
+body[data-density="compact"] .memory-strip,
+body[data-density="compact"] .footprint-photos {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px 18px;
+}
+
+body[data-density="compact"] .polaroid-card:not(.is-video) .polaroid-inner {
+  padding: 8px 8px 11px;
+}
+
+body[data-density="compact"] .photo-comment,
+body[data-density="compact"] .back-tags {
+  display: none;
+}
+
+body[data-density="compact"] .photo-title {
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+body[data-density="compact"] .card-actions {
+  margin-top: 7px;
+  padding-top: 6px;
+}
+
+body[data-density="compact"] .tape {
+  width: 64px;
+  height: 18px;
+  top: -10px;
+}
+
+body[data-theme="vintage"][data-density="compact"] .polaroid-card:not(.is-video) .polaroid-body {
+  padding: 9px 11px 11px;
+}
+
+/* --- Pure Photo Wall Density Mode --- */
+body[data-density="wall"] .gallery,
+body[data-density="wall"] .memory-strip,
+body[data-density="wall"] .footprint-photos {
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 10px 10px;
+}
+
+body[data-density="wall"] .polaroid-card,
+body[data-density="wall"] .polaroid-card:nth-child(n) {
+  --rot: 0deg;
+}
+
+body[data-density="wall"] .tape,
+body[data-density="wall"] .polaroid-body,
+body[data-density="wall"] .vintage-film-footer {
+  display: none;
+}
+
+body[data-density="wall"] .polaroid-card:not(.is-video) .polaroid-inner {
+  padding: 4px;
+  border-radius: 6px;
+}
+
+body[data-theme="classic"][data-density="wall"] .polaroid-card:not(.is-video) .polaroid-inner {
+  padding: 3px;
+  border-radius: 10px;
+}
+
+body[data-theme="classic"][data-density="wall"] .polaroid-card:not(.is-video) .polaroid-photo-frame {
+  border-radius: 7px;
+}
+
+body[data-theme="paper"][data-density="wall"] .polaroid-card:not(.is-video) .polaroid-inner {
+  padding: 5px;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"][data-density="wall"] .polaroid-card:not(.is-video) .polaroid-inner {
+  padding: 0;
+}
+
+body[data-theme="vintage"][data-density="wall"] .polaroid-card:not(.is-video) .polaroid-photo-frame {
+  border-left-width: 5px;
+  border-right-width: 5px;
+}
+
+body[data-density="wall"] .polaroid-card.is-video .polaroid-inner {
+  padding: 6px 16px;
+}
+
+body[data-density="wall"] .polaroid-card.is-video .film-strip {
+  inset: -7px -17px;
+}
+
+body[data-density="wall"] .polaroid-card .favorite-btn {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-press) var(--ease-out);
+}
+
+body[data-density="wall"] .polaroid-card:hover .favorite-btn,
+body[data-density="wall"] .polaroid-card .favorite-btn.active {
+  opacity: 1;
+}
+
+/* --- Auto-Collapsing Topbar on Downward Scroll --- */
+.topbar .folder-row {
+  max-height: 120px;
+  opacity: 1;
+  transition: max-height 210ms var(--ease-out),
+              opacity 160ms var(--ease-out),
+              margin-top 210ms var(--ease-out);
+}
+
+.topbar.is-compact {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.topbar.is-compact .view-switcher-row {
+  margin-bottom: 0;
+}
+
+.topbar.is-compact .folder-row {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar .folder-row {
+    transition: none;
+  }
+}
+
+/* --- Theme Micro-Details: Vintage Darkroom EXIF Readout & Paper Archival Specs --- */
+body[data-theme="vintage"] .specs-badge-grid {
+  padding: 8px 10px;
+  background: #0f0e0d;
+  border: 1px solid #2b2723;
+  border-top: 1px dashed rgba(235, 146, 52, 0.35);
+  border-bottom: 1px dashed rgba(235, 146, 52, 0.35);
+  border-radius: 2px;
+  gap: 8px 10px;
+}
+
+body[data-theme="vintage"] .spec-badge {
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #b5aa9a;
+}
+
+body[data-theme="vintage"] .spec-badge span.spec-val {
+  color: #eb9234;
+  letter-spacing: 0.04em;
+}
+
+body[data-theme="vintage"] .spec-badge.camera-badge {
+  padding-bottom: 5px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #e9e2d6;
+}
+
+body[data-theme="paper"] .specs-badge-grid {
+  padding: 6px 8px;
+  background: #faf5e8;
+  border: 1px dashed #d5cab5;
+  border-radius: 3px;
+}
+
+
 

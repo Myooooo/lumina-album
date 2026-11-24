@@ -33,6 +33,8 @@ const state = {
   view: "album",
   //: Active visual theme: "paper" (纸质手账, default), "classic" (经典画册), or "vintage" (复古胶片).
   theme: "paper",
+  //: Card grid density: "comfortable" | "compact" | "wall".
+  density: "comfortable",
   //: True once the first view has been painted. The very first showView() has
   //: nothing to animate away from, so it activates immediately rather than
   //: waiting out the exit duration behind an empty screen.
@@ -275,6 +277,9 @@ async function loadUiState() {
     }
     if (saved.theme === "classic" || saved.theme === "paper" || saved.theme === "vintage") {
       applyTheme(saved.theme, { persist: false });
+    }
+    if (saved.density === "comfortable" || saved.density === "compact" || saved.density === "wall") {
+      applyDensity(saved.density, { persist: false });
     }
   } catch (e) {
     // A brand-new database has no state yet; an empty one is a fine default.
@@ -1063,5 +1068,119 @@ function initTheme() {
       }
     });
   }
+}
+
+/* ==========================================================================
+   Card Density Switcher ("comfortable" / "compact" / "wall")
+   ========================================================================== */
+
+const DENSITY_META = {
+  comfortable: { label: "舒适视图" },
+  compact: { label: "紧凑视图" },
+  wall: { label: "纯图墙" },
+};
+
+function applyDensity(density, options = {}) {
+  const { persist = true, notify = false } = options;
+  const next = DENSITY_META[density] ? density : "comfortable";
+  state.density = next;
+  if (document.body) {
+    document.body.dataset.density = next;
+  }
+  document.querySelectorAll("#densitySwitcher .density-btn").forEach((btn) => {
+    const active = btn.dataset.density === next;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-checked", active ? "true" : "false");
+  });
+  try {
+    window.localStorage.setItem("lumina_density", next);
+  } catch (e) {}
+  if (persist) {
+    saveUiState({ density: next });
+  }
+  if (typeof scheduleCardSweep === "function") {
+    scheduleCardSweep();
+  }
+  if (notify) {
+    showToast(`已切换为「${DENSITY_META[next].label}」`, "info");
+  }
+}
+
+function initDensity() {
+  let initial = "comfortable";
+  try {
+    const cached = window.localStorage.getItem("lumina_density");
+    if (DENSITY_META[cached]) initial = cached;
+  } catch (e) {}
+  applyDensity(initial, { persist: false });
+  const switcher = $("densitySwitcher");
+  if (switcher) {
+    switcher.addEventListener("click", (e) => {
+      const btn = e.target.closest(".density-btn");
+      if (!btn || !btn.dataset.density) return;
+      if (btn.dataset.density !== state.density) {
+        applyDensity(btn.dataset.density, { persist: true, notify: true });
+      }
+    });
+  }
+}
+
+/* ==========================================================================
+   Topbar Scroll Auto-Collapse (folds .folder-row on downward scroll)
+   ========================================================================== */
+
+function initTopbarAutoCollapse() {
+  const topbar = document.querySelector(".topbar");
+  if (!topbar) return;
+  let lastY = window.scrollY || 0;
+  let compact = false;
+  let ticking = false;
+
+  const canCollapse = () => {
+    const history = $("folderHistory");
+    if (history && !history.classList.contains("hidden")) return false;
+    const progress = $("scanProgress");
+    if (progress && !progress.classList.contains("hidden")) return false;
+    const banner = $("cardBanner");
+    if (banner && !banner.classList.contains("hidden")) return false;
+    if (document.activeElement && topbar.contains(document.activeElement) && document.activeElement.tagName === "INPUT") {
+      return false;
+    }
+    return true;
+  };
+
+  const setCompact = (next) => {
+    if (compact === next) return;
+    compact = next;
+    topbar.classList.toggle("is-compact", compact);
+    if (typeof syncTopbarHeight === "function") {
+      syncTopbarHeight();
+      setTimeout(syncTopbarHeight, 220);
+    }
+  };
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const y = window.scrollY || window.pageYOffset || 0;
+        const delta = y - lastY;
+        lastY = y;
+        if (y < 90 || !canCollapse()) {
+          setCompact(false);
+          return;
+        }
+        if (delta > 14 && y > 160) {
+          setCompact(true);
+        } else if (delta < -10) {
+          setCompact(false);
+        }
+      });
+    },
+    { passive: true }
+  );
 }
 
