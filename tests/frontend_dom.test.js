@@ -376,6 +376,34 @@ async function main() {
     true
   );
 
+  // --- fullscreen switch clears its transform animation before zoom ------
+  const appState = window.eval("state");
+  const fsPhotoA = appState.photos[0];
+  const fsPhotoB = appState.photos[1];
+  if (fsPhotoA && fsPhotoB) {
+    appState.currentPreviewId = fsPhotoA.id;
+    window.openFullscreenViewer();
+    window.renderFullscreenMedia(fsPhotoB, 1);
+    check(
+      "the fullscreen switch animation starts on the next photo",
+      document.getElementById("fsImage").classList.contains("fs-switch-right"),
+      true
+    );
+    await new Promise((resolve) => window.setTimeout(resolve, 320));
+    check(
+      "the switch animation is cleared so zoom can take over",
+      document.getElementById("fsImage").classList.contains("fs-switch-right"),
+      false
+    );
+    window.zoomFullscreen(1.25);
+    check(
+      "the next fullscreen photo can be zoomed",
+      appState.fullscreen.scale,
+      1.25
+    );
+    window.closeFullscreenViewer();
+  }
+
   // --- map source fields keep custom values while hidden -----------------
   const mapProvider = document.getElementById("setMapTileProvider");
   const mapUrlRow = document.getElementById("setMapTileUrlRow");
@@ -531,9 +559,9 @@ async function main() {
     "amap"
   );
   check(
-    "the detail dialog has a fullscreen expand control",
+    "the duplicate fullscreen expand control is gone",
     Boolean(document.getElementById("previewExpandBtn")),
-    true
+    false
   );
 
   const naming = window.LuminaUI.confirmDialog("为人物改名", {

@@ -195,13 +195,6 @@ function init() {
     const photo = photoById(state.currentPreviewId);
     if (photo) playLiveMotion(photo, { loud: true });
   });
-  const previewExpandBtn = $("previewExpandBtn");
-  if (previewExpandBtn) {
-    previewExpandBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openFullscreenViewer();
-    });
-  }
 
   // Fullscreen Viewer Controls
   const fsCloseBtn = $("fsCloseBtn");

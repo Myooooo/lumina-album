@@ -1861,6 +1861,28 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
+    "fullscreen switch animation no longer pins transform after navigation",
+    /finishSwitch/.test(src) &&
+      /\.fs-switch-right \{[^}]*animation: previewSwitchRight 160ms var\(--ease-out\);/.test(css) &&
+      !/previewSwitchRight 160ms var\(--ease-out\) both/.test(css),
+    true
+  );
+  check(
+    "vintage checkbox keeps a fixed box despite form-grid padding",
+    /max-width: 15px/.test(css) &&
+      /padding: 0 !important/.test(css) &&
+      /flex: 0 0 15px/.test(css),
+    true
+  );
+  check(
+    "detail tags keep the .tag pill and gain a hover lift",
+    /\.tag-filter-btn \{[^}]*cursor: pointer/.test(css) &&
+      /\.tag-filter-btn:hover,/.test(css) &&
+      /transform: translateY\(-1px\) scale\(1\.025\)/.test(css) &&
+      !/\.tag-filter-btn \{[^}]*padding:/.test(css),
+    true
+  );
+  check(
     "detail tags are buttons that return to the filtered album",
     /data-preview-tag=/.test(src) &&
       /function openAlbumWithTag\(/.test(src) &&
@@ -1888,7 +1910,7 @@ section("people & pets (人物与宠物)");
       /function renderPreviewFaceBoxes\(/.test(src) &&
       /\.preview-person-pill \{/.test(css) &&
       /\.preview-face-box\.is-active \{/.test(css) &&
-      /id="previewExpandBtn"/.test(html) &&
+      !/previewExpandBtn/.test(html) &&
       /function openFullscreenViewer\(/.test(src),
     true
   );

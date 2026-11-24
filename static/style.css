@@ -10843,11 +10843,11 @@ body[data-theme="vintage"] .fs-viewer-toolbar #fsInfoBtn.active {
 
 /* Fullscreen Directional Switch Micro-Motion */
 .fs-switch-left {
-  animation: previewSwitchLeft 160ms var(--ease-out) both;
+  animation: previewSwitchLeft 160ms var(--ease-out);
 }
 
 .fs-switch-right {
-  animation: previewSwitchRight 160ms var(--ease-out) both;
+  animation: previewSwitchRight 160ms var(--ease-out);
 }
 
 /* Fullscreen EXIF Info HUD Overlay (3-Theme Styled) */
@@ -13358,45 +13358,11 @@ body[data-theme="vintage"] .footprints-map-float-btn {
 
 /* ==========================================================================
    Media controls: paper-journal / vintage-film coordination
-   The play, sound, Live Photo and fullscreen controls share one geometry, but
+   The play, sound and Live Photo controls share one geometry, but
    their material follows the active theme instead of the old universal dark
    glass pill. This keeps the photograph the loudest object and the controls as
    quiet stationery laid on top of it.
    ========================================================================== */
-.preview-expand-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 99px;
-  border: 1px solid rgba(247, 239, 228, 0.28);
-  background: rgba(14, 12, 10, 0.56);
-  color: #f7efe4;
-  cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  opacity: 0.82;
-  transition: opacity 180ms var(--ease-out), transform 180ms var(--ease-out),
-              background-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
-  z-index: 6;
-}
-
-.preview-expand-btn svg { width: 16px; height: 16px; }
-
-.preview-expand-btn:hover {
-  opacity: 1;
-  background: rgba(24, 20, 16, 0.8);
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.34);
-}
-
-.preview-expand-btn:active { transform: scale(0.94); }
-
 /* Paper: a letterpress chip on cream stock. */
 body[data-theme="paper"] .preview-sound-btn,
 body[data-theme="paper"] .preview-video-pause,
@@ -13426,22 +13392,6 @@ body[data-theme="paper"] .preview-sound-btn.is-on {
   box-shadow: 0 0 0 3px rgba(174, 118, 78, 0.12);
 }
 
-body[data-theme="paper"] .preview-expand-btn {
-  border-radius: 3px;
-  border-color: rgba(138, 114, 88, 0.34);
-  background: rgba(250, 245, 232, 0.92);
-  color: #6b4f38;
-  box-shadow: 0 2px 8px rgba(46, 34, 20, 0.12);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
-body[data-theme="paper"] .preview-expand-btn:hover {
-  background: #fffdf8;
-  color: #8a5a36;
-  border-color: rgba(154, 96, 44, 0.55);
-}
-
 /* Vintage: darkroom metal with a faint amber edge-light. */
 body[data-theme="vintage"] .preview-sound-btn,
 body[data-theme="vintage"] .preview-video-pause,
@@ -13466,28 +13416,6 @@ body[data-theme="vintage"] .preview-sound-btn.is-on {
   border-color: #eb9234;
   color: #ffd19a;
   box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.16), 0 0 14px rgba(235, 146, 52, 0.25);
-}
-
-body[data-theme="vintage"] .preview-expand-btn {
-  border-radius: 2px;
-  border-color: rgba(235, 146, 52, 0.4);
-  background: rgba(18, 14, 11, 0.82);
-  color: #f4b165;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.44);
-}
-
-body[data-theme="vintage"] .preview-expand-btn:hover {
-  background: rgba(36, 26, 18, 0.92);
-  border-color: rgba(255, 154, 61, 0.72);
-  color: #ffc27d;
-  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.12);
-}
-
-body[data-theme="classic"] .preview-expand-btn {
-  background: rgba(255, 255, 255, 0.72);
-  border-color: rgba(255, 255, 255, 0.78);
-  color: #3a2f25;
-  box-shadow: 0 4px 14px rgba(38, 31, 25, 0.14);
 }
 
 /* The card badges use the same material language as the controls. */
@@ -13550,7 +13478,6 @@ body[data-theme="vintage"] .path-open-btn:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .footprints-map-wrap:not(.hidden) { animation: none; }
-  .preview-expand-btn,
   .preview-sound-btn,
   .preview-video-pause,
   .preview-live-btn { transition: none; }
@@ -13736,9 +13663,13 @@ body[data-theme="vintage"] .confirm-check input[type="checkbox"] {
   -webkit-appearance: none;
   width: 15px;
   height: 15px;
+  min-width: 15px;
+  max-width: 15px;
   margin: 0;
+  padding: 0 !important;
+  box-sizing: border-box;
   position: relative;
-  flex-shrink: 0;
+  flex: 0 0 15px;
   border: 1px solid #4a4035;
   border-radius: 2px;
   background: #16120f;
@@ -13789,36 +13720,42 @@ body[data-theme="vintage"] .confirm-check input[type="checkbox"]:focus-visible {
 .tag-filter-btn {
   display: inline-flex;
   align-items: center;
-  border: 1px solid transparent;
-  background: transparent;
-  font: inherit;
+  font-family: inherit;
   line-height: inherit;
-  padding: 2px 8px;
-  margin: -2px -4px -2px 0;
-  border-radius: 999px;
   cursor: pointer;
-  transition: background-color 160ms var(--ease-out),
-              border-color 160ms var(--ease-out),
-              color 160ms var(--ease-out);
+  transition: transform 170ms var(--ease-out),
+              box-shadow 170ms var(--ease-out),
+              border-color 170ms var(--ease-out),
+              background-color 170ms var(--ease-out);
 }
 
 .tag-filter-btn:hover,
 .tag-filter-btn:focus-visible {
-  border-color: rgba(174, 118, 78, 0.35);
-  background: rgba(174, 118, 78, 0.1);
-  color: var(--primary-dark);
+  transform: translateY(-1px) scale(1.025);
+  box-shadow: 0 3px 9px rgba(50, 34, 18, 0.12);
   outline: none;
 }
 
-body[data-theme="paper"] .tag-filter-btn:hover {
-  border-radius: 3px;
-  border-color: #cbbda5;
-  background: #f3e3c9;
+.tag-filter-btn:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: none;
 }
 
-body[data-theme="vintage"] .tag-filter-btn:hover {
-  border-radius: 2px;
-  border-color: rgba(235, 146, 52, 0.45);
-  background: rgba(235, 146, 52, 0.12);
-  color: #f4b165;
+body[data-theme="paper"] .tag-filter-btn:hover,
+body[data-theme="paper"] .tag-filter-btn:focus-visible {
+  background: #f3e3c9;
+  border-color: #cbbda5;
+}
+
+body[data-theme="vintage"] .tag-filter-btn:hover,
+body[data-theme="vintage"] .tag-filter-btn:focus-visible {
+  background: rgba(235, 146, 52, 0.14);
+  border-color: rgba(235, 146, 52, 0.52);
+  box-shadow: 0 0 0 2px rgba(235, 146, 52, 0.08), 0 4px 11px rgba(0, 0, 0, 0.34);
+}
+
+body[data-theme="classic"] .tag-filter-btn:hover,
+body[data-theme="classic"] .tag-filter-btn:focus-visible {
+  background: rgba(174, 118, 78, 0.13);
+  border-color: rgba(174, 118, 78, 0.28);
 }

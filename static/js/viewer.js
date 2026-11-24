@@ -166,7 +166,20 @@ function renderFullscreenMedia(photo, direction = 0) {
   applyFsTransform(false);
   if (direction !== 0 && !prefersReducedMotion()) {
     void fsImg.offsetWidth;
-    fsImg.classList.add(direction < 0 ? "fs-switch-left" : "fs-switch-right");
+    const switchClass = direction < 0 ? "fs-switch-left" : "fs-switch-right";
+    fsImg.classList.add(switchClass);
+    // The switch keyframes animate transform. If the class (or its fill mode)
+    // is left behind, it keeps overriding the zoom transform and the next
+    // photo cannot be enlarged. Clear it when the short entrance is over.
+    let cleared = false;
+    const finishSwitch = () => {
+      if (cleared) return;
+      cleared = true;
+      fsImg.classList.remove(switchClass);
+      applyFsTransform(false);
+    };
+    fsImg.addEventListener("animationend", finishSwitch, { once: true });
+    setTimeout(finishSwitch, 240);
   }
   const origUrl = `/api/original/${photo.id}`;
   const loader = new Image();
