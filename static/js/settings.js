@@ -318,7 +318,7 @@ async function deleteCustomPrompt() {
    Settings dialog: tabs
    ========================================================================== */
 
-const SETTINGS_TABS = ["model", "image", "video", "geo", "data"];
+const SETTINGS_TABS = ["model", "image", "video", "people", "geo", "data"];
 
 /** Slide the "ink" behind the active tab and show its pane. */
 function showSettingsTab(name, options = {}) {
@@ -410,6 +410,75 @@ async function paintFfmpegStatus() {
   }
 }
 
+async function paintPeopleEngineStatus() {
+  const el = $("setPeopleEngineStatus");
+  if (!el) return;
+  el.classList.remove("ok", "bad");
+  el.textContent = "正在检测本地识别引擎与硬件加速…";
+  try {
+    const data = await api("/api/people/status");
+    const accel = data.accelerator || "CPU";
+    const model = data.model || "buffalo_l";
+    const ready = Boolean(data.engine_ready);
+    if (ready) {
+      el.classList.add("ok");
+      el.textContent = `本地引擎就绪 · 模型 ${model} · 硬件加速：${accel}`;
+    } else {
+      el.classList.add("bad");
+      const missing = Array.isArray(data.missing_packages) && data.missing_packages.length
+        ? `缺少依赖：${data.missing_packages.join(", ")}`
+        : "尚未下载或初始化本地模型";
+      el.textContent = `${missing} · 检测到的加速设备：${accel}`;
+    }
+  } catch (e) {
+    el.textContent = "无法检测本地人物识别引擎：" + e.message;
+  }
+}
+
+async function downloadFaceModels() {
+  const btn = $("downloadFaceModelsBtn");
+  if (btn) btn.disabled = true;
+  showToast("正在检查并下载本地识别模型，请稍候…", "info");
+  try {
+    const model = $("setFaceModel") ? $("setFaceModel").value : "buffalo_l";
+    const detectPets = $("setFaceDetectPets") ? $("setFaceDetectPets").checked : true;
+    const data = await api("/api/people/models/download", {
+      method: "POST",
+      body: JSON.stringify({ model, detect_pets: detectPets }),
+    });
+    if (data.ok) {
+      showToast(`本地模型（${model}）准备完成，加速设备：${data.accelerator || "CPU"}`, "success");
+    } else {
+      showToast(data.error || "模型下载未完成，请检查本地依赖与网络。", "warning");
+    }
+    await paintPeopleEngineStatus();
+  } catch (e) {
+    showToast("下载本地模型失败：" + e.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function reclusterPeopleFromSettings() {
+  const ok = await confirmDialog(
+    "重新聚类未命名的人物与宠物吗？\n已手动命名的分组不会丢失，未命名照片会按最新阈值重新整理。",
+    { title: "重新聚类", confirmText: "开始聚类" }
+  );
+  if (!ok) return;
+  try {
+    const data = await api("/api/people/recluster", { method: "POST" });
+    showToast(
+      `聚类完成：自动归类 ${data.assigned || 0} 处，待确认 ${data.pending || 0} 处，新建分组 ${data.new_people || 0} 个。`,
+      "success"
+    );
+    if (state.view === "people" && typeof loadPeopleGrid === "function") {
+      loadPeopleGrid();
+    }
+  } catch (e) {
+    showToast("重新聚类失败：" + e.message, "error");
+  }
+}
+
 async function openSettings() {
   try {
     await loadPromptPresets();
@@ -453,11 +522,21 @@ async function openSettings() {
     setSelectValue($("setVideoProcessing"), cfg.video_processing || "ffmpeg");
     setVolume("video", cfg.video_preview_volume ?? 50);
     setVolume("live", cfg.live_volume ?? 0);
+    if ($("setFaceEnabled")) $("setFaceEnabled").checked = cfg.face_recognition_enabled !== false;
+    if ($("setFaceAutoScan")) $("setFaceAutoScan").checked = !!cfg.face_auto_scan;
+    if ($("setFaceDetectPets")) $("setFaceDetectPets").checked = cfg.face_detect_pets !== false;
+    if ($("setFaceModel")) setSelectValue($("setFaceModel"), cfg.face_model || "buffalo_l");
+    if ($("setFaceMatchThreshold")) $("setFaceMatchThreshold").value = cfg.face_match_threshold ?? 0.5;
+    if ($("setFaceMinCluster")) $("setFaceMinCluster").value = cfg.face_min_cluster_size ?? 2;
+    if ($("setFaceModelsDir")) $("setFaceModelsDir").value = cfg.face_models_dir || "";
     state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
     state.videoPreviewMode = cfg.video_preview_mode || "once";
     state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
     state.liveVolume = Number(cfg.live_volume ?? 0);
+    state.faceRecognitionEnabled = cfg.face_recognition_enabled !== false;
+    state.faceAutoScan = !!cfg.face_auto_scan;
     paintFfmpegStatus();
+    paintPeopleEngineStatus();
     // Always open on the model tab: that is what most visits are for.
     showSettingsTab("model");
     showModal($("settingsModal"));
@@ -500,12 +579,21 @@ async function saveSettings() {
     video_processing: $("setVideoProcessing").value,
     video_preview_volume: clampVolume($("setVideoPreviewVolume").value),
     live_volume: clampVolume($("setLiveVolume").value),
+    face_recognition_enabled: $("setFaceEnabled") ? $("setFaceEnabled").checked : true,
+    face_auto_scan: $("setFaceAutoScan") ? $("setFaceAutoScan").checked : false,
+    face_detect_pets: $("setFaceDetectPets") ? $("setFaceDetectPets").checked : true,
+    face_model: $("setFaceModel") ? $("setFaceModel").value : "buffalo_l",
+    face_match_threshold: parseFloat($("setFaceMatchThreshold") ? $("setFaceMatchThreshold").value : "0.5") || 0.5,
+    face_min_cluster_size: parseInt($("setFaceMinCluster") ? $("setFaceMinCluster").value : "2", 10) || 2,
+    face_models_dir: $("setFaceModelsDir") ? $("setFaceModelsDir").value.trim() : "",
   };
   try {
     await api("/api/config", {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    state.faceRecognitionEnabled = !!payload.face_recognition_enabled;
+    state.faceAutoScan = !!payload.face_auto_scan;
     closeModal("settingsModal");
     showToast("设置已保存。", "success");
   } catch (e) {
@@ -1503,6 +1591,90 @@ async function copyText(text) {
  * camera vendor's editor).
  */
 async function handlePreviewInfoClick(event) {
+  const rejectBtn = event.target.closest(".preview-person-reject");
+  if (rejectBtn) {
+    event.stopPropagation();
+    const faceId = Number(rejectBtn.dataset.faceId);
+    if (!Number.isFinite(faceId)) return;
+    try {
+      await api(`/api/faces/${faceId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "reject" }),
+      });
+      const photoId = state.currentPreviewId;
+      if (photoId) {
+        invalidatePhotoDetail(photoId);
+        await ensurePhotoDetail(photoId);
+      }
+      showToast("已移出该识别标注。", "info");
+    } catch (e) {
+      showToast("操作失败：" + e.message, "error");
+    }
+    return;
+  }
+
+  const renameBtn = event.target.closest(".preview-person-rename");
+  if (renameBtn) {
+    event.stopPropagation();
+    const pill = renameBtn.closest(".preview-person-pill");
+    const faceId = Number(renameBtn.dataset.faceId);
+    const currentName = pill ? pill.dataset.personName || "" : "";
+    const name = window.prompt("输入人物或宠物的名字（如与已有同名将自动归入）：", currentName);
+    if (name === null) return;
+    const clean = name.trim();
+    if (!clean) return;
+    try {
+      await api(`/api/faces/${faceId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "assign", name: clean }),
+      });
+      const photoId = state.currentPreviewId;
+      if (photoId) {
+        invalidatePhotoDetail(photoId);
+        await ensurePhotoDetail(photoId);
+      }
+      showToast(`已标注为「${clean}」，后续相似照片将自动归入。`, "success");
+    } catch (e) {
+      showToast("标注失败：" + e.message, "error");
+    }
+    return;
+  }
+
+  const personMain = event.target.closest(".preview-person-main");
+  if (personMain) {
+    event.stopPropagation();
+    const pill = personMain.closest(".preview-person-pill");
+    const faceId = pill ? Number(pill.dataset.faceId) : NaN;
+    const personId = pill ? Number(pill.dataset.personId) : NaN;
+    const personName = pill ? pill.dataset.personName || "" : "";
+    if (Number.isFinite(personId) && personId > 0 && personName) {
+      closeModal("previewModal");
+      if (typeof openPeople === "function") openPeople(personId);
+      return;
+    }
+    if (Number.isFinite(faceId)) {
+      const name = window.prompt("给这位人物或宠物起个名字（如与已有同名将自动归入）：", "");
+      if (name === null) return;
+      const clean = name.trim();
+      if (!clean) return;
+      try {
+        await api(`/api/faces/${faceId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ action: "assign", name: clean }),
+        });
+        const photoId = state.currentPreviewId;
+        if (photoId) {
+          invalidatePhotoDetail(photoId);
+          await ensurePhotoDetail(photoId);
+        }
+        showToast(`已标注为「${clean}」。`, "success");
+      } catch (e) {
+        showToast("标注失败：" + e.message, "error");
+      }
+    }
+    return;
+  }
+
   const openBtn = event.target.closest(".path-open-btn");
   if (openBtn) {
     event.stopPropagation();
@@ -1550,6 +1722,8 @@ async function loadPlaybackConfig() {
     state.videoPreviewMode = cfg.video_preview_mode || "once";
     state.videoPreviewVolume = Number(cfg.video_preview_volume ?? 50);
     state.liveVolume = Number(cfg.live_volume ?? 0);
+    state.faceRecognitionEnabled = cfg.face_recognition_enabled !== false;
+    state.faceAutoScan = !!cfg.face_auto_scan;
   } catch (e) {
     // Defaults are sensible, so a failure here changes nothing visible.
     console.warn("读取播放设置失败", e);

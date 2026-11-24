@@ -1825,6 +1825,43 @@ section("prompt editor");
   );
 }
 
+/* ------------------------------------------------------- people & pets (Phase 2 & 3) */
+section("people & pets (人物与宠物)");
+{
+  const html = fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "..", "static", "style.css"), "utf8");
+  check(
+    "people view and lightbox face boxes exist in HTML",
+    /id="peopleView"/.test(html) && /id="previewFaceBoxes"/.test(html),
+    true
+  );
+  check(
+    "settings modal includes 人物与宠物 tab with buffalo_l / buffalo_s selector",
+    /id="tabBtnPeople"/.test(html) &&
+      /id="tabPeople"/.test(html) &&
+      /value="buffalo_l"/.test(html) &&
+      /value="buffalo_s"/.test(html) &&
+      /id="setFaceDetectPets"/.test(html) &&
+      /id="setPeopleEngineStatus"/.test(html),
+    true
+  );
+  check(
+    "lightbox renders detected people pills and bounding boxes",
+    /function previewPeopleHtml\(/.test(src) &&
+      /function renderPreviewFaceBoxes\(/.test(src) &&
+      /\.preview-person-pill \{/.test(css) &&
+      /\.preview-face-box\.is-active \{/.test(css),
+    true
+  );
+  check(
+    "settings saves and loads face recognition preferences",
+    /face_model:/.test(src) &&
+      /face_detect_pets:/.test(src) &&
+      /paintPeopleEngineStatus\(\)/.test(src),
+    true
+  );
+}
+
 console.log(
   failures
     ? `\n${failures} of ${checks} checks FAILED`

@@ -171,6 +171,19 @@ function init() {
     togglePreviewPause(photoById(state.currentPreviewId));
   });
   $("previewInfo").addEventListener("click", handlePreviewInfoClick);
+  $("previewInfo").addEventListener("pointerover", (e) => {
+    const pill = e.target.closest(".preview-person-pill");
+    if (!pill) return;
+    const box = document.querySelector(`#previewFaceBoxes .preview-face-box[data-face-id="${pill.dataset.faceId}"]`);
+    if (box) box.classList.add("is-active");
+  });
+  $("previewInfo").addEventListener("pointerout", (e) => {
+    const pill = e.target.closest(".preview-person-pill");
+    if (!pill) return;
+    if (pill.contains(e.relatedTarget)) return;
+    const box = document.querySelector(`#previewFaceBoxes .preview-face-box[data-face-id="${pill.dataset.faceId}"]`);
+    if (box) box.classList.remove("is-active");
+  });
   $("previewLiveBtn").addEventListener("click", (e) => {
     e.stopPropagation();
     const photo = photoById(state.currentPreviewId);
@@ -360,6 +373,8 @@ function init() {
       if (label) label.textContent = `${input.value}%`;
     });
   });
+  if ($("downloadFaceModelsBtn")) $("downloadFaceModelsBtn").addEventListener("click", downloadFaceModels);
+  if ($("reclusterPeopleBtn")) $("reclusterPeopleBtn").addEventListener("click", reclusterPeopleFromSettings);
   $("cleanCacheBtn").addEventListener("click", cleanCache);
   $("hideFolderBtn").addEventListener("click", hideCurrentFolder);
   $("viewHiddenFoldersBtn").addEventListener("click", openHiddenFolders);

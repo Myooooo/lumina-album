@@ -232,6 +232,9 @@ async function reloadCurrentView() {
   // so going back to 相册 showed the wrong book.
   const albumRefresh = state.view === "album" ? loadPhotos() : loadPhotos({ quiet: true });
   switch (state.view) {
+    case "people":
+      await Promise.all([albumRefresh, openPeople()]);
+      break;
     case "footprints":
       await Promise.all([albumRefresh, openFootprints()]);
       break;
@@ -754,6 +757,13 @@ function pollScan() {
         refreshCardStatus().then(() => {
           if (imported && imported.source) offerCardSync(imported.source);
         });
+        // Quietly trigger incremental local face/pet scan after album sync/organize.
+        if (job.status === "completed" && job.phase !== "trash" && state.faceRecognitionEnabled && state.faceAutoScan) {
+          api("/api/people/scan", {
+            method: "POST",
+            body: JSON.stringify({ folder: state.folder || "" }),
+          }).catch(() => {});
+        }
         return;
       }
       paintJobProgress(job);

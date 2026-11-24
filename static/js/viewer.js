@@ -452,6 +452,7 @@ function applyPhotoDetail(row, detail) {
     has_live: detail.has_live,
     play_state: detail.play_state,
     ffmpeg: detail.ffmpeg,
+    faces: Array.isArray(detail.faces) ? detail.faces : (row.faces || []),
   });
   if (detail.location) row.location = detail.location;
   return row;
@@ -467,6 +468,7 @@ function invalidatePhotoDetail(id) {
     // a stale one would show wrong camera data while the refetch is in flight.
     row.exif = {};
     row.video_info = {};
+    row.faces = [];
   }
 }
 
@@ -915,11 +917,72 @@ function closeModal(id, onHidden) {
     // A looping preview would otherwise keep decoding (and playing) behind a
     // closed dialog until something else happened to stop it.
     stopPreviewVideo();
+    const faceBoxes = $("previewFaceBoxes");
+    if (faceBoxes) faceBoxes.innerHTML = "";
     state.currentPreviewId = null;
     state.previewContext = null;
     state.previewNavToken += 1;
     $("previewImage").classList.remove("preview-switch-left", "preview-switch-right");
   }
+}
+
+function faceDisplayLabel(face) {
+  if (face.person_name) return face.person_name;
+  if (face.kind === "cat") return "未命名猫咪";
+  if (face.kind === "dog") return "未命名狗狗";
+  return "未命名";
+}
+
+function renderPreviewFaceBoxes(faces) {
+  const boxLayer = $("previewFaceBoxes");
+  if (!boxLayer) return;
+  const list = Array.isArray(faces) ? faces.filter((f) => f && f.status !== "rejected") : [];
+  if (!list.length) {
+    boxLayer.innerHTML = "";
+    return;
+  }
+  boxLayer.innerHTML = list
+    .map((f) => {
+      const left = Math.max(0, Math.min(100, (Number(f.bbox_x) || 0) * 100)).toFixed(2);
+      const top = Math.max(0, Math.min(100, (Number(f.bbox_y) || 0) * 100)).toFixed(2);
+      const width = Math.max(2, Math.min(100, (Number(f.bbox_w) || 0) * 100)).toFixed(2);
+      const height = Math.max(2, Math.min(100, (Number(f.bbox_h) || 0) * 100)).toFixed(2);
+      const label = faceDisplayLabel(f);
+      const petClass = f.kind === "cat" || f.kind === "dog" ? " is-pet" : "";
+      return `<div class="preview-face-box${petClass}" data-face-id="${f.id}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;"><span class="preview-face-label">${escapeHtml(label)}</span></div>`;
+    })
+    .join("");
+}
+
+function previewPeopleHtml(photo) {
+  const faces = Array.isArray(photo.faces) ? photo.faces.filter((f) => f && f.status !== "rejected") : [];
+  if (!faces.length) return "";
+  const pills = faces
+    .map((f) => {
+      const label = faceDisplayLabel(f);
+      const isPet = f.kind === "cat" || f.kind === "dog";
+      const named = Boolean(f.person_name && f.person_id);
+      const pendingTag = f.status === "pending" ? '<span class="preview-person-pending">待确认</span>' : "";
+      return `
+        <div class="preview-person-pill${named ? " is-named" : ""}${isPet ? " is-pet" : ""}" data-face-id="${f.id}" data-person-id="${f.person_id || ""}" data-person-name="${escapeHtml(f.person_name || "")}">
+          <button type="button" class="preview-person-main" title="${named ? `查看「${escapeHtml(f.person_name)}」的所有照片` : "点击命名人物或宠物"}">
+            <span class="preview-person-avatar">
+              <img src="/api/faces/${f.id}/thumb" alt="${escapeHtml(label)}" loading="lazy" decoding="async" />
+              ${isPet ? `<span class="preview-person-paw" aria-hidden="true">${ICONS.paw || ""}</span>` : ""}
+            </span>
+            <span class="preview-person-name">${escapeHtml(label)}</span>
+            ${pendingTag}
+          </button>
+          <button type="button" class="preview-person-rename" data-face-id="${f.id}" title="修改或标注名字">${ICONS.edit || ""}</button>
+          <button type="button" class="preview-person-reject" data-face-id="${f.id}" title="不是此人 / 移除识别">${ICONS.close || ""}</button>
+        </div>`;
+    })
+    .join("");
+  return `
+    <div class="preview-people-section">
+      <div class="preview-people-title">${ICONS.people || ""}<span>照片中的人物与宠物</span></div>
+      <div class="preview-people-list">${pills}</div>
+    </div>`;
 }
 
 /**
@@ -1087,6 +1150,8 @@ function updatePreview(options = {}) {
       </div>
     ` : ""}
 
+    ${previewPeopleHtml(photo)}
+
     ${specItems.length ? `
       <div class="specs-badge-grid">
         ${specItems.join("")}
@@ -1149,6 +1214,7 @@ function updatePreview(options = {}) {
     ` : ""}
   `;
 
+  renderPreviewFaceBoxes(photo.faces || []);
   renderPreviewFilmstrip(order, frameIdx);
   const fsModal = $("fullscreenModal");
   if (fsModal && !fsModal.classList.contains("hidden")) {

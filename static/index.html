@@ -280,6 +280,7 @@
                margin beside a portrait photo. -->
           <div class="preview-stage">
             <img id="previewImage" alt="预览" />
+            <div id="previewFaceBoxes" class="preview-face-boxes" aria-hidden="true"></div>
             <!-- Video: the poster shows immediately, the loop cross-fades in.
                  The same element plays a Live Photo's motion once, then fades. -->
             <video id="previewVideo" class="preview-video hidden" muted autoplay loop playsinline preload="metadata"></video>
@@ -564,6 +565,10 @@
                 aria-selected="false" aria-controls="tabVideo" tabindex="-1">
           <span class="btn-icon" data-icon="video"></span><span class="tab-label">视频处理</span>
         </button>
+        <button class="settings-tab" role="tab" data-tab="people" id="tabBtnPeople"
+                aria-selected="false" aria-controls="tabPeople" tabindex="-1">
+          <span class="btn-icon" data-icon="people"></span><span class="tab-label">人物与宠物</span>
+        </button>
         <button class="settings-tab" role="tab" data-tab="geo" id="tabBtnGeo"
                 aria-selected="false" aria-controls="tabGeo" tabindex="-1">
           <span class="btn-icon" data-icon="pin"></span><span class="tab-label">地理编码</span>
@@ -748,6 +753,45 @@
               <span>索引时生成预览片段（首次打开更快，扫描更慢）</span>
             </label>
             <div class="full-row settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
+          </div>
+        </section>
+
+        <section class="settings-pane" id="tabPeople" role="tabpanel"
+                 aria-labelledby="tabBtnPeople" data-pane="people" hidden>
+          <p class="settings-hint">全部人脸与宠物猫狗识别、聚类均在本地离线完成，照片与特征向量绝不上传云端。自动优先调用 Apple CoreML、NVIDIA CUDA 或 Windows DirectML 加速。</p>
+          <div class="form-grid">
+            <label class="checkbox-row full-row">
+              <input id="setFaceEnabled" type="checkbox" />
+              <span>启用本地人物与宠物识别</span>
+            </label>
+            <label class="checkbox-row full-row">
+              <input id="setFaceAutoScan" type="checkbox" />
+              <span>同步或整理相册后自动在后台增量扫描新照片</span>
+            </label>
+            <label class="checkbox-row full-row">
+              <input id="setFaceDetectPets" type="checkbox" />
+              <span>同时识别宠物猫狗（本地检测与特征归类）</span>
+            </label>
+            <label class="full-row">人脸识别模型
+              <select id="setFaceModel">
+                <option value="buffalo_l">buffalo_l（高精度 · 默认，约 280MB）</option>
+                <option value="buffalo_s">buffalo_s（轻量快速，约 160MB）</option>
+              </select>
+            </label>
+            <label>自动归类相似度阈值 (0.25-0.75)
+              <input id="setFaceMatchThreshold" type="number" min="0.25" max="0.75" step="0.02" />
+            </label>
+            <label>未命名聚类最少照片数
+              <input id="setFaceMinCluster" type="number" min="1" max="10" step="1" />
+            </label>
+            <label class="full-row">本地模型存放目录（留空则使用默认 data/models）
+              <input id="setFaceModelsDir" type="text" placeholder="默认：data/models" />
+            </label>
+            <div class="full-row settings-status" id="setPeopleEngineStatus">正在检测本地识别引擎与硬件加速…</div>
+            <div class="full-row settings-row-actions">
+              <button id="downloadFaceModelsBtn" class="btn" type="button"><span class="btn-icon" data-icon="import"></span>下载 / 检查本地模型</button>
+              <button id="reclusterPeopleBtn" class="btn" type="button"><span class="btn-icon" data-icon="refresh"></span>重新聚类未命名人物</button>
+            </div>
           </div>
         </section>
 
