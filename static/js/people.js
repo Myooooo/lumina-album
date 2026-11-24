@@ -365,8 +365,10 @@ function renderPersonDetail(payload) {
   peopleState.currentPerson = payload;
   const person = payload.person;
   const photos = payload.photos || [];
+  const pendingPhotos = payload.pending_photos || [];
   const pending = payload.pending_faces || [];
   adoptPhotos(photos);
+  adoptPhotos(pendingPhotos);
 
   const backBtn = $("peopleBackBtn");
   const titleEl = $("peopleTitle");
@@ -640,7 +642,20 @@ function initPeople() {
       const openPhoto = e.target.closest("[data-open-photo]");
       if (openPhoto) {
         const photoId = Number(openPhoto.dataset.openPhoto);
-        if (Number.isFinite(photoId)) openPreview(photoId);
+        if (Number.isFinite(photoId)) {
+          const cur = peopleState.currentPerson;
+          const pendingIds = cur
+            ? [...new Set((cur.pending_faces || []).map((f) => Number(f.photo_id)).filter(Number.isFinite))]
+            : [];
+          if (pendingIds.length && cur) {
+            openPreview(photoId, {
+              ids: pendingIds,
+              title: `${personDisplayName(cur.person)} · 待确认`,
+            });
+          } else {
+            openPreview(photoId);
+          }
+        }
       }
     });
   }

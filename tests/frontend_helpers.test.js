@@ -1890,6 +1890,12 @@ section("people & pets (人物与宠物)");
       /cluster_version/.test(src),
     true
   );
+  check(
+    "pending faces adopt pending_photos and open preview in pending context",
+    /adoptPhotos\(pendingPhotos\)/.test(src) &&
+      /title:\s*`\$\{personDisplayName\(cur\.person\)\} · 待确认`/.test(src),
+    true
+  );
 }
 
 console.log(

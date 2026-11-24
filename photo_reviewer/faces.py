@@ -1034,6 +1034,10 @@ class LocalFacePetEngine:
             logger.debug("failed opening image %s for face/pet scan", image_path, exc_info=True)
             return []
 
+        # Guard against huge DSLR originals when falling back without a cached proxy.
+        if max(img_rgb.size) > 1600:
+            img_rgb.thumbnail((1600, 1600), Image.Resampling.BILINEAR)
+
         iw, ih = img_rgb.size
         if iw <= 0 or ih <= 0:
             return []

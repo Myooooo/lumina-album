@@ -116,6 +116,7 @@ def register(app, cfg, database):
             return jsonify({"error": "人物不存在"}), 404
         folder = request.args.get("folder", "").strip() or None
         confirmed_photos = database.person_photos(person_id, folder=folder, pending=False)
+        pending_photos = database.person_photos(person_id, folder=folder, pending=True)
         pending_faces = database.person_pending_faces(person_id, folder=folder)
         cover_faces = database.faces_for_person(person_id, include_pending=False)[:24]
         return jsonify(
@@ -130,6 +131,7 @@ def register(app, cfg, database):
                     "count": len(confirmed_photos),
                 },
                 "photos": [_photo_payload(p) for p in confirmed_photos],
+                "pending_photos": [_photo_payload(p) for p in pending_photos],
                 "pending_faces": pending_faces,
                 "cover_candidates": [
                     {
