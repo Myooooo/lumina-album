@@ -1880,12 +1880,14 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "model download modal, manual download guide, and people scan progress bar exist",
+    "model download modal, manual download guide, live people refresh, and people scan progress bar exist",
     /id="modelDownloadModal"/.test(html) &&
       /id="modelDownloadFill"/.test(html) &&
       /id="setFaceManualGuide"/.test(html) &&
       /id="peopleScanProgress"/.test(html) &&
-      /id="peopleScanProgressFill"/.test(html),
+      /id="peopleScanProgressFill"/.test(html) &&
+      /function refreshPeopleGridSilent\(/.test(src) &&
+      /cluster_version/.test(src),
     true
   );
 }

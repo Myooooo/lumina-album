@@ -14,6 +14,8 @@ const peopleState = {
   currentPerson: null, // detail payload when inside one person/pet
   status: null,
   pollTimer: null,
+  lastClusterVersion: 0,
+  silentRefreshing: false,
 };
 
 function kindBadgeLabel(kind) {
@@ -75,20 +77,33 @@ function startPeoplePoll() {
       peopleState.status = st;
       const job = st.job || {};
       renderPeopleScanStatus(job);
-      if (job.status !== "running") {
-        stopPeoplePoll();
-        if (job.status === "completed") {
-          showToast(job.message || "人物与宠物识别完成", "success");
-          if (state.view === "people") {
-            if (peopleState.currentPerson) {
-              openPersonDetail(peopleState.currentPerson.person.id);
-            } else {
-              loadPeopleGrid();
-            }
+      const clusterVer = Number(job.cluster_version) || 0;
+      if (job.status === "running") {
+        if (clusterVer > peopleState.lastClusterVersion) {
+          peopleState.lastClusterVersion = clusterVer;
+          if (state.view === "people" && !peopleState.currentPerson && !peopleState.mergeMode) {
+            refreshPeopleGridSilent();
           }
-        } else if (job.status === "error" && job.error) {
-          showToast(`识别失败：${job.error}`, "error");
         }
+        return;
+      }
+      stopPeoplePoll();
+      peopleState.lastClusterVersion = clusterVer;
+      if (job.status === "completed") {
+        showToast(job.message || "人物与宠物识别完成", "success");
+        if (state.view === "people") {
+          if (peopleState.currentPerson) {
+            openPersonDetail(peopleState.currentPerson.person.id);
+          } else {
+            refreshPeopleGridSilent();
+          }
+        }
+      } else if (job.status === "cancelled") {
+        if (state.view === "people" && !peopleState.currentPerson) {
+          refreshPeopleGridSilent();
+        }
+      } else if (job.status === "error" && job.error) {
+        showToast(`识别失败：${job.error}`, "error");
       }
     } catch (e) {
       stopPeoplePoll();
@@ -116,16 +131,20 @@ async function startPeopleScan(force = false) {
   }
 }
 
-function peopleCardHtml(person, index) {
+function peopleCardHtml(person, index, options = {}) {
   const isUnnamed = !(person.name || "").trim();
   const isPet = person.kind === "cat" || person.kind === "dog";
   const isSelected = peopleState.mergeSelected.has(person.id);
+  const animate = options.animate !== false;
   const avatar = person.thumb_url
     ? `<img class="person-avatar-img" src="${escapeHtml(person.thumb_url)}" alt="${escapeHtml(personDisplayName(person))}" loading="lazy" decoding="async" />`
     : `<span class="person-avatar-fallback">${isPet ? ICONS.paw : ICONS.people}</span>`;
+  const styleAttr = animate
+    ? ` style="animation-delay:${Math.min(index, 18) * 0.03}s"`
+    : ` style="animation:none"`;
   return `
     <div class="person-card${isUnnamed ? " is-unnamed" : ""}${isPet ? " is-pet" : ""}${person.is_hidden ? " is-hidden-person" : ""}${isSelected ? " is-merge-selected" : ""}"
-         data-person-id="${person.id}" style="animation-delay:${Math.min(index, 18) * 0.03}s">
+         data-person-id="${person.id}"${styleAttr}>
       ${peopleState.mergeMode ? `<span class="person-merge-check">${isSelected ? ICONS.check : ""}</span>` : ""}
       <button type="button" class="person-avatar-btn" data-open-person="${person.id}">
         <span class="person-avatar-ring">
@@ -158,7 +177,7 @@ function updateMergeBar() {
   if (runBtn) runBtn.disabled = count < 2;
 }
 
-function renderPeopleGrid() {
+function renderPeopleGrid(options = {}) {
   const body = $("peopleBody");
   const lede = $("peopleLede");
   const backBtn = $("peopleBackBtn");
@@ -213,9 +232,38 @@ function renderPeopleGrid() {
     return;
   }
 
-  body.innerHTML = `<div class="people-grid">${items.map(peopleCardHtml).join("")}</div>`;
+  const animate = options.animate !== false;
+  body.innerHTML = `<div class="people-grid">${items.map((p, idx) => peopleCardHtml(p, idx, { animate })).join("")}</div>`;
   renderAllIcons(body);
   updateMergeBar();
+}
+
+async function refreshPeopleGridSilent() {
+  if (peopleState.silentRefreshing) return;
+  peopleState.silentRefreshing = true;
+  try {
+    const params = new URLSearchParams();
+    if (state.folder) params.set("folder", state.folder);
+    if (peopleState.kind !== "all") params.set("kind", peopleState.kind);
+    if (peopleState.includeHidden) params.set("include_hidden", "1");
+    const data = await api(`/api/people?${params.toString()}`);
+    peopleState.items = data.people || [];
+    peopleState.status = data.status || null;
+    if (data.job) {
+      peopleState.lastClusterVersion = Math.max(
+        peopleState.lastClusterVersion,
+        Number(data.job.cluster_version) || 0
+      );
+      renderPeopleScanStatus(data.job);
+    }
+    if (state.view === "people" && !peopleState.currentPerson && !peopleState.mergeMode) {
+      renderPeopleGrid({ animate: false });
+    }
+  } catch (e) {
+    // Silent live refresh failure is harmless; next tick or completion will retry.
+  } finally {
+    peopleState.silentRefreshing = false;
+  }
 }
 
 async function loadPeopleGrid() {
@@ -229,6 +277,7 @@ async function loadPeopleGrid() {
     const data = await api(`/api/people?${params.toString()}`);
     peopleState.items = data.people || [];
     peopleState.status = data.status || null;
+    peopleState.lastClusterVersion = Number((data.job && data.job.cluster_version) || 0);
     renderPeopleScanStatus(data.job);
     if (data.job && data.job.status === "running") startPeoplePoll();
     renderPeopleGrid();

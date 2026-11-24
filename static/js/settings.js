@@ -460,7 +460,8 @@ async function paintPeopleEngineStatus() {
         pill(`加速：${accel}`, Boolean(deps.onnxruntime)),
         pill(`buffalo_l`, Boolean(modelsInstalled.buffalo_l)),
         pill(`buffalo_s`, Boolean(modelsInstalled.buffalo_s)),
-        pill(`宠物检测`, Boolean(modelsInstalled.pets)),
+        pill(`宠物模型`, Boolean(modelsInstalled.pets)),
+        pill(`ultralytics`, Boolean(deps.ultralytics)),
         pill(`insightface`, Boolean(deps.insightface)),
         pill(`onnxruntime`, Boolean(deps.onnxruntime)),
       ].join("");
@@ -628,7 +629,7 @@ async function reclusterPeopleFromSettings() {
   try {
     const data = await api("/api/people/recluster", { method: "POST" });
     showToast(
-      `聚类完成：自动归类 ${data.assigned || 0} 处，待确认 ${data.pending || 0} 处，新建分组 ${data.new_people || 0} 个。`,
+      `聚类完成：自动归类 ${data.auto_matched || 0} 处，待确认 ${data.pending_queued || 0} 处，新建分组 ${data.clusters_created || 0} 个。`,
       "success"
     );
     if (state.view === "people" && typeof loadPeopleGrid === "function") {
@@ -1004,7 +1005,7 @@ async function hideCurrentFolder() {
     return;
   }
   const ok = await confirmDialog(
-    `隐藏「${folder}」吗？\n隐藏后它不会出现在主页的路径选择里，只能从「设置 → 数据管理 → 查看隐藏的目录」进入。照片、评分与缓存都会保留。`,
+    `隐藏「${folder}」吗？\n隐藏后它不会出现在主页的路径选择里，只能从「设置 → 系统 → 查看隐藏的目录」进入。照片、评分与缓存都会保留。`,
     { title: "隐藏当前目录", confirmText: "隐藏" }
   );
   if (!ok) return;

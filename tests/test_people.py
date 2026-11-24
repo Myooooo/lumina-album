@@ -220,6 +220,89 @@ class PeopleAndPetsTest(unittest.TestCase):
             self.assertTrue((target / "det_500m.onnx").is_file())
             self.assertTrue((target / "w600k_mbf.onnx").is_file())
 
+    def test_live_periodic_clustering_during_scan_and_pet_download(self) -> None:
+        import time
+        from unittest import mock
+        from photo_reviewer import faces as faces_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "library.db"))
+            cfg = _DummyConfig(tmp)
+            folder = Path(tmp) / "album"
+            folder.mkdir(parents=True, exist_ok=True)
+            try:
+                for idx in range(6):
+                    img = folder / f"p_{idx}.jpg"
+                    img.write_bytes(b"fake-jpg")
+                    db.upsert_photo(
+                        {
+                            "path": str(img),
+                            "folder": str(folder),
+                            "filename": img.name,
+                            "status": "analyzed",
+                        }
+                    )
+
+                alice = [1.0, 0.0, 0.0, 0.0]
+                det = [
+                    faces_mod.DetectedEntity(
+                        entity_kind="person",
+                        bbox=(0.1, 0.1, 0.3, 0.3),
+                        det_score=0.95,
+                        embedding=alice,
+                    )
+                ]
+                coord = faces_mod.PeopleScanCoordinator()
+                with (
+                    mock.patch.object(faces_mod.ENGINE, "detect", return_value=det),
+                    mock.patch.object(faces_mod, "crop_entity_thumbnail", return_value=None),
+                ):
+                    coord.start(db, cfg, folder=str(folder))
+                    deadline = time.monotonic() + 5.0
+                    while coord.status()["status"] == "running" and time.monotonic() < deadline:
+                        time.sleep(0.02)
+                st = coord.status()
+                self.assertEqual(st["status"], "completed")
+                # Photo #5 triggers mid-scan cluster_version=1, final pass bumps to >=2.
+                self.assertGreaterEqual(st["cluster_version"], 2)
+                self.assertEqual(len(db.list_people(folder=str(folder))), 1)
+            finally:
+                try:
+                    db.close()
+                except ImportError:
+                    pass
+
+            # ModelDownloadCoordinator with include_pets=True invokes pet prepare with install_deps=True.
+            face_dir = Path(tmp) / "models" / "models" / "buffalo_l"
+            face_dir.mkdir(parents=True, exist_ok=True)
+            (face_dir / "w600k_r50.onnx").write_bytes(b"fake-face")
+
+            called: dict = {}
+
+            def _fake_pet(root, install_deps=True, on_progress=None, on_status=None, cancel_event=None):
+                called["install_deps"] = install_deps
+                if on_status:
+                    on_status("正在安装宠物识别依赖（ultralytics、onnx）…")
+                    on_status("正在下载宠物检测权重（yolov8n.pt）…")
+                if on_progress:
+                    on_progress(50, 100, 100.0)
+                if on_status:
+                    on_status("正在导出宠物检测模型（yolov8n.onnx）…")
+                (root / faces_mod.PET_DETECTOR_FILENAME).write_bytes(b"fake-pet-onnx")
+                return None
+
+            dl = faces_mod.ModelDownloadCoordinator()
+            with mock.patch.object(faces_mod, "_try_prepare_pet_model", side_effect=_fake_pet):
+                dl.start(cfg, model_name="buffalo_l", include_pets=True)
+                deadline = time.monotonic() + 5.0
+                while dl.status()["status"] == "running" and time.monotonic() < deadline:
+                    time.sleep(0.02)
+            dl_st = dl.status()
+            self.assertEqual(dl_st["status"], "completed")
+            self.assertTrue(called.get("install_deps"))
+            self.assertIn("pets", dl_st["downloaded"])
+            self.assertTrue(faces_mod.has_pet_model(cfg))
+
 
 if __name__ == "__main__":
     unittest.main()

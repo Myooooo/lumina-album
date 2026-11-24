@@ -16,12 +16,16 @@ rest of Lumina Album keeps running even when they are not installed yet.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import logging
 import math
 import os
 import platform
 import shutil
 import struct
+import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -68,9 +72,18 @@ INSIGHTFACE_MODEL_URLS = {
 
 #: Lightweight YOLOv8n ONNX (COCO 80 classes; 15=cat, 16=dog) for local pet detection.
 PET_DETECTOR_FILENAME = "yolov8n.onnx"
+PET_WEIGHTS_FILENAME = "yolov8n.pt"
 PET_DETECTOR_URL = (
     "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.onnx"
 )
+PET_WEIGHTS_URL = (
+    "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt"
+)
+
+#: Periodic live clustering cadence during a background face/pet scan.
+LIVE_CLUSTER_FIRST_PHOTO = 5
+LIVE_CLUSTER_BATCH_PHOTOS = 15
+LIVE_CLUSTER_INTERVAL_SEC = 4.0
 COCO_CAT_CLASS = 15
 COCO_DOG_CLASS = 16
 
@@ -378,6 +391,7 @@ def engine_status(cfg) -> dict[str, Any]:
     except ImportError:
         has_insightface_pkg = False
 
+    has_ultralytics_pkg = importlib.util.find_spec("ultralytics") is not None
     providers = select_ort_providers()
     ort_available = ort is not None
     numpy_available = np is not None
@@ -387,8 +401,11 @@ def engine_status(cfg) -> dict[str, Any]:
         "numpy": numpy_available,
         "insightface": has_insightface_pkg,
         "pillow": pillow_available,
+        "ultralytics": has_ultralytics_pkg,
     }
-    missing_packages = [k for k, ok in deps.items() if not ok]
+    missing_packages = [
+        k for k in ("onnxruntime", "numpy", "insightface", "pillow") if not deps[k]
+    ]
     models_installed = {
         "buffalo_l": has_insightface_model(cfg, "buffalo_l"),
         "buffalo_s": has_insightface_model(cfg, "buffalo_s"),
@@ -512,25 +529,106 @@ def _stream_download_file(
         raise
 
 
-def _try_prepare_pet_model(root: Path) -> str | None:
-    """Try to export yolov8n.onnx via ultralytics if installed; return warning if unavailable."""
+def _install_pet_dependencies(
+    cancel_event: threading.Event | None = None,
+    on_status=None,
+) -> str | None:
+    """Install ``ultralytics`` and ``onnx`` via pip when missing for pet detection."""
+    missing = [
+        pkg for pkg in ("ultralytics", "onnx") if importlib.util.find_spec(pkg) is None
+    ]
+    if not missing:
+        return None
+    if on_status:
+        on_status(f"正在安装宠物识别依赖（{'、'.join(missing)}）…")
+    cmd = [sys.executable, "-m", "pip", "install", "--quiet", *missing]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        while proc.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                raise InterruptedError("已取消下载")
+            time.sleep(0.2)
+        output = ""
+        if proc.stdout is not None:
+            output = (proc.stdout.read() or "").strip()
+        if proc.returncode != 0:
+            tail = output.splitlines()[-1] if output else f"退出码 {proc.returncode}"
+            return (
+                f"宠物识别依赖（{'、'.join(missing)}）自动安装失败：{tail}。"
+                "可手动执行 pip install ultralytics onnx 后重试，或直接放入 yolov8n.onnx。"
+            )
+        importlib.invalidate_caches()
+        return None
+    except InterruptedError:
+        raise
+    except Exception as exc:
+        return f"宠物识别依赖自动安装异常（不影响人脸识别）：{exc}"
+
+
+def _try_prepare_pet_model(
+    root: Path,
+    install_deps: bool = True,
+    on_progress=None,
+    on_status=None,
+    cancel_event: threading.Event | None = None,
+) -> str | None:
+    """Install pet deps if requested, download yolov8n.pt and export yolov8n.onnx."""
     dest = root / PET_DETECTOR_FILENAME
     if dest.is_file() and dest.stat().st_size > 0:
         return None
+    if install_deps:
+        dep_err = _install_pet_dependencies(
+            cancel_event=cancel_event, on_status=on_status
+        )
+        if dep_err:
+            return dep_err
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("已取消下载")
     try:
         from ultralytics import YOLO  # type: ignore
-
-        tmp_pt = root / "yolov8n.pt"
-        model = YOLO(str(tmp_pt) if tmp_pt.is_file() else "yolov8n.pt")
-        exported = model.export(format="onnx", imgsz=640, simplify=False)
-        if exported and os.path.isfile(str(exported)):
-            shutil.move(str(exported), str(dest))
-            return None
     except ImportError:
         return (
-            "宠物猫狗检测模型（yolov8n.onnx）为可选项：如需识别宠物，"
-            "请安装 ultralytics 或手动将 yolov8n.onnx 放入模型目录。"
+            "未检测到 ultralytics：请安装 ultralytics onnx，"
+            "或手动将 yolov8n.onnx 放入模型目录。"
         )
+
+    pt_path = root / PET_WEIGHTS_FILENAME
+    downloaded_pt = False
+    try:
+        if not (pt_path.is_file() and pt_path.stat().st_size > 0):
+            if on_status:
+                on_status("正在下载宠物检测权重（yolov8n.pt）…")
+            _stream_download_file(
+                PET_WEIGHTS_URL,
+                pt_path,
+                on_progress=on_progress,
+                cancel_event=cancel_event,
+            )
+            downloaded_pt = True
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("已取消下载")
+        if on_status:
+            on_status("正在导出宠物检测模型（yolov8n.onnx）…")
+        model = YOLO(str(pt_path))
+        exported = model.export(format="onnx", imgsz=640, simplify=False)
+        if exported and os.path.isfile(str(exported)):
+            if Path(str(exported)).resolve() != dest.resolve():
+                shutil.move(str(exported), str(dest))
+            if downloaded_pt and pt_path.exists():
+                pt_path.unlink(missing_ok=True)
+            return None
+    except InterruptedError:
+        raise
     except Exception as exc:
         return f"宠物检测模型自动准备未完成（不影响人脸识别）：{exc}"
     return "宠物检测模型尚未就绪，可手动放入 yolov8n.onnx。"
@@ -614,6 +712,8 @@ class ModelDownloadCoordinator:
             try:
                 root = models_root(cfg)
                 root.mkdir(parents=True, exist_ok=True)
+                need_pets = bool(include_pets and not has_pet_model(cfg))
+                face_max_pct = 62.0 if need_pets else 92.0
 
                 if not has_insightface_model(cfg, model_name):
                     zip_path = root / f"{model_name}.zip"
@@ -628,7 +728,7 @@ class ModelDownloadCoordinator:
                         job.total_bytes = total_b
                         job.speed_bps = speed
                         if total_b > 0:
-                            job.percent = min(92.0, (done_b / total_b) * 92.0)
+                            job.percent = min(face_max_pct, (done_b / total_b) * face_max_pct)
 
                     _stream_download_file(
                         url,
@@ -637,7 +737,7 @@ class ModelDownloadCoordinator:
                         cancel_event=job.cancel_event,
                     )
                     job.stage = "extracting"
-                    job.percent = 94.0
+                    job.percent = face_max_pct + 2.0
                     job.message = f"下载完成，正在解压 {model_name} 模型…"
                     try:
                         _extract_insightface_zip(zip_path, target_dir)
@@ -649,17 +749,51 @@ class ModelDownloadCoordinator:
                     job.downloaded.append(model_name)
                 else:
                     _normalize_insightface_layout(cfg, model_name)
-                    job.percent = 92.0
+                    job.percent = 12.0 if need_pets else 92.0
                     job.message = f"{model_name} 模型已存在于本地"
 
-                if include_pets and not has_pet_model(cfg):
+                if need_pets:
                     if job.cancel_event.is_set():
                         raise InterruptedError("已取消下载")
+                    pet_base = job.percent
                     job.stage = "pets"
-                    job.percent = 96.0
-                    job.current_item = PET_DETECTOR_FILENAME
-                    job.message = "正在检查宠物猫狗检测模型…"
-                    warn = _try_prepare_pet_model(root)
+                    job.current_item = "ultralytics / yolov8n.onnx"
+                    job.downloaded_bytes = 0
+                    job.total_bytes = 0
+                    job.speed_bps = 0.0
+
+                    def _on_pet_status(msg: str):
+                        job.message = msg
+                        if "安装宠物识别依赖" in msg:
+                            job.stage = "pets_deps"
+                            job.current_item = "pip install ultralytics onnx"
+                            job.percent = max(job.percent, min(72.0, pet_base + 12.0))
+                        elif "下载宠物检测权重" in msg:
+                            job.stage = "pets"
+                            job.current_item = PET_WEIGHTS_FILENAME
+                            job.percent = max(job.percent, 75.0)
+                        elif "导出宠物检测模型" in msg:
+                            job.stage = "pets_export"
+                            job.current_item = PET_DETECTOR_FILENAME
+                            job.downloaded_bytes = 0
+                            job.total_bytes = 0
+                            job.speed_bps = 0.0
+                            job.percent = max(job.percent, 94.0)
+
+                    def _on_pet_prog(done_b: int, total_b: int, speed: float):
+                        job.downloaded_bytes = done_b
+                        job.total_bytes = total_b
+                        job.speed_bps = speed
+                        if total_b > 0:
+                            job.percent = min(93.0, 75.0 + (done_b / total_b) * 18.0)
+
+                    warn = _try_prepare_pet_model(
+                        root,
+                        install_deps=True,
+                        on_progress=_on_pet_prog,
+                        on_status=_on_pet_status,
+                        cancel_event=job.cancel_event,
+                    )
                     if warn:
                         job.warnings.append(warn)
                     else:
@@ -1140,6 +1274,7 @@ class PeopleScanJob:
     done: int = 0
     faces_found: int = 0
     pets_found: int = 0
+    cluster_version: int = 0
     message: str = ""
     error: str = ""
     cancel_event: threading.Event = field(default_factory=threading.Event)
@@ -1151,6 +1286,7 @@ class PeopleScanJob:
             "done": self.done,
             "faces_found": self.faces_found,
             "pets_found": self.pets_found,
+            "cluster_version": self.cluster_version,
             "message": self.message,
             "error": self.error,
         }
@@ -1195,8 +1331,15 @@ class PeopleScanCoordinator:
                 )
                 job.total = len(photos)
                 thumbs_root = face_thumbs_dir(cfg)
+                last_cluster_at = time.monotonic()
+                photos_since_cluster = 0
+                entities_since_cluster = 0
+
                 for idx, photo in enumerate(photos, start=1):
                     if job.cancel_event.is_set():
+                        if entities_since_cluster > 0:
+                            match_and_cluster_library(database, cfg)
+                            job.cluster_version += 1
                         job.status = "cancelled"
                         job.message = "已取消人物识别"
                         return
@@ -1239,10 +1382,25 @@ class PeopleScanCoordinator:
                             database.update_face_thumb(fid, saved)
                     database.mark_photo_faces_scanned(photo["id"], model_name)
                     job.done = idx
+                    photos_since_cluster += 1
+                    entities_since_cluster += len(records)
                     job.message = f"已扫描 {idx} / {job.total} 张照片…"
+
+                    now = time.monotonic()
+                    if entities_since_cluster > 0 and (
+                        idx == LIVE_CLUSTER_FIRST_PHOTO
+                        or photos_since_cluster >= LIVE_CLUSTER_BATCH_PHOTOS
+                        or (now - last_cluster_at) >= LIVE_CLUSTER_INTERVAL_SEC
+                    ):
+                        match_and_cluster_library(database, cfg)
+                        job.cluster_version += 1
+                        photos_since_cluster = 0
+                        entities_since_cluster = 0
+                        last_cluster_at = time.monotonic()
 
                 job.message = "正在自动归类人物与宠物…"
                 summary = match_and_cluster_library(database, cfg)
+                job.cluster_version += 1
                 job.status = "completed"
                 job.message = (
                     f"识别完成：共扫描 {job.total} 张，"
