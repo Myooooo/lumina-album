@@ -1127,23 +1127,46 @@ function initDensity() {
 
 /* ==========================================================================
    Topbar Scroll Auto-Collapse (folds .folder-row on downward scroll)
+   Jitter-proof state machine:
+   - Accumulated directional travel (48px down to fold, 44px up to reveal)
+   - 340ms post-toggle cooldown so sticky-height reflow never triggers feedback
+   - Wide top hysteresis (always open <= 48px, only fold >= 180px)
+   - Minimum scrollable-height guard (never fold short pages)
+   - Bottom rubber-band bounce guard (ignore macOS elastic recoil at bottom)
    ========================================================================== */
 
 function initTopbarAutoCollapse() {
   const topbar = document.querySelector(".topbar");
   if (!topbar) return;
-  let lastY = window.scrollY || 0;
+  let lastY = Math.max(0, window.scrollY || window.pageYOffset || 0);
+  let accum = 0;
   let compact = false;
   let ticking = false;
+  let lockedUntil = 0;
+  let topbarHovered = false;
+
+  topbar.addEventListener("mouseenter", () => {
+    topbarHovered = true;
+  });
+  topbar.addEventListener("mouseleave", () => {
+    topbarHovered = false;
+  });
 
   const canCollapse = () => {
+    if (topbarHovered) return false;
     const history = $("folderHistory");
     if (history && !history.classList.contains("hidden")) return false;
+    const themeMenu = $("themeMenu");
+    if (themeMenu && !themeMenu.classList.contains("hidden")) return false;
     const progress = $("scanProgress");
     if (progress && !progress.classList.contains("hidden")) return false;
     const banner = $("cardBanner");
     if (banner && !banner.classList.contains("hidden")) return false;
-    if (document.activeElement && topbar.contains(document.activeElement) && document.activeElement.tagName === "INPUT") {
+    if (
+      document.activeElement &&
+      topbar.contains(document.activeElement) &&
+      document.activeElement.tagName === "INPUT"
+    ) {
       return false;
     }
     return true;
@@ -1152,6 +1175,8 @@ function initTopbarAutoCollapse() {
   const setCompact = (next) => {
     if (compact === next) return;
     compact = next;
+    accum = 0;
+    lockedUntil = performance.now() + 340;
     topbar.classList.toggle("is-compact", compact);
     if (typeof syncTopbarHeight === "function") {
       syncTopbarHeight();
@@ -1166,16 +1191,46 @@ function initTopbarAutoCollapse() {
       ticking = true;
       requestAnimationFrame(() => {
         ticking = false;
-        const y = window.scrollY || window.pageYOffset || 0;
+        const now = performance.now();
+        const y = Math.max(0, window.scrollY || window.pageYOffset || 0);
+        const docHeight = Math.max(
+          document.body ? document.body.scrollHeight : 0,
+          document.documentElement ? document.documentElement.scrollHeight : 0
+        );
+        const maxScroll = Math.max(0, docHeight - window.innerHeight);
+
+        // During the post-toggle transition lockout, absorb layout-induced scroll shifts.
+        if (now < lockedUntil) {
+          lastY = y;
+          accum = 0;
+          return;
+        }
+
         const delta = y - lastY;
         lastY = y;
-        if (y < 90 || !canCollapse()) {
+
+        // Always open near top, on short pages, or when topbar controls are active.
+        if (y <= 48 || maxScroll < 320 || !canCollapse()) {
           setCompact(false);
           return;
         }
-        if (delta > 14 && y > 160) {
+
+        // Ignore macOS rubber-band recoil near the bottom edge.
+        const nearBottom = maxScroll > 0 && y >= maxScroll - 64;
+        if (nearBottom && delta < 0) {
+          accum = 0;
+          return;
+        }
+
+        // Accumulate travel in the current direction; reset on direction reversal.
+        if ((delta > 0 && accum < 0) || (delta < 0 && accum > 0)) {
+          accum = 0;
+        }
+        accum += delta;
+
+        if (!compact && accum >= 48 && y >= 180) {
           setCompact(true);
-        } else if (delta < -10) {
+        } else if (compact && accum <= -44) {
           setCompact(false);
         }
       });
