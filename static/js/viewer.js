@@ -191,11 +191,21 @@ function openPreview(id, context = null) {
   const modal = $("previewModal");
   const content = modal ? modal.querySelector(".preview-content") : null;
   const sourceRect = !prefersReducedMotion() ? findVisiblePhotoCardRect(id) : null;
+  const useFlip = !!(sourceRect && modal && content && typeof requestAnimationFrame === "function");
 
   state.previewNavToken += 1;
   state.currentPreviewId = id;
   state.previewContext = context && context.ids && context.ids.length ? context : null;
-  if (modal) modal.classList.remove("is-flip-opening", "is-flip-closing");
+  if (modal) {
+    if (modal._flipOpenTimer) {
+      clearTimeout(modal._flipOpenTimer);
+      modal._flipOpenTimer = null;
+    }
+    modal.classList.remove("is-flip-opening", "is-flip-closing");
+    // Add BEFORE showModal() so .modal-content's modalPop never triggers.
+    // Keep .is-flip-opening until close so removing it never replays modalPop.
+    if (useFlip) modal.classList.add("is-flip-opening");
+  }
   if (content) {
     content.style.transition = "";
     content.style.transform = "";
@@ -205,10 +215,7 @@ function openPreview(id, context = null) {
   pushModal(modal);
   updatePreview();
 
-  // Single unified directional FLIP on .preview-content (never fights modalPop
-  // and always has deterministic geometry on frame 1 even before image decode).
-  if (sourceRect && modal && content && typeof requestAnimationFrame === "function") {
-    modal.classList.add("is-flip-opening");
+  if (useFlip) {
     const target = content.getBoundingClientRect();
     if (target.width > 0 && target.height > 0) {
       const rawDx = sourceRect.left + sourceRect.width / 2 - (target.left + target.width / 2);
@@ -224,12 +231,14 @@ function openPreview(id, context = null) {
         content.style.transform = "translate3d(0, 0, 0) scale(1)";
         content.style.opacity = "1";
       });
-      setTimeout(() => {
-        modal.classList.remove("is-flip-opening");
+      modal._flipOpenTimer = setTimeout(() => {
+        modal._flipOpenTimer = null;
         content.style.transition = "";
         content.style.transform = "";
         content.style.opacity = "";
       }, 280);
+    } else {
+      modal.classList.remove("is-flip-opening");
     }
   }
 }
@@ -708,9 +717,13 @@ function closeModal(id, onHidden) {
   const modal = $(id);
   const closingPreviewId = id === "previewModal" ? state.currentPreviewId : null;
   let previewContent = null;
-  if (id === "previewModal" && modal && !modal.classList.contains("hidden") && !prefersReducedMotion()) {
+  if (id === "previewModal" && modal && !modal.classList.contains("hidden")) {
+    if (modal._flipOpenTimer) {
+      clearTimeout(modal._flipOpenTimer);
+      modal._flipOpenTimer = null;
+    }
     previewContent = modal.querySelector(".preview-content");
-    const targetCard = findVisiblePhotoCardRect(closingPreviewId);
+    const targetCard = !prefersReducedMotion() ? findVisiblePhotoCardRect(closingPreviewId) : null;
     if (previewContent && targetCard) {
       const rect = previewContent.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
@@ -723,7 +736,11 @@ function closeModal(id, onHidden) {
         previewContent.style.transition = "transform 170ms var(--ease-out), opacity 150ms var(--ease-out)";
         previewContent.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0) scale(0.92)`;
         previewContent.style.opacity = "0";
+      } else {
+        modal.classList.remove("is-flip-opening");
       }
+    } else {
+      modal.classList.remove("is-flip-opening");
     }
   }
   hideModal(modal, () => {
