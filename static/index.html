@@ -248,10 +248,6 @@
 
   </div>
 
-  <!-- The multi-select shelf. Deliberately outside #albumView: that element
-       keeps a transform after its entrance animation, which would make it the
-       containing block for this fixed bar and push it off the bottom of the
-       screen. A shelf over the whole app belongs at the top level. -->
 
 
   <!-- The multi-select shelf. Deliberately outside #albumView: that element
@@ -980,11 +976,17 @@
     <button id="fsPrevBtn" class="fs-nav-btn prev hidden" type="button" title="上一张 (←)" aria-label="上一张"><span class="btn-icon" data-icon="chevronLeft"></span></button>
     <button id="fsNextBtn" class="fs-nav-btn next hidden" type="button" title="下一张 (→)" aria-label="下一张"><span class="btn-icon" data-icon="chevronRight"></span></button>
     <button id="fsCloseBtn" class="fs-viewer-close" title="退出全屏 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
-    <div class="fs-viewer-toolbar">
-      <button id="fsZoomOutBtn" title="缩小 (滚轮下滚)"><span class="btn-icon" data-icon="zoomOut"></span></button>
-      <span id="fsZoomPct" class="fs-zoom-pct">100%</span>
-      <button id="fsZoomInBtn" title="放大 (滚轮上滚)"><span class="btn-icon" data-icon="zoomIn"></span></button>
-      <button id="fsResetBtn" title="重置缩放"><span class="btn-icon" data-icon="reset"></span>还原</button>
+    <div class="fs-viewer-toolbar" id="fsToolbar">
+      <div class="fs-zoom-group" id="fsZoomGroup">
+        <button id="fsZoomOutBtn" type="button" title="缩小 (- / 滚轮下滚)"><span class="btn-icon" data-icon="zoomOut"></span></button>
+        <span id="fsZoomPct" class="fs-zoom-pct">100%</span>
+        <button id="fsZoomInBtn" type="button" title="放大 (+ / 滚轮上滚)"><span class="btn-icon" data-icon="zoomIn"></span></button>
+        <button id="fsResetBtn" type="button" title="重置缩放 (0)"><span class="btn-icon" data-icon="reset"></span><span>还原</span></button>
+      </div>
+      <span class="fs-toolbar-divider" id="fsToolbarDivider" aria-hidden="true"></span>
+      <button id="fsFavoriteBtn" class="fs-action-btn" type="button" title="珍藏 (F)"><span class="btn-icon" data-icon="heart"></span><span>珍藏</span></button>
+      <button id="fsDeleteBtn" class="fs-action-btn is-danger" type="button" title="暂时收起 (D)"><span class="btn-icon" data-icon="trash"></span><span>收起</span></button>
+      <button id="fsRestoreBtn" class="fs-action-btn hidden" type="button" title="恢复"><span class="btn-icon" data-icon="restore"></span><span>恢复</span></button>
     </div>
     <div id="fsImageContainer" class="fs-image-container">
       <img id="fsImage" alt="全屏照片" />

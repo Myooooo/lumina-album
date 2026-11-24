@@ -167,6 +167,20 @@ function init() {
   if (fsZoomOutBtn) fsZoomOutBtn.addEventListener("click", () => zoomFullscreen(0.8, undefined, undefined, true));
   const fsResetBtn = $("fsResetBtn");
   if (fsResetBtn) fsResetBtn.addEventListener("click", () => resetFullscreenZoom(true));
+  const fsFavoriteBtn = $("fsFavoriteBtn");
+  if (fsFavoriteBtn) fsFavoriteBtn.addEventListener("click", toggleCurrentPreviewFavorite);
+  const fsDeleteBtn = $("fsDeleteBtn");
+  if (fsDeleteBtn) {
+    fsDeleteBtn.addEventListener("click", () => {
+      if (state.currentPreviewId) deletePhotos([state.currentPreviewId]);
+    });
+  }
+  const fsRestoreBtn = $("fsRestoreBtn");
+  if (fsRestoreBtn) {
+    fsRestoreBtn.addEventListener("click", () => {
+      if (state.currentPreviewId) restorePhotos([state.currentPreviewId]);
+    });
+  }
 
   const fsContainer = $("fsImageContainer");
   if (fsContainer) {

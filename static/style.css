@@ -6926,41 +6926,7 @@ body[data-theme="vintage"] .classic-icon {
   display: none;
 }
 
-/* Darkroom Topbar, Tabs & Controls */
-body[data-theme="vintage"] .topbar,
-body[data-theme="vintage"] .album-sticky-bar {
-  background: rgba(22, 17, 14, 0.9);
-  border-bottom-color: var(--border);
-}
-
-body[data-theme="vintage"] .brand h1 {
-  color: #f4eadc;
-  letter-spacing: 0.06em;
-}
-
-body[data-theme="vintage"] .brand h1 .sub {
-  color: #d89347;
-  font-family: var(--font-mono);
-  letter-spacing: 0.14em;
-}
-
-body[data-theme="vintage"] .view-switcher,
-body[data-theme="vintage"] .settings-tabs {
-  background: rgba(255, 240, 220, 0.06);
-  border-color: var(--border);
-}
-
-body[data-theme="vintage"] .view-ink,
-body[data-theme="vintage"] .settings-tab-ink {
-  background: #2b221b;
-  border: 1px solid rgba(217, 130, 59, 0.35);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
-}
-
-body[data-theme="vintage"] .view-tab.is-active,
-body[data-theme="vintage"] .settings-tab.active {
-  color: #f3b06b;
-}
+/* Darkroom Topbar, Tabs & Controls (unified overrides live in theme block below) */
 
 
 
@@ -7017,20 +6983,7 @@ body[data-theme="vintage"] .polaroid-card:hover .polaroid-inner {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(217, 130, 59, 0.2);
 }
 
-/* Top 35mm sprocket holes + amber film stock edge markings */
-body[data-theme="vintage"] .vintage-film-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin: 0 -11px 9px;
-  padding: 20px 12px 5px;
-  background-color: #120e0b;
-  border-bottom: 1px solid rgba(217, 130, 59, 0.16);
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='22' height='14'><rect x='5' y='4' width='12' height='8' rx='2' fill='%232e241c' stroke='%2347382c' stroke-width='0.7'/></svg>");
-  background-repeat: repeat-x;
-  background-position: 4px 2px;
-  background-size: 22px 14px;
-}
+
 
 body[data-theme="vintage"] .vintage-film-stock,
 body[data-theme="vintage"] .vintage-film-frame {
@@ -10433,6 +10386,401 @@ body[data-theme="vintage"] .fs-nav-btn:hover {
   .brand h1 .sub {
     display: none;
   }
+}
+
+/* ==========================================================================
+   Fullscreen Theme-Matched Action Dock & Vintage Darkroom Modal Cohesion
+   ========================================================================== */
+
+.fs-zoom-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fs-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.fs-viewer-toolbar .fs-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.fs-viewer-toolbar .fs-action-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.fs-viewer-toolbar #fsFavoriteBtn.active {
+  background: rgba(217, 83, 79, 0.26);
+  color: #ff918c;
+}
+
+.fs-viewer-toolbar #fsFavoriteBtn.active svg {
+  color: #ff6e68;
+  fill: #ff6e68;
+}
+
+.fs-viewer-toolbar .fs-action-btn.is-danger:hover {
+  background: rgba(217, 83, 79, 0.85);
+  color: #ffffff;
+}
+
+/* 1. Classic: Apple Frosted Dark Liquid Glass Dock */
+body[data-theme="classic"] .fs-viewer-toolbar {
+  background: rgba(28, 25, 22, 0.72);
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* 2. Paper · Stationery: Warm Walnut & Kraft Letterpress Dock */
+body[data-theme="paper"] .fs-viewer-toolbar {
+  background: rgba(44, 36, 28, 0.94);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px dashed rgba(213, 202, 181, 0.45);
+  border-radius: 4px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.48), 3px 3px 0 rgba(199, 125, 88, 0.38);
+  font-family: var(--font-mono), "PingFang SC", monospace;
+}
+
+body[data-theme="paper"] .fs-viewer-toolbar button {
+  border-radius: 3px;
+  color: #f5efe2;
+}
+
+body[data-theme="paper"] .fs-viewer-toolbar button:hover {
+  background: rgba(245, 239, 226, 0.16);
+}
+
+body[data-theme="paper"] .fs-viewer-toolbar #fsFavoriteBtn.active {
+  background: rgba(184, 74, 57, 0.34);
+  color: #ffc2b8;
+}
+
+body[data-theme="paper"] .fs-viewer-toolbar .fs-action-btn.is-danger:hover {
+  background: #b84a39;
+  color: #fffdf8;
+}
+
+body[data-theme="paper"] .fs-nav-btn,
+body[data-theme="paper"] .fs-viewer-close {
+  border-radius: 4px;
+  background: rgba(44, 36, 28, 0.9);
+  border: 1px solid rgba(213, 202, 181, 0.36);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 3. Vintage Analog: Darkroom Obsidian & Amber Instrument Dock */
+body[data-theme="vintage"] .fs-viewer-toolbar {
+  background: rgba(18, 17, 16, 0.95);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(235, 146, 52, 0.42);
+  border-radius: 2px;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.72), 0 0 18px rgba(235, 146, 52, 0.12);
+  font-family: var(--font-mono), "PingFang SC", monospace;
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar button {
+  border-radius: 2px;
+  color: #e9e2d6;
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar button:hover {
+  background: rgba(235, 146, 52, 0.2);
+  color: #f4b165;
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar .fs-zoom-pct {
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .fs-toolbar-divider {
+  background: rgba(235, 146, 52, 0.28);
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar #fsFavoriteBtn.active {
+  background: rgba(255, 106, 43, 0.22);
+  color: #ff8c59;
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar #fsFavoriteBtn.active svg {
+  color: #ff6a2b;
+  fill: #ff6a2b;
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar .fs-action-btn.is-danger:hover {
+  background: #e2634c;
+  color: #141210;
+}
+
+body[data-theme="vintage"] .fs-viewer-close {
+  border-radius: 2px;
+  background: rgba(18, 17, 16, 0.92);
+  border-color: rgba(235, 146, 52, 0.36);
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .fs-viewer-close:hover {
+  background: #e2634c;
+  border-color: #e2634c;
+  color: #141210;
+}
+
+/* --- Vintage Darkroom Modals, Settings & Edit Memory Complete Cohesion --- */
+body[data-theme="vintage"] .modal-content {
+  background: #171513;
+  border: 1px solid #35302a;
+  box-shadow: 0 28px 72px rgba(0, 0, 0, 0.78), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+body[data-theme="vintage"] .modal-content::before {
+  left: 20px;
+  right: 20px;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, #eb9234, transparent);
+  opacity: 0.7;
+}
+
+body[data-theme="vintage"] .modal-content h2 {
+  color: #f4eee4;
+  border-bottom: 1px solid #2b2723;
+  font-family: var(--font-mono), var(--font-serif);
+  letter-spacing: 0.04em;
+}
+
+body[data-theme="vintage"] .modal-content h2 svg {
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .modal-actions,
+body[data-theme="vintage"] .modal-content > .dir-actions {
+  border-top: 1px dashed rgba(255, 255, 255, 0.14);
+}
+
+/* Prevent bright #ffffff flashes on focus/hover across ALL Vintage inputs */
+body[data-theme="vintage"] .folder-row input:focus,
+body[data-theme="vintage"] .filter-group select:focus,
+body[data-theme="vintage"] .filter-group input:focus,
+body[data-theme="vintage"] .search-capsule:focus-within,
+body[data-theme="vintage"] .custom-select-trigger:hover,
+body[data-theme="vintage"] .custom-select-trigger.open,
+body[data-theme="vintage"] .form-grid input:focus,
+body[data-theme="vintage"] .form-grid textarea:focus,
+body[data-theme="vintage"] .form-grid select:focus,
+body[data-theme="vintage"] .dir-row input:focus,
+body[data-theme="vintage"] .prompt-save-row input[type="text"]:focus {
+  background: #121110;
+  border-color: #eb9234;
+  color: #f4eee4;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.24);
+}
+
+body[data-theme="vintage"] .filter-group.active-filter .custom-select-trigger,
+body[data-theme="vintage"] .filter-group.active-filter input {
+  background: #1d1a17;
+  border-color: #eb9234;
+  box-shadow: 0 0 0 2px rgba(235, 146, 52, 0.22);
+}
+
+/* Settings Modal Darkroom Surfaces */
+body[data-theme="vintage"] .settings-hint {
+  background: #121110;
+  border: 1px solid #2b2723;
+  border-left: 2px solid #eb9234;
+  border-radius: 2px;
+  color: #b5aa9a;
+}
+
+body[data-theme="vintage"] .settings-subtitle {
+  color: #f4eee4;
+}
+
+body[data-theme="vintage"] .settings-subtitle::before {
+  background: #eb9234;
+  border-radius: 1px;
+}
+
+body[data-theme="vintage"] .settings-status {
+  background: #121110;
+  border: 1px dashed #35302a;
+  border-radius: 2px;
+  color: #b5aa9a;
+}
+
+body[data-theme="vintage"] .settings-danger-row {
+  background: #1c1a17;
+  border-color: #2b2723;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .settings-danger-row:hover {
+  border-color: rgba(235, 146, 52, 0.42);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+body[data-theme="vintage"] .settings-danger-text strong {
+  color: #f4eee4;
+}
+
+body[data-theme="vintage"] .prompt-editor {
+  background: #141210;
+  border-color: #2b2723;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .prompt-editor-head label {
+  color: #e9e2d6;
+}
+
+body[data-theme="vintage"] .prompt-save-row {
+  border-top-color: #2b2723;
+}
+
+body[data-theme="vintage"] .preset-btn.active,
+body[data-theme="vintage"] .custom-prompt-trigger.active {
+  background: rgba(235, 146, 52, 0.2);
+  border-color: #eb9234;
+  color: #f4b165;
+  box-shadow: 0 0 0 2px rgba(235, 146, 52, 0.22);
+}
+
+/* Edit Memory & Settings Sliders (Replace Cream #ebe0d2 Rail & White Knob) */
+body[data-theme="vintage"] .form-grid input.score-range {
+  background: linear-gradient(
+    to right,
+    var(--score-color) 0%,
+    var(--score-color) var(--score-pct, 0%),
+    #2c2824 var(--score-pct, 0%),
+    #2c2824 100%
+  );
+  border: none;
+}
+
+body[data-theme="vintage"] .form-grid input.score-range:focus {
+  background: linear-gradient(
+    to right,
+    var(--score-color) 0%,
+    var(--score-color) var(--score-pct, 0%),
+    #2c2824 var(--score-pct, 0%),
+    #2c2824 100%
+  );
+}
+
+body[data-theme="vintage"] .form-grid input.volume-range {
+  background: linear-gradient(
+    to right,
+    var(--volume-color) 0%,
+    var(--volume-color) var(--volume-pct, 0%),
+    #2c2824 var(--volume-pct, 0%),
+    #2c2824 100%
+  );
+  border: none;
+}
+
+body[data-theme="vintage"] .score-range::-webkit-slider-thumb {
+  background: #141210;
+  border: 2.5px solid var(--score-color);
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+body[data-theme="vintage"] .score-range::-moz-range-thumb {
+  background: #141210;
+  border: 2.5px solid var(--score-color);
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+body[data-theme="vintage"] .volume-range::-webkit-slider-thumb {
+  background: #141210;
+  border: 2.5px solid var(--volume-color);
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+body[data-theme="vintage"] .volume-range::-moz-range-thumb {
+  background: #141210;
+  border: 2.5px solid var(--volume-color);
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+body[data-theme="vintage"] .form-grid input.score-number,
+body[data-theme="vintage"] .form-grid input.volume-number {
+  background: #121110;
+  border-color: #2b2723;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .form-grid input.score-number:hover,
+body[data-theme="vintage"] .form-grid input.volume-number:hover {
+  background: #1a1816;
+  border-color: #eb9234;
+}
+
+body[data-theme="vintage"] .form-grid .score-editor {
+  --score-color: #eb9234;
+  --score-glow: rgba(235, 146, 52, 0.28);
+}
+
+/* Shortcuts, Confirm, Dir & Export Modals in Vintage */
+body[data-theme="vintage"] .shortcuts-group h3 {
+  color: #eb9234;
+  border-bottom-color: #2b2723;
+}
+
+body[data-theme="vintage"] .shortcut-row {
+  color: #c8bfb0;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+body[data-theme="vintage"] .shortcut-row kbd,
+body[data-theme="vintage"] .compare-footer kbd {
+  background: #121110;
+  border-color: #38322c;
+  color: #eb9234;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .dir-list li,
+body[data-theme="vintage"] .hidden-folder-open {
+  color: #e9e2d6;
+}
+
+body[data-theme="vintage"] .dir-list li:hover,
+body[data-theme="vintage"] .dir-list li.active,
+body[data-theme="vintage"] .hidden-folder-open:hover,
+body[data-theme="vintage"] .hidden-folder-open:focus-visible {
+  background: rgba(235, 146, 52, 0.16);
+  color: #f4b165;
+}
+
+body[data-theme="vintage"] .export-choice:hover {
+  background: #1f1c19;
+  border-color: #eb9234;
+}
+
+body[data-theme="vintage"] .export-choice-icon {
+  background: rgba(235, 146, 52, 0.14);
+  color: #eb9234;
+  border-radius: 2px;
+}
+
+body[data-theme="vintage"] .confirm-check:hover {
+  background: rgba(235, 146, 52, 0.12);
+  border-color: #eb9234;
 }
 
 

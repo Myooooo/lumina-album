@@ -13,11 +13,31 @@ function applyFsTransform(smooth = false) {
   if (pctEl) pctEl.textContent = `${Math.round(scale * 100)}%`;
 }
 
+function paintFullscreenActions(photo) {
+  if (!photo) return;
+  const favBtn = $("fsFavoriteBtn");
+  if (favBtn) {
+    favBtn.classList.toggle("active", !!photo.favorite);
+    favBtn.innerHTML = `<span class="btn-icon">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</span><span>${photo.favorite ? "已珍藏" : "珍藏"}</span>`;
+    favBtn.title = photo.favorite ? "取消珍藏 (F)" : "珍藏 (F)";
+  }
+  const isDeleted = photo.status === "deleted";
+  const delBtn = $("fsDeleteBtn");
+  const restoreBtn = $("fsRestoreBtn");
+  if (delBtn) delBtn.classList.toggle("hidden", isDeleted);
+  if (restoreBtn) restoreBtn.classList.toggle("hidden", !isDeleted);
+  const prevBtn = $("fsPrevBtn");
+  const nextBtn = $("fsNextBtn");
+  if (prevBtn) prevBtn.classList.toggle("hidden", !previewHasNeighbour(-1));
+  if (nextBtn) nextBtn.classList.toggle("hidden", !previewHasNeighbour(1));
+}
+
 function renderFullscreenMedia(photo) {
   const fsModal = $("fullscreenModal");
   const fsImg = $("fsImage");
   const fsVideo = $("fsVideo");
-  const toolbar = fsModal ? fsModal.querySelector(".fs-viewer-toolbar") : null;
+  const zoomGroup = $("fsZoomGroup");
+  const divider = $("fsToolbarDivider");
   if (!fsModal || !fsImg || !photo) return;
 
   fsModal.dataset.photoId = String(photo.id);
@@ -25,11 +45,7 @@ function renderFullscreenMedia(photo) {
   state.fullscreen.panX = 0;
   state.fullscreen.panY = 0;
   state.fullscreen.isDragging = false;
-
-  const prevBtn = $("fsPrevBtn");
-  const nextBtn = $("fsNextBtn");
-  if (prevBtn) prevBtn.classList.toggle("hidden", !previewHasNeighbour(-1));
-  if (nextBtn) nextBtn.classList.toggle("hidden", !previewHasNeighbour(1));
+  paintFullscreenActions(photo);
 
   const isVideo = photo.media_kind === "video";
   if (fsVideo) {
@@ -40,7 +56,8 @@ function renderFullscreenMedia(photo) {
       fsVideo.muted = false;
       fsVideo.src = `/api/video/${photo.id}/stream`;
       fsVideo.load();
-      if (toolbar) toolbar.classList.add("hidden");
+      if (zoomGroup) zoomGroup.classList.add("hidden");
+      if (divider) divider.classList.add("hidden");
       attachFullscreenVideoFallback(fsVideo, photo);
       return;
     }
@@ -50,7 +67,8 @@ function renderFullscreenMedia(photo) {
     fsVideo.classList.add("hidden");
     fsVideo.onerror = null;
   }
-  if (toolbar) toolbar.classList.remove("hidden");
+  if (zoomGroup) zoomGroup.classList.remove("hidden");
+  if (divider) divider.classList.remove("hidden");
   fsImg.classList.remove("hidden");
   fsImg.src = `/api/original/${photo.id}`;
   applyFsTransform(false);
@@ -1028,10 +1046,7 @@ function updatePreview(options = {}) {
     if (fsModal.dataset.photoId !== String(id)) {
       renderFullscreenMedia(photo);
     } else {
-      const prevBtn = $("fsPrevBtn");
-      const nextBtn = $("fsNextBtn");
-      if (prevBtn) prevBtn.classList.toggle("hidden", !previewHasNeighbour(-1));
-      if (nextBtn) nextBtn.classList.toggle("hidden", !previewHasNeighbour(1));
+      paintFullscreenActions(photo);
     }
   }
 }
