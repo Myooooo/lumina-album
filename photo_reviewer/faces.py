@@ -1166,7 +1166,7 @@ def match_and_cluster_library(database, cfg) -> dict[str, int]:
        discover new unnamed people/pets cleanly without touching manual labels.
     """
     model_name = getattr(cfg, "face_model", "buffalo_l")
-    threshold = float(getattr(cfg, "face_match_threshold", 0.50))
+    threshold = float(getattr(cfg, "face_match_threshold", 0.40))
     pending_cutoff = min(0.75, threshold + 0.14)
     min_cluster = max(2, int(getattr(cfg, "face_min_cluster_size", 2)))
 

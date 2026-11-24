@@ -346,7 +346,7 @@ class Config:
         default_factory=lambda: _env_bool("PHOTO_FACE_DETECT_PETS", True)
     )
     face_match_threshold: float = field(
-        default_factory=lambda: float(os.getenv("PHOTO_FACE_MATCH_THRESHOLD", "0.50"))
+        default_factory=lambda: float(os.getenv("PHOTO_FACE_MATCH_THRESHOLD", "0.40"))
     )
     face_min_cluster_size: int = field(
         default_factory=lambda: int(os.getenv("PHOTO_FACE_MIN_CLUSTER_SIZE", "2"))

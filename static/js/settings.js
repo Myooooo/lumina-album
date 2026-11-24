@@ -687,7 +687,7 @@ async function openSettings() {
     if ($("setFaceAutoScan")) $("setFaceAutoScan").checked = !!cfg.face_auto_scan;
     if ($("setFaceDetectPets")) $("setFaceDetectPets").checked = cfg.face_detect_pets !== false;
     if ($("setFaceModel")) setSelectValue($("setFaceModel"), cfg.face_model || "buffalo_l");
-    if ($("setFaceMatchThreshold")) $("setFaceMatchThreshold").value = cfg.face_match_threshold ?? 0.5;
+    if ($("setFaceMatchThreshold")) $("setFaceMatchThreshold").value = cfg.face_match_threshold ?? 0.4;
     if ($("setFaceMinCluster")) $("setFaceMinCluster").value = cfg.face_min_cluster_size ?? 2;
     if ($("setFaceModelsDir")) $("setFaceModelsDir").value = cfg.face_models_dir || "";
     state.videoClipSeconds = Number(cfg.video_clip_seconds) || 3;
@@ -744,7 +744,7 @@ async function saveSettings() {
     face_auto_scan: $("setFaceAutoScan") ? $("setFaceAutoScan").checked : false,
     face_detect_pets: $("setFaceDetectPets") ? $("setFaceDetectPets").checked : true,
     face_model: $("setFaceModel") ? $("setFaceModel").value : "buffalo_l",
-    face_match_threshold: parseFloat($("setFaceMatchThreshold") ? $("setFaceMatchThreshold").value : "0.5") || 0.5,
+    face_match_threshold: parseFloat($("setFaceMatchThreshold") ? $("setFaceMatchThreshold").value : "0.4") || 0.4,
     face_min_cluster_size: parseInt($("setFaceMinCluster") ? $("setFaceMinCluster").value : "2", 10) || 2,
     face_models_dir: $("setFaceModelsDir") ? $("setFaceModelsDir").value.trim() : "",
   };

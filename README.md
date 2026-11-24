@@ -182,7 +182,7 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_FACE_AUTO_SCAN` | `false` | 同步/整理相册后是否自动后台增量扫描人物 |
 | `PHOTO_FACE_MODEL` | `buffalo_l` | 人脸模型：`buffalo_l`（高精度）或 `buffalo_s`（轻量） |
 | `PHOTO_FACE_DETECT_PETS` | `true` | 是否同时识别宠物猫狗 |
-| `PHOTO_FACE_MATCH_THRESHOLD` | `0.50` | 自动归类余弦距离阈值（0.25–0.75，越小越严格） |
+| `PHOTO_FACE_MATCH_THRESHOLD` | `0.40` | 自动归类余弦距离阈值（0.25–0.75，越小越严格） |
 | `PHOTO_FACE_MIN_CLUSTER` | `2` | 未命名人物聚类的最少照片数 |
 | `PHOTO_FACE_MODELS_DIR` | 空 | 本地模型存放目录（默认 `data/models`） |
 | `PHOTO_OPEN_BROWSER` | `1` | 启动时自动打开浏览器 |
