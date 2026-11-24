@@ -12518,3 +12518,138 @@ body[data-theme="vintage"] .prompt-editor textarea:focus {
   color: #f4eee4;
   box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.24);
 }
+
+/* ==========================================================================
+   Button Theme Consistency (.btn.active, .footprints-back, .dup-group-keep)
+   & Settings Tab/Section Pixel Alignment
+   ========================================================================== */
+
+/* 1. Toggleable .btn.active state across all 3 themes (e.g. 已隐藏 / 合并 / 置顶) */
+.btn.active:not(.primary):not(.danger) {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: 600;
+  box-shadow: 0 0 0 2px var(--primary-glow);
+}
+
+.btn.active:not(.primary):not(.danger):hover {
+  background: var(--primary-light);
+  border-color: var(--primary-dark);
+  color: var(--primary-dark);
+}
+
+body[data-theme="classic"] .btn.active:not(.primary):not(.danger):not(#previewFavoriteBtn) {
+  background: rgba(174, 118, 78, 0.14);
+  border-color: rgba(174, 118, 78, 0.55);
+  color: var(--primary-dark);
+  box-shadow: 0 0 0 2px rgba(174, 118, 78, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+body[data-theme="classic"] .btn.active:not(.primary):not(.danger):not(#previewFavoriteBtn):hover {
+  background: rgba(174, 118, 78, 0.2);
+  border-color: var(--primary);
+}
+
+body[data-theme="paper"] .btn.active:not(.primary):not(.danger):not(#previewFavoriteBtn) {
+  background: #362e26;
+  border-color: #362e26;
+  border-radius: 3px;
+  color: #fbf7ee;
+  box-shadow: 2.5px 2.5px 0 rgba(199, 125, 88, 0.5);
+}
+
+body[data-theme="paper"] .btn.active:not(.primary):not(.danger):not(#previewFavoriteBtn):hover {
+  background: #28211b;
+  border-color: #28211b;
+  color: #fffdf8;
+}
+
+body[data-theme="vintage"] .btn.active:not(.primary):not(.danger):not(#previewFavoriteBtn) {
+  background: rgba(235, 146, 52, 0.2);
+  border-color: #eb9234;
+  border-radius: 2px;
+  color: #f4b165;
+  box-shadow: 0 0 0 2px rgba(235, 146, 52, 0.22);
+}
+
+body[data-theme="vintage"] .btn.active:not(.primary):not(.danger):not(#previewFavoriteBtn):hover {
+  background: rgba(235, 146, 52, 0.28);
+  border-color: #f4b165;
+  color: #fff2df;
+}
+
+/* 2. Back pills (足迹「所有地方」 / 人物「所有人物与宠物」) & Duplicates 「只留一张」 */
+body[data-theme="classic"] .footprints-back,
+body[data-theme="classic"] .dup-group-keep {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(125, 95, 65, 0.16);
+  color: var(--text-secondary);
+  box-shadow: 0 1px 2px rgba(38, 31, 25, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+body[data-theme="classic"] .footprints-back:hover,
+body[data-theme="classic"] .dup-group-keep:hover {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(174, 118, 78, 0.45);
+  color: var(--primary-dark);
+  box-shadow: 0 4px 12px rgba(38, 31, 25, 0.08);
+}
+
+body[data-theme="paper"] .footprints-back,
+body[data-theme="paper"] .dup-group-keep {
+  background: #fffdf8;
+  border: 1px solid #d5cab5;
+  border-radius: 3px;
+  color: #5d5144;
+  font-family: var(--font-mono), "PingFang SC", "Noto Sans SC", monospace;
+  font-size: 12px;
+  box-shadow: 2px 2px 0 rgba(70, 55, 35, 0.08);
+}
+
+body[data-theme="paper"] .footprints-back:hover,
+body[data-theme="paper"] .dup-group-keep:hover {
+  background: #ffffff;
+  border-color: #bfb39c;
+  color: #2c241d;
+  box-shadow: 3px 3px 0 rgba(70, 55, 35, 0.14);
+}
+
+body[data-theme="vintage"] .footprints-back,
+body[data-theme="vintage"] .dup-group-keep {
+  background: #1a1816;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+  color: #c8bfb0;
+  font-family: var(--font-mono), "PingFang SC", monospace;
+  font-size: 12px;
+}
+
+body[data-theme="vintage"] .footprints-back:hover,
+body[data-theme="vintage"] .dup-group-keep:hover {
+  background: #221f1c;
+  border-color: #eb9234;
+  color: #f4b165;
+}
+
+/* 3. Settings Modal: Pixel-align .settings-tabs with .settings-section cards */
+.settings-content {
+  max-width: 760px;
+}
+
+.settings-tabs {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.modal-content.settings-content > .settings-panes {
+  margin-right: -14px;
+  padding-right: 14px;
+  scrollbar-gutter: stable;
+}
+
+.settings-pane,
+.settings-section {
+  width: 100%;
+  box-sizing: border-box;
+}

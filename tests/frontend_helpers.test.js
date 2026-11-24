@@ -1869,11 +1869,14 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "modal scroll lock and standalone prompt textarea styles are wired",
+    "modal scroll lock, standalone prompt textarea, button themes, and settings alignment are wired",
     /html\.modal-open,\s*body\.modal-open/.test(css) &&
       /overscroll-behavior:\s*contain/.test(css) &&
       /function syncModalScrollLock\(/.test(src) &&
-      /\.prompt-editor textarea \{[\s\S]{0,240}border:/.test(css),
+      /\.prompt-editor textarea \{[\s\S]{0,240}border:/.test(css) &&
+      /body\[data-theme="vintage"\] \.btn\.active:not\(\.primary\):not\(\.danger\)/.test(css) &&
+      /body\[data-theme="vintage"\] \.footprints-back/.test(css) &&
+      /\.modal-content\.settings-content > \.settings-panes/.test(css),
     true
   );
   check(
