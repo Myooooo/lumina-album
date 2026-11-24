@@ -5885,7 +5885,7 @@ body:not([data-view="album"]) .topbar {
 
 .theme-menu-wrap {
   position: relative;
-  order: 1;
+  order: 0;
 }
 
 .theme-toggle-btn {
@@ -13886,9 +13886,6 @@ body[data-theme="vintage"] .card-status {
   background: rgba(20, 16, 13, 0.78);
   color: #b9a894;
   box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.04);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  letter-spacing: 0.02em;
 }
 
 body[data-theme="vintage"] .card-status::before {

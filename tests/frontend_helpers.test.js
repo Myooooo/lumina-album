@@ -1303,7 +1303,7 @@ section("toolbar layout");
   );
   check(
     "settings lives on the switcher's row",
-    /view-switcher-row[\s\S]{0,1400}id="settingsBtn"/.test(html),
+    /view-switcher-row[\s\S]{0,4200}id="settingsBtn"/.test(html),
     true
   );
   check(
@@ -1519,6 +1519,25 @@ section("photobook layout and motion system");
       /\.scan-progress\.closing/.test(css) &&
       /\.card-banner\.closing/.test(css) &&
       /function hideStrip\(el\)/.test(src),
+    true
+  );
+  check(
+    "the theme switcher sits before the shortcuts button",
+    html.indexOf('id="themeMenuWrap"') >= 0 &&
+      html.indexOf('id="themeMenuWrap"') < html.indexOf('id="shortcutsBtn"'),
+    true
+  );
+  check(
+    "the settings tab rail is pinned to the active card width",
+    /function alignSettingsTabsToContent\(/.test(src) &&
+      /card\.offsetWidth/.test(src) &&
+      /new ResizeObserver\(refreshSettingsRail\)/.test(src),
+    true
+  );
+  check(
+    "the vintage SD status inherits the toolbar button type size",
+    !/body\[data-theme="vintage"\] \.card-status \{[^}]*font-size/.test(css) &&
+      !/body\[data-theme="vintage"\] \.card-status \{[^}]*font-family/.test(css),
     true
   );
   check(

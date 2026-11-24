@@ -341,11 +341,32 @@ function showSettingsTab(name, options = {}) {
     pane.classList.toggle("active", active);
   });
 
+  alignSettingsTabsToContent();
   moveSettingsTabInk();
   if (options.focus) {
     const activeTab = tabs.find((tab) => tab.dataset.tab === target);
     if (activeTab) activeTab.focus();
   }
+}
+
+/**
+ * Make the top tab rail exactly as wide as the active settings card.
+ *
+ * The pane scrolls independently and its reserved scrollbar gutter (plus the
+ * modal's -14px/padding compensation) makes the cards ~10px narrower than a
+ * 100%-wide tab rail. Measure the real card after layout and pin the rail to it,
+ * so the left and right edges line up on every platform/scrollbar width.
+ */
+function alignSettingsTabsToContent() {
+  const rail = document.querySelector("#settingsModal .settings-tabs");
+  const panes = $("settingsPanes");
+  if (!rail || !panes || rail.offsetParent === null) return;
+  const card = panes.querySelector(".settings-pane.active .settings-section");
+  if (!card) return;
+  // offsetWidth is layout width: getBoundingClientRect would return the modal's
+  // opening scale (about 96%) and leave the rail visibly short.
+  const width = card.offsetWidth;
+  if (width > 0) rail.style.width = `${width}px`;
 }
 
 /** Position the sliding highlight under the active tab. */
@@ -367,6 +388,24 @@ function moveSettingsTabInk() {
   ink.style.opacity = "1";
   ink.style.width = `${rect.width}px`;
   ink.style.transform = `translateX(${rect.left - base.left - border}px)`;
+}
+
+function refreshSettingsRail() {
+  const modal = $("settingsModal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  requestAnimationFrame(() => {
+    alignSettingsTabsToContent();
+    moveSettingsTabInk();
+  });
+}
+
+window.addEventListener("resize", refreshSettingsRail);
+
+// Async status blocks (people models, ffmpeg, engine pills) can make the pane
+// scrollbar appear after the dialog is already open; re-pin the rail when the
+// scrollable content box changes width.
+if (typeof ResizeObserver === "function" && $("settingsPanes")) {
+  new ResizeObserver(refreshSettingsRail).observe($("settingsPanes"));
 }
 
 /** Arrow-key navigation between tabs, as expected of a real tablist. */
@@ -822,7 +861,6 @@ async function openSettings() {
     state.mapTileProvider = ["amap", "osm", "carto", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
     state.mapTileUrl = cfg.map_tile_url || "";
     state.mapApiKey = cfg.map_api_key || "";
-    state.mapApiKey = cfg.map_api_key || "";
     paintFfmpegStatus();
     paintPeopleEngineStatus();
     // Always open on the model tab: that is what most visits are for.
@@ -830,7 +868,10 @@ async function openSettings() {
     showModal($("settingsModal"));
     pushModal($("settingsModal"));
     // The tab widths are only measurable once the dialog is on screen.
-    requestAnimationFrame(moveSettingsTabInk);
+    requestAnimationFrame(() => {
+      alignSettingsTabsToContent();
+      moveSettingsTabInk();
+    });
   } catch (e) {
     showToast("读取设置失败：" + e.message, "error");
   }

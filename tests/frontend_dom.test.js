@@ -416,6 +416,17 @@ async function main() {
   }
 
   check(
+    "the theme switcher is before the shortcuts button",
+    Boolean(
+      document
+        .getElementById("themeMenuWrap")
+        .compareDocumentPosition(document.getElementById("shortcutsBtn")) &
+        window.Node.DOCUMENT_POSITION_FOLLOWING
+    ),
+    true
+  );
+
+  check(
     "the map key hint is a single element",
     document.querySelectorAll("#footprintsMapKeyHint").length,
     1
