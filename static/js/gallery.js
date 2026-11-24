@@ -530,7 +530,7 @@ function cardHtml(photo) {
         ${liveBadgeHtml(photo)}
         <div class="polaroid-photo-frame"><img class="polaroid-photo" data-src="${thumbnailUrl(photo)}" alt="${escapeHtml(photo.filename)}" />${
           isVideo ? videoDurationBadge(photo) : ""
-        }${quartzDate && !isVideo ? `<span class="vintage-date-stamp" aria-hidden="true">${quartzDate}</span>` : ""}</div>
+        }${quartzDate && !isVideo ? `<span class="vintage-date-stamp" aria-hidden="true">${quartzDate}</span>` : ""}<div class="wall-overlay" aria-hidden="true"><span class="wall-title">${escapeHtml(titleText || photo.filename || "")}</span>${hasScore ? `<span class="wall-score">${scoreText(photo.score)}</span>` : ""}</div></div>
         ${isVideo ? "" : `<div class="vintage-film-footer" aria-hidden="true"><span>EXP ${film.frame.replace("A", "")}/36</span><span class="vintage-sprockets"><i></i><i></i><i></i><i></i><i></i></span><span>SAFETY FILM</span></div>`}
         <div class="polaroid-body">
           ${

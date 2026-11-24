@@ -296,7 +296,7 @@ svg {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
-  transition: background-color .18s ease, color .18s ease;
+  transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 
 .folder-history-toggle svg {
@@ -359,7 +359,7 @@ svg {
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.9);
   cursor: pointer;
-  transition: background-color .2s ease, border-color .2s ease;
+  transition: background-color 180ms var(--ease-out), border-color 180ms var(--ease-out);
 }
 
 .force-label input[type="checkbox"]:checked {
@@ -914,7 +914,7 @@ svg {
   border-right: 2px solid var(--muted);
   border-bottom: 2px solid var(--muted);
   transform: rotate(45deg);
-  transition: transform .2s ease;
+  transition: transform 180ms var(--ease-out);
   flex-shrink: 0;
   margin-top: -3px;
 }
@@ -1351,7 +1351,7 @@ select {
 .favorite-btn svg {
   width: 16px;
   height: 16px;
-  transition: transform .2s ease;
+  transition: transform 180ms var(--ease-out);
 }
 
 .favorite-btn:hover {
@@ -1445,7 +1445,7 @@ select {
   margin-left: -6px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background-color .2s ease, color .2s ease;
+  transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out);
 }
 
 .meta-item-row .meta-content .path-link:hover {
@@ -1999,7 +1999,7 @@ select {
   object-fit: contain;
   background: #1e1914;
   box-shadow: var(--shadow-card);
-  transition: transform .2s ease;
+  transition: transform 180ms var(--ease-out);
 }
 
 /* The picture's own box. The overlay controls are positioned against this, so
@@ -2155,8 +2155,8 @@ select {
   cursor: pointer;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  transition: transform .26s var(--ease-out), background-color .2s ease,
-              box-shadow .26s ease;
+  transition: transform 220ms var(--ease-out), background-color 180ms var(--ease-out),
+              box-shadow 220ms var(--ease-out);
   z-index: 4;
 }
 
@@ -2459,7 +2459,7 @@ select {
   border-radius: 50%;
   background: #fffdf9;
   box-shadow: 0 1px 3px rgba(50, 34, 18, 0.28), 0 1px 1px rgba(50, 34, 18, 0.12);
-  transition: transform .3s var(--ease-out), width .2s ease;
+  transition: transform 260ms var(--ease-out), width 180ms var(--ease-out);
 }
 
 .checkbox-row input[type="checkbox"]:checked {
@@ -2617,9 +2617,12 @@ select {
   max-height: 90vh;
   object-fit: contain;
   transform-origin: center center;
-  transition: transform 0.05s linear;
+  transition: none;
   box-shadow: 0 10px 40px rgba(0,0,0,0.6);
   pointer-events: none;
+}
+.fs-image-container img.is-smooth {
+  transition: transform 180ms var(--ease-out);
 }
 
 .preview-info {
@@ -2893,7 +2896,7 @@ select {
   );
   outline: none;
   cursor: pointer;
-  transition: box-shadow .25s ease;
+  transition: box-shadow 200ms var(--ease-out);
 }
 
 .form-grid input.score-range:focus {
@@ -2916,7 +2919,7 @@ select {
   border: 3px solid var(--score-color);
   box-shadow: 0 2px 6px rgba(50, 34, 18, 0.18);
   cursor: grab;
-  transition: transform .2s var(--ease-out), box-shadow .2s ease;
+  transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
 }
 
 .score-range::-moz-range-thumb {
@@ -2927,7 +2930,7 @@ select {
   border: 3px solid var(--score-color);
   box-shadow: 0 2px 6px rgba(50, 34, 18, 0.18);
   cursor: grab;
-  transition: transform .2s var(--ease-out), box-shadow .2s ease;
+  transition: transform 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
 }
 
 .score-range:hover::-webkit-slider-thumb,
@@ -3528,7 +3531,7 @@ select {
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: color .22s ease, transform .22s var(--ease-out);
+  transition: color 180ms var(--ease-out), transform 180ms var(--ease-out);
 }
 
 /* The ink measures this box, so a label change must not shift the padding. */
@@ -3565,7 +3568,7 @@ select {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.7);
-  transition: border-color .2s ease, box-shadow .2s ease;
+  transition: border-color 180ms var(--ease-out), box-shadow 180ms var(--ease-out);
 }
 
 .settings-danger-row:hover {
@@ -4040,7 +4043,7 @@ select {
   color: var(--text-secondary);
   cursor: pointer;
   text-align: left;
-  transition: border-color .2s ease, background-color .2s ease;
+  transition: border-color 180ms var(--ease-out), background-color 180ms var(--ease-out);
 }
 
 .confirm-check:hover {
@@ -7379,13 +7382,21 @@ body[data-theme="vintage"] .theme-option.active {
   border-color: var(--primary);
 }
 
+body[data-theme="vintage"] * {
+  scrollbar-color: #36322d #121110;
+}
+
 body[data-theme="vintage"] ::-webkit-scrollbar-track {
-  background: #16110e;
+  background: #121110;
 }
 
 body[data-theme="vintage"] ::-webkit-scrollbar-thumb {
-  background: #46372b;
-  border-color: #16110e;
+  background: #36322d;
+  border-color: #121110;
+}
+
+body[data-theme="vintage"] ::-webkit-scrollbar-thumb:hover {
+  background: #eb9234;
 }
 
 /* ==========================================================================
@@ -8918,9 +8929,39 @@ body[data-density="wall"] .polaroid-card:nth-child(n) {
 }
 
 body[data-density="wall"] .tape,
-body[data-density="wall"] .polaroid-body,
-body[data-density="wall"] .vintage-film-footer {
+body[data-density="wall"] .vintage-film-footer,
+body[data-density="wall"] .polaroid-body > :not(.card-actions),
+body[data-density="wall"] .card-btn-group {
   display: none;
+}
+
+body[data-density="wall"] .polaroid-body {
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+body[data-density="wall"] .card-actions {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 8;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+body[data-density="wall"] .polaroid-card:hover .card-actions,
+body[data-density="wall"] .card-actions:has(input:checked) {
+  opacity: 1;
+}
+
+body[data-density="wall"] .card-check {
+  background: rgba(255, 253, 249, 0.9);
+  border-radius: 5px;
+  padding: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
 }
 
 body[data-density="wall"] .polaroid-card:not(.is-video) .polaroid-inner {
@@ -9700,6 +9741,116 @@ body[data-theme="vintage"] #previewModal .preview-side-btn:hover {
     transition: none !important;
   }
 }
+
+/* ==========================================================================
+   P0 Polish: Wall Hover Overlay, ::selection, :focus-visible & Type Hygiene
+   ========================================================================== */
+
+.wall-overlay {
+  display: none;
+}
+
+body[data-density="wall"] .wall-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 22px 10px 8px;
+  background: linear-gradient(to top, rgba(16, 13, 10, 0.78) 0%, rgba(16, 13, 10, 0.32) 60%, transparent 100%);
+  color: #fffdf8;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+body[data-density="wall"] .polaroid-card:hover .wall-overlay {
+  opacity: 1;
+}
+
+.wall-title {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.wall-score {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff8ef;
+}
+
+body[data-theme="vintage"] .wall-score {
+  background: rgba(235, 146, 52, 0.25);
+  color: #eb9234;
+  border-radius: 2px;
+}
+
+/* Lock WenKai to native 400 weight (prevent browser faux-bold blur) */
+.photo-comment,
+.preview-quote-card {
+  font-weight: 400;
+}
+
+/* Keep Vintage long-form settings & detail prose in crisp sans-serif */
+body[data-theme="vintage"] .settings-pane,
+body[data-theme="vintage"] .settings-hint,
+body[data-theme="vintage"] .meta-item-row,
+body[data-theme="vintage"] .confirm-content p,
+body[data-theme="vintage"] .export-choice-hint {
+  font-family: var(--font-sans);
+}
+
+/* Theme-Matched ::selection Highlight */
+::selection {
+  background: rgba(174, 118, 78, 0.24);
+  color: var(--text);
+}
+
+body[data-theme="paper"] ::selection {
+  background: rgba(199, 125, 88, 0.28);
+  color: #2c241d;
+}
+
+body[data-theme="vintage"] ::selection {
+  background: rgba(235, 146, 52, 0.34);
+  color: #fff6e8;
+}
+
+/* Unified High-Contrast Keyboard Focus Ring */
+.btn:focus-visible,
+.density-btn:focus-visible,
+.favorite-btn:focus-visible,
+.preview-side-btn:focus-visible,
+.modal-close:focus-visible,
+.theme-menu-item:focus-visible,
+.theme-option:focus-visible,
+.custom-select-trigger:focus-visible,
+.back-to-top:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+body[data-theme="paper"] :where(.btn, .density-btn, .favorite-btn, .preview-side-btn, .modal-close, .theme-menu-item, .theme-option):focus-visible {
+  outline-color: #c77d58;
+}
+
+body[data-theme="vintage"] :where(.btn, .density-btn, .favorite-btn, .preview-side-btn, .modal-close, .theme-menu-item, .theme-option):focus-visible {
+  outline-color: #eb9234;
+}
+
 
 
 

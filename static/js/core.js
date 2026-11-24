@@ -1081,17 +1081,38 @@ const DENSITY_META = {
 };
 
 function applyDensity(density, options = {}) {
-  const { persist = true, notify = false } = options;
+  const { persist = true, notify = false, animate = false } = options;
   const next = DENSITY_META[density] ? density : "comfortable";
-  state.density = next;
-  if (document.body) {
-    document.body.dataset.density = next;
+  const changed = state.density !== next;
+
+  const commit = () => {
+    state.density = next;
+    if (document.body) {
+      document.body.dataset.density = next;
+    }
+    document.querySelectorAll("#densitySwitcher .density-btn").forEach((btn) => {
+      const active = btn.dataset.density === next;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-checked", active ? "true" : "false");
+    });
+  };
+
+  if (
+    animate &&
+    changed &&
+    state.photos.length < 80 &&
+    !prefersReducedMotion() &&
+    typeof document.startViewTransition === "function"
+  ) {
+    try {
+      document.startViewTransition(commit);
+    } catch (e) {
+      commit();
+    }
+  } else {
+    commit();
   }
-  document.querySelectorAll("#densitySwitcher .density-btn").forEach((btn) => {
-    const active = btn.dataset.density === next;
-    btn.classList.toggle("active", active);
-    btn.setAttribute("aria-checked", active ? "true" : "false");
-  });
+
   try {
     window.localStorage.setItem("lumina_density", next);
   } catch (e) {}
@@ -1112,14 +1133,14 @@ function initDensity() {
     const cached = window.localStorage.getItem("lumina_density");
     if (DENSITY_META[cached]) initial = cached;
   } catch (e) {}
-  applyDensity(initial, { persist: false });
+  applyDensity(initial, { persist: false, animate: false });
   const switcher = $("densitySwitcher");
   if (switcher) {
     switcher.addEventListener("click", (e) => {
       const btn = e.target.closest(".density-btn");
       if (!btn || !btn.dataset.density) return;
       if (btn.dataset.density !== state.density) {
-        applyDensity(btn.dataset.density, { persist: true, notify: true });
+        applyDensity(btn.dataset.density, { persist: true, notify: true, animate: true });
       }
     });
   }

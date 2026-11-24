@@ -3,11 +3,12 @@
    ========================================================================== */
 "use strict";
 
-function applyFsTransform() {
+function applyFsTransform(smooth = false) {
   const img = $("fsImage");
   if (!img) return;
+  img.classList.toggle("is-smooth", !!smooth && !state.fullscreen.isDragging);
   const { scale, panX, panY } = state.fullscreen;
-  img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  img.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${scale})`;
   const pctEl = $("fsZoomPct");
   if (pctEl) pctEl.textContent = `${Math.round(scale * 100)}%`;
 }
@@ -142,11 +143,11 @@ function closeFullscreenViewer() {
   state.fullscreen.isDragging = false;
 }
 
-function zoomFullscreen(factor, clientX, clientY) {
+function zoomFullscreen(factor, clientX, clientY, smooth = false) {
   const oldScale = state.fullscreen.scale;
   let newScale = oldScale * factor;
   newScale = Math.max(0.5, Math.min(6.0, newScale));
-  
+
   if (clientX !== undefined && clientY !== undefined) {
     const rect = $("fsImageContainer").getBoundingClientRect();
     const offsetX = clientX - (rect.left + rect.width / 2);
@@ -154,16 +155,16 @@ function zoomFullscreen(factor, clientX, clientY) {
     state.fullscreen.panX -= (offsetX - state.fullscreen.panX) * (newScale / oldScale - 1);
     state.fullscreen.panY -= (offsetY - state.fullscreen.panY) * (newScale / oldScale - 1);
   }
-  
+
   state.fullscreen.scale = newScale;
-  applyFsTransform();
+  applyFsTransform(smooth);
 }
 
-function resetFullscreenZoom() {
+function resetFullscreenZoom(smooth = true) {
   state.fullscreen.scale = 1;
   state.fullscreen.panX = 0;
   state.fullscreen.panY = 0;
-  applyFsTransform();
+  applyFsTransform(smooth);
 }
 
 /**

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>拾光相册 / Lumina</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="preload" href="/static/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/static/fonts/cormorant-garamond-600.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/static/fonts/fonts.css" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
@@ -26,6 +28,7 @@
                 title="找出看起来相似的回忆"><span class="btn-icon" data-icon="rawLayers"></span>相似回忆</button>
       </div>
       <div class="view-switcher-actions">
+        <button id="shortcutsBtn" class="btn icon-only" type="button" title="键盘快捷键 (?)" aria-label="键盘快捷键"><span class="btn-icon" data-icon="keyboard"></span></button>
         <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
         <div class="theme-menu-wrap" id="themeMenuWrap">
           <button id="themeToggleBtn" class="btn theme-toggle-btn" type="button"

@@ -44,6 +44,16 @@ function init() {
     toggleFolderHistory();
   });
   $("settingsBtn").addEventListener("click", openSettings);
+  const shortcutsBtn = $("shortcutsBtn");
+  if (shortcutsBtn) {
+    shortcutsBtn.addEventListener("click", () => {
+      const modal = $("shortcutsModal");
+      if (modal) {
+        showModal(modal);
+        pushModal(modal);
+      }
+    });
+  }
   initTheme();
   initDensity();
   initTopbarAutoCollapse();
@@ -131,11 +141,11 @@ function init() {
   const fsCloseBtn = $("fsCloseBtn");
   if (fsCloseBtn) fsCloseBtn.addEventListener("click", closeFullscreenViewer);
   const fsZoomInBtn = $("fsZoomInBtn");
-  if (fsZoomInBtn) fsZoomInBtn.addEventListener("click", () => zoomFullscreen(1.25));
+  if (fsZoomInBtn) fsZoomInBtn.addEventListener("click", () => zoomFullscreen(1.25, undefined, undefined, true));
   const fsZoomOutBtn = $("fsZoomOutBtn");
-  if (fsZoomOutBtn) fsZoomOutBtn.addEventListener("click", () => zoomFullscreen(0.8));
+  if (fsZoomOutBtn) fsZoomOutBtn.addEventListener("click", () => zoomFullscreen(0.8, undefined, undefined, true));
   const fsResetBtn = $("fsResetBtn");
-  if (fsResetBtn) fsResetBtn.addEventListener("click", resetFullscreenZoom);
+  if (fsResetBtn) fsResetBtn.addEventListener("click", () => resetFullscreenZoom(true));
 
   const fsContainer = $("fsImageContainer");
   if (fsContainer) {
