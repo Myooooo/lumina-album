@@ -1233,6 +1233,9 @@ function initTopbarAutoCollapse() {
   });
 
   const canCollapse = () => {
+    // Keep the header geometry stable while a dialog owns the page: folding the
+    // folder row underneath the dim layer makes the whole modal shift.
+    if (document.body && document.body.classList.contains("modal-open")) return false;
     if (topbarHovered) return false;
     const history = $("folderHistory");
     if (history && !history.classList.contains("hidden")) return false;

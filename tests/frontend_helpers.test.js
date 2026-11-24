@@ -1541,9 +1541,13 @@ section("photobook layout and motion system");
     true
   );
   check(
-    "modal backdrop starts below the sticky header so the topbar never vanishes",
-    /\.modal \{[^}]*inset: var\(--topbar-height, 0px\) 0 0;/.test(css) &&
-      /max-height: min\(92vh, calc\(100vh - var\(--topbar-height, 0px\) - 48px\)\)/.test(css),
+    "the modal dims the header but the root-only scroll lock keeps it sticky",
+    /\.modal \{[^}]*inset: 0;/.test(css) &&
+      /padding: calc\(var\(--topbar-height, 0px\) \+ 24px\) 24px 24px;/.test(css) &&
+      /html\.modal-open \{[^}]*overflow: hidden;/.test(css) &&
+      /html\.modal-open \{[^}]*scrollbar-gutter: stable;/.test(css) &&
+      !/body\.modal-open \{[^}]*overflow: hidden;/.test(css) &&
+      /classList\.contains\("modal-open"\)/.test(src),
     true
   );
   check(
@@ -1985,7 +1989,7 @@ section("people & pets (人物与宠物)");
   );
   check(
     "modal scroll lock, standalone prompt textarea, button themes, and settings alignment are wired",
-    /html\.modal-open,\s*body\.modal-open/.test(css) &&
+    /html\.modal-open \{[\s\S]{0,120}overflow:\s*hidden/.test(css) &&
       /overscroll-behavior:\s*contain/.test(css) &&
       /function syncModalScrollLock\(/.test(src) &&
       /\.prompt-editor textarea \{[\s\S]{0,240}border:/.test(css) &&
