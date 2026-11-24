@@ -13,13 +13,91 @@ function applyFsTransform(smooth = false) {
   if (pctEl) pctEl.textContent = `${Math.round(scale * 100)}%`;
 }
 
-function paintFullscreenActions(photo) {
+let fsLoadToken = 0;
+let fsIdleTimer = null;
+let fsInfoVisible = false;
+
+function clearFsIdleTimer() {
+  if (fsIdleTimer) {
+    clearTimeout(fsIdleTimer);
+    fsIdleTimer = null;
+  }
+}
+
+function resetFsIdleTimer() {
+  const fsModal = $("fullscreenModal");
+  if (!fsModal || fsModal.classList.contains("hidden")) return;
+  fsModal.classList.remove("is-hud-hidden");
+  clearFsIdleTimer();
+  fsIdleTimer = setTimeout(() => {
+    fsIdleTimer = null;
+    if (!fsModal || fsModal.classList.contains("hidden")) return;
+    if (fsModal.querySelector(".fs-viewer-toolbar:hover, .fs-nav-btn:hover, .fs-viewer-close:hover, .fs-info-overlay:hover")) {
+      return;
+    }
+    fsModal.classList.add("is-hud-hidden");
+  }, 2500);
+}
+
+function paintFullscreenInfo(photo) {
+  const overlay = $("fsInfoOverlay");
+  const infoBtn = $("fsInfoBtn");
+  if (infoBtn) infoBtn.classList.toggle("active", fsInfoVisible);
+  if (!overlay) return;
+  if (!fsInfoVisible || !photo) {
+    overlay.classList.add("hidden");
+    return;
+  }
+  const exif = photo.exif || {};
+  const parts = [];
+  const camera = [exif.make, exif.model].filter(Boolean).join(" ");
+  if (camera) parts.push(`<span class="fs-info-chip">${ICONS.camera}${escapeHtml(camera)}</span>`);
+  if (photo.media_kind === "video") {
+    const info = photo.video_info || {};
+    if (photo.width && photo.height) parts.push(`<span class="fs-info-chip">${photo.width}×${photo.height}</span>`);
+    if (info.fps) parts.push(`<span class="fs-info-chip">${escapeHtml(formatFps(info.fps))}</span>`);
+    if (photo.duration_ms) parts.push(`<span class="fs-info-chip">${escapeHtml(formatDuration(photo.duration_ms))}</span>`);
+  } else {
+    if (exif.fnumber) parts.push(`<span class="fs-info-chip">f/${escapeHtml(formatFnumber(exif.fnumber))}</span>`);
+    if (exif.exposure) parts.push(`<span class="fs-info-chip">${escapeHtml(formatExposure(exif.exposure))}</span>`);
+    if (exif.iso) parts.push(`<span class="fs-info-chip">ISO ${escapeHtml(formatIso(exif.iso))}</span>`);
+    const focal = exif.focal_length_35mm || exif.focal_length;
+    if (focal) parts.push(`<span class="fs-info-chip">${escapeHtml(formatFocalLength(focal))}</span>`);
+  }
+  const loc = typeof formatShortLocation === "function" ? formatShortLocation(photo.location) : (photo.location || "");
+  const date = formatCaptureTime(exif.datetime_original);
+  const sub = [date, loc].filter(Boolean).join(" · ");
+  overlay.innerHTML = `
+    <div class="fs-info-title">${escapeHtml(photo.title || photo.filename)}</div>
+    ${sub ? `<div class="fs-info-sub">${escapeHtml(sub)}</div>` : ""}
+    ${parts.length ? `<div class="fs-info-specs">${parts.join("")}</div>` : ""}
+  `;
+  overlay.classList.remove("hidden");
+}
+
+function toggleFullscreenInfo() {
+  fsInfoVisible = !fsInfoVisible;
+  const photo = photoById(state.currentPreviewId);
+  if (fsInfoVisible && photo) ensurePhotoDetail(photo.id);
+  paintFullscreenInfo(photo);
+  resetFsIdleTimer();
+}
+
+function paintFullscreenActions(photo, options = {}) {
   if (!photo) return;
   const favBtn = $("fsFavoriteBtn");
   if (favBtn) {
-    favBtn.classList.toggle("active", !!photo.favorite);
-    favBtn.innerHTML = `<span class="btn-icon">${photo.favorite ? ICONS.heartFilled : ICONS.heart}</span><span>${photo.favorite ? "已珍藏" : "珍藏"}</span>`;
-    favBtn.title = photo.favorite ? "取消珍藏 (F)" : "珍藏 (F)";
+    const wasActive = favBtn.classList.contains("active");
+    const isNow = !!photo.favorite;
+    favBtn.classList.toggle("active", isNow);
+    favBtn.innerHTML = `<span class="btn-icon">${isNow ? ICONS.heartFilled : ICONS.heart}</span><span>${isNow ? "已珍藏" : "珍藏"}</span>`;
+    favBtn.title = isNow ? "取消珍藏 (F)" : "珍藏 (F)";
+    if (options.animateHeart || (isNow && !wasActive && options.fromToggle)) {
+      favBtn.classList.remove("is-popping");
+      void favBtn.offsetWidth;
+      favBtn.classList.add("is-popping");
+      setTimeout(() => favBtn.classList.remove("is-popping"), 320);
+    }
   }
   const isDeleted = photo.status === "deleted";
   const delBtn = $("fsDeleteBtn");
@@ -30,9 +108,22 @@ function paintFullscreenActions(photo) {
   const nextBtn = $("fsNextBtn");
   if (prevBtn) prevBtn.classList.toggle("hidden", !previewHasNeighbour(-1));
   if (nextBtn) nextBtn.classList.toggle("hidden", !previewHasNeighbour(1));
+
+  const counter = $("fsFrameCounter");
+  const counterDiv = $("fsCounterDivider");
+  if (counter) {
+    const order = state.previewContext ? state.previewContext.ids : visiblePhotoOrder();
+    const idx = order.indexOf(photo.id);
+    const total = !state.previewContext && state.totalCount > order.length ? state.totalCount : order.length;
+    const show = idx >= 0 && total > 1;
+    counter.textContent = show ? `${String(idx + 1).padStart(2, "0")} / ${String(total).padStart(2, "0")}` : "";
+    counter.classList.toggle("hidden", !show);
+    if (counterDiv) counterDiv.classList.toggle("hidden", !show);
+  }
+  paintFullscreenInfo(photo);
 }
 
-function renderFullscreenMedia(photo) {
+function renderFullscreenMedia(photo, direction = 0) {
   const fsModal = $("fullscreenModal");
   const fsImg = $("fsImage");
   const fsVideo = $("fsVideo");
@@ -40,6 +131,7 @@ function renderFullscreenMedia(photo) {
   const divider = $("fsToolbarDivider");
   if (!fsModal || !fsImg || !photo) return;
 
+  const token = ++fsLoadToken;
   fsModal.dataset.photoId = String(photo.id);
   state.fullscreen.scale = 1;
   state.fullscreen.panX = 0;
@@ -69,9 +161,20 @@ function renderFullscreenMedia(photo) {
   }
   if (zoomGroup) zoomGroup.classList.remove("hidden");
   if (divider) divider.classList.remove("hidden");
-  fsImg.classList.remove("hidden");
-  fsImg.src = `/api/original/${photo.id}`;
+  fsImg.classList.remove("hidden", "fs-switch-left", "fs-switch-right");
+  fsImg.src = `/api/proxy/${photo.id}`;
   applyFsTransform(false);
+  if (direction !== 0 && !prefersReducedMotion()) {
+    void fsImg.offsetWidth;
+    fsImg.classList.add(direction < 0 ? "fs-switch-left" : "fs-switch-right");
+  }
+  const origUrl = `/api/original/${photo.id}`;
+  const loader = new Image();
+  loader.onload = () => {
+    if (token !== fsLoadToken || fsModal.classList.contains("hidden")) return;
+    fsImg.src = origUrl;
+  };
+  loader.src = origUrl;
 }
 
 function openFullscreenViewer() {
@@ -80,19 +183,22 @@ function openFullscreenViewer() {
   if (!photo) return;
   const fsModal = $("fullscreenModal");
   if (!fsModal) return;
-  renderFullscreenMedia(photo);
+  fsModal.classList.remove("is-hud-hidden");
+  renderFullscreenMedia(photo, 0);
   showModal(fsModal);
   pushModal(fsModal);
+  resetFsIdleTimer();
 }
 
 async function navigateFullscreen(delta) {
   const beforeId = state.currentPreviewId;
+  resetFsIdleTimer();
   await navigatePreview(delta);
   const fsModal = $("fullscreenModal");
   if (!fsModal || fsModal.classList.contains("hidden")) return;
   if (state.currentPreviewId && state.currentPreviewId !== beforeId) {
     const nextPhoto = photoById(state.currentPreviewId);
-    if (nextPhoto) renderFullscreenMedia(nextPhoto);
+    if (nextPhoto) renderFullscreenMedia(nextPhoto, delta);
   }
 }
 
@@ -162,6 +268,8 @@ async function waitForVideoJob(jobId, photoId) {
 }
 
 function closeFullscreenViewer() {
+  fsLoadToken += 1;
+  clearFsIdleTimer();
   const fsModal = $("fullscreenModal");
   const fsVideo = $("fsVideo");
   if (fsVideo) {
@@ -172,6 +280,7 @@ function closeFullscreenViewer() {
     fsVideo.onerror = null;
   }
   if (fsModal) {
+    fsModal.classList.remove("is-hud-hidden");
     delete fsModal.dataset.photoId;
     const at = state.modalStack.lastIndexOf("fullscreenModal");
     if (at !== -1) state.modalStack.splice(at, 1);
@@ -1044,9 +1153,9 @@ function updatePreview(options = {}) {
   const fsModal = $("fullscreenModal");
   if (fsModal && !fsModal.classList.contains("hidden")) {
     if (fsModal.dataset.photoId !== String(id)) {
-      renderFullscreenMedia(photo);
+      renderFullscreenMedia(photo, 0);
     } else {
-      paintFullscreenActions(photo);
+      paintFullscreenActions(photo, { fromToggle: true });
     }
   }
 }

@@ -867,6 +867,7 @@
             <div class="shortcut-row"><span>编辑回忆信息</span><kbd>E</kbd></div>
             <div class="shortcut-row"><span>进入 / 退出全屏沉浸模式</span><kbd>Space</kbd></div>
             <div class="shortcut-row"><span>全屏缩放 / 还原</span><span><kbd>+</kbd> <kbd>-</kbd> <kbd>0</kbd></span></div>
+            <div class="shortcut-row"><span>全屏显示 / 隐藏拍摄参数</span><kbd>I</kbd></div>
             <div class="shortcut-row"><span>关闭当前弹窗</span><kbd>Esc</kbd></div>
           </section>
         </div>
@@ -976,7 +977,10 @@
     <button id="fsPrevBtn" class="fs-nav-btn prev hidden" type="button" title="上一张 (←)" aria-label="上一张"><span class="btn-icon" data-icon="chevronLeft"></span></button>
     <button id="fsNextBtn" class="fs-nav-btn next hidden" type="button" title="下一张 (→)" aria-label="下一张"><span class="btn-icon" data-icon="chevronRight"></span></button>
     <button id="fsCloseBtn" class="fs-viewer-close" title="退出全屏 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
+    <div id="fsInfoOverlay" class="fs-info-overlay hidden" aria-live="polite"></div>
     <div class="fs-viewer-toolbar" id="fsToolbar">
+      <span id="fsFrameCounter" class="fs-frame-counter hidden"></span>
+      <span class="fs-toolbar-divider hidden" id="fsCounterDivider" aria-hidden="true"></span>
       <div class="fs-zoom-group" id="fsZoomGroup">
         <button id="fsZoomOutBtn" type="button" title="缩小 (- / 滚轮下滚)"><span class="btn-icon" data-icon="zoomOut"></span></button>
         <span id="fsZoomPct" class="fs-zoom-pct">100%</span>
@@ -984,6 +988,7 @@
         <button id="fsResetBtn" type="button" title="重置缩放 (0)"><span class="btn-icon" data-icon="reset"></span><span>还原</span></button>
       </div>
       <span class="fs-toolbar-divider" id="fsToolbarDivider" aria-hidden="true"></span>
+      <button id="fsInfoBtn" class="fs-action-btn" type="button" title="拍摄参数 (I)"><span class="btn-icon" data-icon="camera"></span><span>参数</span></button>
       <button id="fsFavoriteBtn" class="fs-action-btn" type="button" title="珍藏 (F)"><span class="btn-icon" data-icon="heart"></span><span>珍藏</span></button>
       <button id="fsDeleteBtn" class="fs-action-btn is-danger" type="button" title="暂时收起 (D)"><span class="btn-icon" data-icon="trash"></span><span>收起</span></button>
       <button id="fsRestoreBtn" class="fs-action-btn hidden" type="button" title="恢复"><span class="btn-icon" data-icon="restore"></span><span>恢复</span></button>

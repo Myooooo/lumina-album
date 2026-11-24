@@ -10811,6 +10811,200 @@ body[data-theme="vintage"] .confirm-check:hover {
   border-color: #eb9234;
 }
 
+/* ==========================================================================
+   Round 3 P0: Fullscreen Immersive HUD Auto-Hide, EXIF Overlay, Switch Motion,
+   Heart Pop & Pure Photo Wall Selected State Highlights
+   ========================================================================== */
+
+.fs-viewer .fs-viewer-close,
+.fs-viewer .fs-nav-btn,
+.fs-viewer .fs-viewer-toolbar {
+  opacity: 1;
+  transition: opacity 260ms var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+
+.fs-viewer.is-hud-hidden .fs-viewer-close,
+.fs-viewer.is-hud-hidden .fs-nav-btn,
+.fs-viewer.is-hud-hidden .fs-viewer-toolbar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fs-frame-counter {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.78);
+  padding: 0 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-theme="vintage"] .fs-frame-counter {
+  color: #eb9234;
+}
+
+body[data-theme="vintage"] .fs-frame-counter::before {
+  content: "FRAME ";
+  opacity: 0.72;
+}
+
+.fs-viewer-toolbar #fsInfoBtn.active {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+body[data-theme="vintage"] .fs-viewer-toolbar #fsInfoBtn.active {
+  background: rgba(235, 146, 52, 0.22);
+  color: #f4b165;
+}
+
+.fs-viewer-toolbar #fsFavoriteBtn.is-popping svg {
+  animation: heartPop 300ms var(--ease-out);
+}
+
+/* Fullscreen Directional Switch Micro-Motion */
+.fs-switch-left {
+  animation: previewSwitchLeft 160ms var(--ease-out) both;
+}
+
+.fs-switch-right {
+  animation: previewSwitchRight 160ms var(--ease-out) both;
+}
+
+/* Fullscreen EXIF Info HUD Overlay (3-Theme Styled) */
+.fs-info-overlay {
+  position: fixed;
+  left: 24px;
+  bottom: 84px;
+  z-index: 1010;
+  max-width: min(440px, calc(100vw - 48px));
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(24, 21, 18, 0.78);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #f6f2eb;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+  animation: fadeSlideIn 180ms var(--ease-out) both;
+}
+
+.fs-info-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #ffffff;
+  margin-bottom: 3px;
+}
+
+.fs-info-sub {
+  font-size: 12px;
+  color: rgba(245, 239, 230, 0.72);
+  margin-bottom: 8px;
+}
+
+.fs-info-specs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fs-info-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #f3ece2;
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-info-chip svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+
+body[data-theme="paper"] .fs-info-overlay {
+  border-radius: 4px;
+  background: rgba(44, 36, 28, 0.94);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px dashed rgba(213, 202, 181, 0.48);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.48), 3px 3px 0 rgba(199, 125, 88, 0.36);
+}
+
+body[data-theme="paper"] .fs-info-chip {
+  border-radius: 2px;
+  background: rgba(245, 239, 226, 0.14);
+}
+
+body[data-theme="vintage"] .fs-info-overlay {
+  border-radius: 2px;
+  background: rgba(18, 17, 16, 0.95);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(235, 146, 52, 0.42);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.72);
+}
+
+body[data-theme="vintage"] .fs-info-title {
+  font-family: var(--font-mono), var(--font-sans);
+  color: #f4eee4;
+}
+
+body[data-theme="vintage"] .fs-info-chip {
+  border-radius: 2px;
+  background: rgba(235, 146, 52, 0.14);
+  border: 1px solid rgba(235, 146, 52, 0.28);
+  color: #eb9234;
+}
+
+/* Pure Photo Wall Selected State Highlights (Per-Theme Craft) */
+body[data-density="wall"] .polaroid-card:has(.card-check input:checked) .polaroid-inner {
+  box-shadow: 0 0 0 2.5px var(--primary), 0 10px 24px var(--primary-glow);
+}
+
+body[data-theme="paper"][data-density="wall"] .polaroid-card:has(.card-check input:checked) .polaroid-inner {
+  border-color: #b84a39;
+  box-shadow: 0 0 0 2px #b84a39, 3px 3px 0 rgba(184, 74, 57, 0.32);
+}
+
+body[data-theme="vintage"][data-density="wall"] .polaroid-card:has(.card-check input:checked) .polaroid-inner {
+  border-color: #eb9234;
+  box-shadow: 0 0 0 2px #eb9234, 0 0 18px rgba(235, 146, 52, 0.36);
+}
+
+@media (max-width: 640px) {
+  .fs-info-overlay {
+    left: 12px;
+    right: 12px;
+    bottom: 76px;
+    max-width: none;
+  }
+  .fs-frame-counter,
+  #fsCounterDivider {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-switch-left,
+  .fs-switch-right,
+  .fs-viewer-toolbar #fsFavoriteBtn.is-popping svg {
+    animation: none !important;
+  }
+}
+
 
 
 
