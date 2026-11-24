@@ -1902,6 +1902,7 @@ async function openAlbumWithTag(tag) {
   setSelectValue($("kindFilter"), "");
   setSelectValue($("minScoreFilter"), "");
   setSelectValue($("yearFilter"), "");
+  setSelectValue($("favoriteFilter"), "");
   const search = $("searchInput");
   if (search) search.value = "";
   const select = $("tagFilter");

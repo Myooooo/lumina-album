@@ -351,12 +351,18 @@ async function main() {
   await new Promise((resolve) => window.setTimeout(resolve, 120));
 
   // --- clicking a detail tag lands on the album filtered by that tag ------
+  document.getElementById("favoriteFilter").value = "1";
   await window.openAlbumWithTag("旅行");
   await new Promise((resolve) => window.setTimeout(resolve, 120));
   check(
     "a detail tag returns to the album with that tag selected",
     document.getElementById("tagFilter").value,
     "旅行"
+  );
+  check(
+    "a detail tag clears the previous favourites-only filter",
+    document.getElementById("favoriteFilter").value,
+    ""
   );
   check(
     "a detail tag keeps the album on all memories",
