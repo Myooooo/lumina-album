@@ -1915,6 +1915,17 @@ section("people & pets (人物与宠物)");
       /function openPlacePhotoPicker\(/.test(src),
     true
   );
+  check(
+    "footprints iOS-style map mode, clustering, auto fitBounds, and theme tiles are wired",
+    /id="footprintsMapCanvas"/.test(html) &&
+      /id="footprintsMapDrawer"/.test(html) &&
+      /function renderFootprintsMap\(/.test(src) &&
+      /function fitFootprintsMapToPlaces\(/.test(src) &&
+      /function fpClusterPins\(/.test(src) &&
+      /function fpWgs84ToGcj02\(/.test(src) &&
+      /function refreshFootprintsMapLayer\(/.test(src),
+    true
+  );
 }
 
 console.log(

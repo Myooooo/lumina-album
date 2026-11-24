@@ -12950,3 +12950,413 @@ body[data-theme="classic"] .footprints-mode-switch {
   backdrop-filter: blur(12px);
 }
 
+/* ==========================================================================
+   Footprints iOS-Style Map Mode & Three-Theme Visual Coordination
+   ========================================================================== */
+
+.footprints-map-wrap {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 220px);
+  min-height: 460px;
+  max-height: 780px;
+  border-radius: var(--radius-lg, 16px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-2, #ebe5da);
+  box-shadow: var(--shadow-md, 0 8px 28px rgba(0, 0, 0, 0.08));
+}
+
+.footprints-map-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.footprints-map-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.fp-map-tiles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition: filter 0.25s ease;
+}
+
+.fp-map-tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 256px;
+  height: 256px;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.fp-map-pins {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* iOS Photos-style square thumbnail pin with corner count badge */
+.fp-map-pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 2;
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), z-index 0s;
+}
+
+.fp-map-pin:hover,
+.fp-map-pin.is-selected {
+  transform: translate(-50%, -100%) scale(1.08);
+  z-index: 8;
+}
+
+.fp-pin-frame {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  border: 3px solid #fff;
+  background: var(--surface, #fff);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fp-map-pin.is-cluster .fp-pin-frame {
+  width: 62px;
+  height: 62px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.26), 0 0 0 2px rgba(255, 255, 255, 0.55);
+}
+
+.fp-map-pin.is-selected .fp-pin-frame {
+  border-color: var(--primary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 3px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.fp-pin-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 9px;
+  display: block;
+}
+
+.fp-pin-fallback {
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fp-pin-badge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--primary, #ae764e);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  border: 1.5px solid #fff;
+}
+
+.fp-pin-label {
+  margin-top: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(38, 31, 25, 0.78);
+  color: #f9f6f0;
+  font-size: 11px;
+  font-weight: 500;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+.fp-pin-tail {
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  transform: rotate(45deg);
+  margin-top: -28px;
+  margin-bottom: 20px;
+  z-index: -1;
+  box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.14);
+}
+
+/* Floating zoom & fit-bounds controls */
+.fp-map-zoom-stack {
+  position: absolute;
+  right: 14px;
+  bottom: 34px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface, rgba(255, 255, 255, 0.92));
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.fp-map-zoom-btn {
+  width: 34px;
+  height: 34px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fp-map-zoom-btn + .fp-map-zoom-btn {
+  border-top: 1px solid var(--border);
+}
+
+.fp-map-zoom-btn:hover {
+  background: var(--surface-2, rgba(0, 0, 0, 0.06));
+}
+
+.footprints-map-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+}
+
+.footprints-map-float-btn {
+  background: var(--surface, rgba(255, 255, 255, 0.92));
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.fp-map-attribution {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  z-index: 5;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.fp-map-empty-toast {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  padding: 12px 18px;
+  border-radius: var(--radius-md, 12px);
+  background: var(--surface, rgba(255, 255, 255, 0.94));
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13.5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  max-width: min(86%, 420px);
+  text-align: center;
+}
+
+/* Floating photo drawer on pin click */
+.footprints-map-drawer {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 10;
+  width: min(360px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-lg, 16px);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+  backdrop-filter: blur(18px) saturate(1.15);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.fp-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fp-drawer-title-wrap h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fp-drawer-title-wrap p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+}
+
+.fp-drawer-tag {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.fp-drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.fp-drawer-thumb {
+  border: none;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.fp-drawer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.18s ease;
+}
+
+.fp-drawer-thumb:hover img {
+  transform: scale(1.06);
+}
+
+.fp-drawer-empty {
+  grid-column: 1 / -1;
+  margin: 12px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.fp-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Theme 1: Paper (纸质手账) — warm sepia travel-journal map */
+body[data-theme="paper"] .fp-map-tiles {
+  filter: sepia(0.22) saturate(0.84) brightness(1.01);
+}
+
+body[data-theme="paper"] .fp-pin-frame {
+  border-color: #fbf7ef;
+}
+
+body[data-theme="paper"] .fp-pin-badge {
+  background: #ae764e;
+  border-color: #fbf7ef;
+}
+
+/* Theme 2: Classic (经典画册) — Apple-style frosted glass */
+body[data-theme="classic"] .footprints-map-drawer,
+body[data-theme="classic"] .fp-map-zoom-stack,
+body[data-theme="classic"] .footprints-map-float-btn {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(22px) saturate(1.4);
+}
+
+/* Theme 3: Vintage (复古胶片) — darkroom amber map & quartz-orange badges */
+body[data-theme="vintage"] .footprints-map-wrap {
+  background: #181411;
+  border-color: rgba(235, 146, 52, 0.24);
+}
+
+body[data-theme="vintage"] .fp-map-tiles.is-dark-filter {
+  filter: invert(0.92) hue-rotate(180deg) sepia(0.28) brightness(0.82) contrast(0.94);
+}
+
+body[data-theme="vintage"] .fp-pin-frame {
+  border-color: #2b231d;
+  background: #1f1915;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+}
+
+body[data-theme="vintage"] .fp-pin-tail {
+  background: #2b231d;
+}
+
+body[data-theme="vintage"] .fp-pin-badge {
+  background: #eb9234;
+  color: #181411;
+  border-color: #2b231d;
+}
+
+body[data-theme="vintage"] .fp-pin-label {
+  background: rgba(24, 20, 17, 0.88);
+  color: #f4b165;
+  border: 1px solid rgba(235, 146, 52, 0.3);
+}
+
+body[data-theme="vintage"] .fp-map-attribution {
+  background: rgba(24, 20, 17, 0.78);
+  color: #b8a38c;
+}
+
+body[data-theme="vintage"] .footprints-map-drawer,
+body[data-theme="vintage"] .fp-map-zoom-stack,
+body[data-theme="vintage"] .footprints-map-float-btn {
+  background: rgba(28, 22, 18, 0.88);
+  border-color: rgba(235, 146, 52, 0.28);
+  color: #f3e8d8;
+}
+
+

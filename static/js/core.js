@@ -1075,6 +1075,9 @@ function applyTheme(theme, options = {}) {
         const activeView = VIEWS.find((v) => v.name === state.view) || VIEWS[0];
         if (activeView) moveViewInk(activeView.button);
       }
+      if (typeof refreshFootprintsMapLayer === "function") {
+        refreshFootprintsMapLayer();
+      }
     });
   }
   if (notify) {

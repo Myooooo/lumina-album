@@ -47,9 +47,10 @@
 - 照片详情页展示识别到的人物/宠物头像胶囊，悬停在照片上高亮人脸/宠物框，点击直接跳转对应人物集合，并支持原地命名或移出误检
 
 **足迹**
-- 按城市聚合照片，点进去是这个地点自己的照片墙
-- 详情页的上一张 / 下一张在该地点的照片里轮换
-- 不用地图：本地应用不该为此联网
+- 合并展示 EXIF GPS 自动识别的城市与用户**自定义地点**，支持「卡片」和「地图」两种视图切换
+- 新建地点时自动调用「设置 → 地点」中的地理编码接口反查经纬度，支持候选确认或手工填写坐标
+- 支持在地点内批量添加/移出照片，或在相册多选底栏一键「归入地点」；归入后仅覆盖数据库中的地点字段，原图 EXIF 全程不动
+- 地图模式仿 iOS 相册体验：封面缩略图气泡图钉 + 照片数量角标 + 缩放动态聚合 + 进入时自动缩放到刚好覆盖所有有照片的地点；默认使用免 Key 底图（CartoDB），并兼容高德（自动火星坐标纠偏）、OSM 与自定义 XYZ 瓦片源
 
 **导出**
 - 存成**网页**：单个 HTML，图片全部内嵌，十年后还能直接打开、也能打印
@@ -165,6 +166,10 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_GEOCODING_FALLBACK` | `false` | 高德查不到时是否改用 Nominatim（会把坐标发给 OpenStreetMap） |
 | `PHOTO_GEOCODING_INTERVAL` | `1.0` | 地理编码最小间隔（秒） |
 | `PHOTO_GEOCODING_RETRIES` | `3` | 地理编码重试次数 |
+| `PHOTO_FOOTPRINT_DEFAULT_VIEW` | `grid` | 足迹默认视图：`grid`（卡片）或 `map`（地图） |
+| `PHOTO_MAP_TILE_PROVIDER` | `carto` | 地图底图源：`carto`（免 Key 默认）/ `osm` / `amap` / `custom` |
+| `PHOTO_MAP_TILE_URL` | 空 | 自定义 XYZ 瓦片模板（支持 `{z}/{x}/{y}/{s}/{apikey}`） |
+| `PHOTO_MAP_API_KEY` | 空 | 自定义底图可选 API Key |
 | `PHOTO_FFMPEG_PATH` | 空 | ffmpeg/ffprobe 所在目录 |
 | `PHOTO_VIDEO_CLIP_SECONDS` | `3` | 详情页预览时长 |
 | `PHOTO_VIDEO_CLIP_MAX_EDGE` | `960` | 预览最大边长 |
@@ -197,7 +202,7 @@ sudo apt install ffmpeg        # Linux
 - **图片**：代理图与缩略图、索引线程数、实况照片、那年今日时间范围
 - **视频**：处理方式、预览参数、ffmpeg 检测状态
 - **人物**：开关、自动扫描、宠物猫狗、`buffalo_l`/`buffalo_s` 模型切换、聚类阈值、硬件加速与依赖检查、一键下载（弹窗进度条）及手动下载路径指引
-- **地点**：逆地理编码服务、Key、失败回退、请求间隔、重试次数
+- **地点**：地理编码与地名解析（服务商、Key、回退、间隔、重试）、地图模式默认视图与底图源（默认免 Key CartoDB，兼容高德/OSM/自定义 XYZ）
 - **系统**：分为「主题」（三套界面主题切换）与「数据」（清理缓存、隐藏当前目录、查看隐藏的目录、移除当前目录）
 
 提示词只有评价风格和评分标准是开放的；每张照片先用固定的「说人话」规则写一句简评，再由模型判断这句是不是只是画面说明（是则重写），最后单独按评分标准打分、打标签、起标题。粘贴一份完整提示词也会被自动裁掉固定部分。用本地 9B 级模型实测时，把写简评和打分分开、并在必要时重写一句，比一次输出 JSON 更不容易把简评写成画面说明。
@@ -206,7 +211,7 @@ sudo apt install ffmpeg        # Linux
 
 ## 开发与测试
 
-应用本身没有构建步骤：`static/index.html` 按顺序加载普通脚本（`icons` / `ui-kit` / `core` / `gallery` / `views` / `viewer` / `settings` / `people` / `app`），后端由 `photo_reviewer/web/` 里的路由模块自行注册。
+应用本身没有构建步骤：`static/index.html` 按顺序加载普通脚本（`icons` / `ui-kit` / `core` / `gallery` / `views` / `viewer` / `settings` / `people` / `footprints` / `footprints-map` / `app`），后端由 `photo_reviewer/web/` 里的路由模块自行注册。
 
 ```bash
 # 后端：unittest 全量（不需要额外依赖；装了 ffmpeg 时视频集成测试会真正执行）
