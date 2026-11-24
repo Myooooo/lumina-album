@@ -828,9 +828,16 @@ function updateCardFavorite(id) {
   const card = document.querySelector(`.polaroid-card[data-id="${id}"]`);
   if (!photo || !card) return;
   const btn = card.querySelector(".favorite-btn");
+  if (!btn) return;
   btn.classList.toggle("active", !!photo.favorite);
   btn.title = photo.favorite ? "取消珍藏" : "珍藏";
   btn.innerHTML = photo.favorite ? ICONS.heartFilled : ICONS.heart;
+  if (photo.favorite) {
+    btn.classList.remove("is-popping");
+    void btn.offsetWidth;
+    btn.classList.add("is-popping");
+    setTimeout(() => btn.classList.remove("is-popping"), 320);
+  }
 }
 
 /* ==========================================================================

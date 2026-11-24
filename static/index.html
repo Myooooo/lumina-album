@@ -886,6 +886,37 @@
     </div>
   </div>
 
+  <!-- Duplicate Split-Curtain Comparison Modal -->
+  <div id="compareModal" class="modal hidden">
+    <div class="modal-content compare-content">
+      <button class="modal-close" data-close="compareModal" title="关闭 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
+      <div class="compare-header">
+        <h2><span class="modal-title-icon" data-icon="compare"></span>暗房细节对比</h2>
+        <div class="compare-pickers">
+          <label class="compare-picker-label">左图
+            <select id="compareLeftSelect" data-no-custom></select>
+          </label>
+          <label class="compare-picker-label">右图
+            <select id="compareRightSelect" data-no-custom></select>
+          </label>
+        </div>
+      </div>
+      <div class="compare-stage" id="compareStage" style="--split: 50%">
+        <img id="compareRightImg" class="compare-img compare-img-right" alt="右图" />
+        <img id="compareLeftImg" class="compare-img compare-img-left" alt="左图" />
+        <div class="compare-divider" id="compareDivider" aria-hidden="true">
+          <span class="compare-handle" data-icon="compare"></span>
+        </div>
+        <div class="compare-tag compare-tag-left" id="compareLeftMeta"></div>
+        <div class="compare-tag compare-tag-right" id="compareRightMeta"></div>
+        <input id="compareSlider" class="compare-range" type="range" min="0" max="100" value="50" aria-label="拖动对比分割线" />
+      </div>
+      <div class="compare-footer">
+        <span class="compare-tip">左右拖动分割线对比锐度与细节，按住 <kbd>Space</kbd> 快速切换右图</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Fullscreen Zoom & Pan Modal -->
   <div id="fullscreenModal" class="fs-viewer hidden">
     <button id="fsCloseBtn" class="fs-viewer-close" title="退出全屏 (Esc)"><span class="btn-icon" data-icon="close"></span></button>

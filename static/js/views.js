@@ -922,6 +922,27 @@ async function deletePhotos(ids) {
     loadStats();
     applyPreviewAfterRemoval(previewNext);
     await refreshCardStatus();
+    if (!data.errors || !data.errors.length) {
+      const removedIds = ids.slice();
+      showToast(`已暂时收起 ${removedIds.length} 张回忆`, "info", {
+        action: {
+          label: "撤销",
+          onClick: async () => {
+            try {
+              await api("/api/restore", {
+                method: "POST",
+                body: JSON.stringify({ ids: removedIds, sync_card: syncCard }),
+              });
+              showToast(`已恢复 ${removedIds.length} 张回忆`, "success");
+              await loadPhotos({ quiet: false });
+              await refreshCardStatus();
+            } catch (err) {
+              showToast("撤销失败：" + err.message, "error");
+            }
+          },
+        },
+      });
+    }
   } catch (e) {
     showToast("暂时收起失败：" + e.message, "error");
   }

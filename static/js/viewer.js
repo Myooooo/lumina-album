@@ -175,12 +175,49 @@ function resetFullscreenZoom() {
  * may not contain the photo at all.
  */
 function openPreview(id, context = null) {
+  let sourceRect = null;
+  if (typeof document !== "undefined" && !prefersReducedMotion()) {
+    const cardThumb =
+      document.querySelector(`.polaroid-card[data-id="${id}"] .polaroid-photo-frame`) ||
+      document.querySelector(`.dup-card[data-id="${id}"] .dup-shot`);
+    if (cardThumb) {
+      const r = cardThumb.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) {
+        sourceRect = r;
+      }
+    }
+  }
   state.previewNavToken += 1;
   state.currentPreviewId = id;
   state.previewContext = context && context.ids && context.ids.length ? context : null;
   showModal($("previewModal"));
   pushModal($("previewModal"));
   updatePreview();
+
+  if (sourceRect && typeof requestAnimationFrame === "function") {
+    const stage = document.querySelector("#previewModal .preview-stage");
+    if (stage) {
+      requestAnimationFrame(() => {
+        const target = stage.getBoundingClientRect();
+        if (!target.width || !target.height) return;
+        const dx = sourceRect.left + sourceRect.width / 2 - (target.left + target.width / 2);
+        const dy = sourceRect.top + sourceRect.height / 2 - (target.top + target.height / 2);
+        const scale = Math.max(0.25, Math.min(1, sourceRect.width / target.width));
+        stage.style.transition = "none";
+        stage.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${scale.toFixed(3)})`;
+        stage.style.opacity = "0.75";
+        void stage.offsetWidth;
+        stage.style.transition = "transform 260ms var(--ease-out), opacity 200ms var(--ease-out)";
+        stage.style.transform = "";
+        stage.style.opacity = "";
+        setTimeout(() => {
+          stage.style.transition = "";
+          stage.style.transform = "";
+          stage.style.opacity = "";
+        }, 290);
+      });
+    }
+  }
 }
 
 /**

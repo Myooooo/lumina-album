@@ -231,14 +231,14 @@ window.LuminaUI = (() => {
   }
 
   /**
-   * Warm paper-style toast notification
+   * Warm paper-style toast notification (supports optional action button, e.g. Undo)
    */
-  function showToast(message, type = "info") {
+  function showToast(message, type = "info", options = {}) {
     const container = getEl("toastContainer");
     if (!container) return;
     const el = document.createElement("div");
     el.className = `toast ${type}`;
-    
+
     let iconSvg = ICONS.sparkles || "";
     if (type === "success") iconSvg = ICONS.check || "";
     else if (type === "error") iconSvg = ICONS.error || "";
@@ -248,14 +248,35 @@ window.LuminaUI = (() => {
     // The message is text, never markup: it routinely carries a server error or
     // a file name, and this was the one render path that skipped escapeHtml.
     const text = document.createElement("span");
+    text.className = "toast-message";
     text.textContent = String(message ?? "");
     el.appendChild(text);
-    container.appendChild(el);
 
-    setTimeout(() => {
+    let dismissed = false;
+    const dismiss = () => {
+      if (dismissed) return;
+      dismissed = true;
       el.classList.add("removing");
       setTimeout(() => el.remove(), 180);
-    }, 3600);
+    };
+
+    if (options && options.action && typeof options.action.onClick === "function") {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "toast-action";
+      btn.textContent = String(options.action.label || "撤销");
+      btn.addEventListener("click", () => {
+        dismiss();
+        options.action.onClick();
+      });
+      el.appendChild(btn);
+    }
+
+    container.appendChild(el);
+    const duration =
+      Number(options && options.duration) ||
+      (options && options.action ? 6000 : 3600);
+    setTimeout(dismiss, duration);
   }
 
   function showLoading(text) {

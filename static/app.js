@@ -1166,6 +1166,7 @@ function dupGroupHtml(group, index) {
         <span class="dup-group-title">${group.photos.length} 张相似</span>
         ${wasted ? `<span class="dup-group-wasted">${wasted}</span>` : ""}
         ${allChosen ? '<span class="dup-group-warning">整组都会被收起</span>' : ""}
+        ${group.photos.length >= 2 ? `<button class="dup-group-compare" type="button" data-compare="${index}" title="叠加拖动分割线对比两张细节">${ICONS.compare || ""}对比细节</button>` : ""}
         <button class="dup-group-keep" type="button" data-keep="${index}">只留建议的那张</button>
       </header>
       <div class="dup-grid">
@@ -1452,10 +1453,16 @@ function initDuplicates() {
   const trash = $("dupTrashBtn");
   if (trash) trash.addEventListener("click", trashChosenDuplicates);
 
-  // The per-group shortcut lives in the header of each group, so it is delegated
+  // The per-group shortcuts live in the header of each group, so they are delegated
   // from the list rather than bound to every group on every render.
   if (body) {
     body.addEventListener("click", (e) => {
+      const compareBtn = e.target.closest(".dup-group-compare");
+      if (compareBtn) {
+        const index = Number(compareBtn.dataset.compare);
+        if (Number.isFinite(index)) openCompareModal(index);
+        return;
+      }
       const button = e.target.closest(".dup-group-keep");
       if (!button) return;
       const index = Number(button.dataset.keep);
@@ -1464,6 +1471,116 @@ function initDuplicates() {
       renderDuplicates();
     });
   }
+  initCompareModal();
+}
+
+/* ==========================================================================
+   Duplicate Split-Curtain Comparison Modal
+   ========================================================================== */
+
+const compareState = {
+  photos: [],
+  leftId: null,
+  rightId: null,
+  split: 50,
+  savedSplit: null,
+};
+
+function setCompareSplit(pct) {
+  const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
+  compareState.split = clamped;
+  const stage = $("compareStage");
+  const slider = $("compareSlider");
+  if (stage) stage.style.setProperty("--split", `${clamped}%`);
+  if (slider) slider.value = String(Math.round(clamped));
+}
+
+function paintCompareImages() {
+  const left = compareState.photos.find((p) => p.id === compareState.leftId) || compareState.photos[0];
+  const right = compareState.photos.find((p) => p.id === compareState.rightId) || compareState.photos[1] || left;
+  if (!left || !right) return;
+  const leftImg = $("compareLeftImg");
+  const rightImg = $("compareRightImg");
+  if (leftImg) leftImg.src = `/api/proxy/${left.id}`;
+  if (rightImg) rightImg.src = `/api/proxy/${right.id}`;
+  const metaText = (p, side) => {
+    const dims = p.width && p.height ? `${p.width}×${p.height}` : "";
+    return `${side} · ${p.filename}${dims ? ` (${dims})` : ""} · ${fmtSize(p.size)}`;
+  };
+  const leftMeta = $("compareLeftMeta");
+  const rightMeta = $("compareRightMeta");
+  if (leftMeta) leftMeta.textContent = metaText(left, "左");
+  if (rightMeta) rightMeta.textContent = metaText(right, "右");
+}
+
+function openCompareModal(groupIndex) {
+  const group = (dupState.groups || [])[groupIndex];
+  if (!group || !group.photos || group.photos.length < 2) return;
+  compareState.photos = group.photos;
+  const keeper = group.photos.find((p) => p.id === group.keep_id) || group.photos[0];
+  const other = group.photos.find((p) => p.id !== keeper.id) || group.photos[1];
+  compareState.leftId = keeper.id;
+  compareState.rightId = other.id;
+
+  const leftSel = $("compareLeftSelect");
+  const rightSel = $("compareRightSelect");
+  const optsHtml = group.photos
+    .map((p) => `<option value="${p.id}">${escapeHtml(p.filename)}${p.id === group.keep_id ? "（建议保留）" : ""}</option>`)
+    .join("");
+  if (leftSel) {
+    leftSel.innerHTML = optsHtml;
+    leftSel.value = String(keeper.id);
+  }
+  if (rightSel) {
+    rightSel.innerHTML = optsHtml;
+    rightSel.value = String(other.id);
+  }
+  setCompareSplit(50);
+  paintCompareImages();
+  showModal($("compareModal"));
+  pushModal($("compareModal"));
+}
+
+function initCompareModal() {
+  const slider = $("compareSlider");
+  if (slider) {
+    slider.addEventListener("input", () => setCompareSplit(slider.value));
+  }
+  const leftSel = $("compareLeftSelect");
+  const rightSel = $("compareRightSelect");
+  if (leftSel) {
+    leftSel.addEventListener("change", () => {
+      compareState.leftId = Number(leftSel.value);
+      paintCompareImages();
+    });
+  }
+  if (rightSel) {
+    rightSel.addEventListener("change", () => {
+      compareState.rightId = Number(rightSel.value);
+      paintCompareImages();
+    });
+  }
+  document.addEventListener("keydown", (e) => {
+    const modal = $("compareModal");
+    if (!modal || modal.classList.contains("hidden")) return;
+    if (e.code === "Space" && !e.repeat) {
+      e.preventDefault();
+      compareState.savedSplit = compareState.split;
+      setCompareSplit(0);
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      setCompareSplit(compareState.split - 5);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      setCompareSplit(compareState.split + 5);
+    }
+  });
+  document.addEventListener("keyup", (e) => {
+    if (e.code === "Space" && compareState.savedSplit !== null) {
+      setCompareSplit(compareState.savedSplit);
+      compareState.savedSplit = null;
+    }
+  });
 }
 
 document.addEventListener("DOMContentLoaded", init);
