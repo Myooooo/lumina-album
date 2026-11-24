@@ -6998,17 +6998,7 @@ body[data-theme="vintage"] .tape {
 }
 
 body[data-theme="vintage"] .polaroid-inner {
-  background: #1d1713;
-  border: 1px solid #352a21;
-  border-radius: 3px;
-  padding: 0 11px 13px;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 232, 200, 0.06);
   overflow: hidden;
-}
-
-body[data-theme="vintage"] .polaroid-card:hover .polaroid-inner {
-  border-color: rgba(217, 130, 59, 0.45);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(217, 130, 59, 0.2);
 }
 
 
@@ -7055,24 +7045,8 @@ body[data-theme="vintage"] .vintage-date-stamp {
 }
 
 body[data-theme="vintage"] .favorite-btn {
-  top: 44px;
-  right: 18px;
   width: 32px;
   height: 32px;
-  background: rgba(20, 15, 11, 0.72);
-  border-color: rgba(214, 184, 148, 0.25);
-  color: #cbbba8;
-}
-
-body[data-theme="vintage"] .favorite-btn.active {
-  background: rgba(232, 93, 63, 0.22);
-  border-color: rgba(232, 93, 63, 0.55);
-  color: #ff7a59;
-}
-
-body[data-theme="vintage"] .favorite-btn.active svg {
-  color: #ff7a59;
-  fill: #ff7a59;
 }
 
 body[data-theme="vintage"] .raw-badge-card {
@@ -7146,11 +7120,7 @@ body[data-theme="vintage"] .score-pill {
   border: 1px solid rgba(214, 184, 148, 0.18);
 }
 
-body[data-theme="vintage"] .score-pill.total {
-  background: rgba(217, 130, 59, 0.2);
-  border-color: rgba(217, 130, 59, 0.42);
-  color: #f5b97a;
-}
+
 
 body[data-theme="vintage"] .card-actions {
   border-top-color: rgba(214, 184, 148, 0.16);
@@ -7161,13 +7131,7 @@ body[data-theme="vintage"] .modal {
   background: rgba(8, 6, 4, 0.78);
 }
 
-body[data-theme="vintage"] .modal-content,
-body[data-theme="vintage"] .preview-content {
-  background: #1d1713;
-  border: 1px solid #382d24;
-  box-shadow: var(--shadow-modal);
-  color: var(--text);
-}
+
 
 body[data-theme="vintage"] .modal-close {
   background: #2a211a;
@@ -11118,6 +11082,50 @@ body[data-theme="vintage"] .polaroid-card.is-video .polaroid-photo-frame::before
 
 body[data-theme="vintage"][data-density="wall"] .polaroid-card.is-video .polaroid-photo-frame::before {
   display: none;
+}
+
+/* ==========================================================================
+   Round 3 P2: Global Tabular Numerals & Cross-Theme Typographic Rhythm
+   ========================================================================== */
+
+.fs-zoom-pct,
+.score-pill,
+.badge.score,
+.dimension-value,
+.spec-badge span.spec-val,
+.filters-active-badge,
+.card-pending-dot,
+.selection-bar strong,
+.video-badge,
+.progress-eta,
+.wall-score {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Vintage CJK + Mono breathing room & crisp sans-serif for all long-form copy */
+body[data-theme="vintage"] .btn,
+body[data-theme="vintage"] .tag,
+body[data-theme="vintage"] .view-tab,
+body[data-theme="vintage"] .filter-chip,
+body[data-theme="vintage"] .stat-label {
+  letter-spacing: 0.025em;
+}
+
+body[data-theme="vintage"] .empty-state-desc,
+body[data-theme="vintage"] .footprints-empty-hint,
+body[data-theme="vintage"] .memories-empty-hint,
+body[data-theme="vintage"] .duplicates-empty-hint,
+body[data-theme="vintage"] .export-lede,
+body[data-theme="vintage"] .import-note,
+body[data-theme="vintage"] .duplicates-lede,
+body[data-theme="vintage"] .memories-lede,
+body[data-theme="vintage"] .footprints-lede {
+  font-family: var(--font-sans);
+  letter-spacing: 0.005em;
+}
+
+body[data-theme="classic"] .preview-quote-card {
+  letter-spacing: 0.01em;
 }
 
 
