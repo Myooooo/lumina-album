@@ -671,6 +671,10 @@ async function openSettings() {
     $("setGeocodingFallback").checked = !!cfg.geocoding_fallback;
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
+    if ($("setFootprintDefaultView")) setSelectValue($("setFootprintDefaultView"), cfg.footprint_default_view || "grid");
+    if ($("setMapTileProvider")) setSelectValue($("setMapTileProvider"), cfg.map_tile_provider || "carto");
+    if ($("setMapTileUrl")) $("setMapTileUrl").value = cfg.map_tile_url || "";
+    if ($("setMapApiKey")) $("setMapApiKey").value = cfg.map_api_key || "";
     $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 3;
     $("setVideoClipMaxEdge").value = cfg.video_clip_max_edge || 960;
     $("setVideoClipCrf").value = cfg.video_clip_crf ?? 28;
@@ -696,6 +700,11 @@ async function openSettings() {
     state.liveVolume = Number(cfg.live_volume ?? 0);
     state.faceRecognitionEnabled = cfg.face_recognition_enabled !== false;
     state.faceAutoScan = !!cfg.face_auto_scan;
+    state.geocodingProvider = cfg.geocoding_provider || "nominatim";
+    state.footprintDefaultView = cfg.footprint_default_view || "grid";
+    state.mapTileProvider = cfg.map_tile_provider || "carto";
+    state.mapTileUrl = cfg.map_tile_url || "";
+    state.mapApiKey = cfg.map_api_key || "";
     paintFfmpegStatus();
     paintPeopleEngineStatus();
     // Always open on the model tab: that is what most visits are for.
@@ -728,6 +737,10 @@ async function saveSettings() {
     geocoding_fallback: $("setGeocodingFallback").checked,
     geocoding_interval: parseFloat($("setGeocodingInterval").value) || 1.0,
     geocoding_retries: parseInt($("setGeocodingRetries").value, 10) || 3,
+    footprint_default_view: $("setFootprintDefaultView") ? $("setFootprintDefaultView").value : "grid",
+    map_tile_provider: $("setMapTileProvider") ? $("setMapTileProvider").value : "carto",
+    map_tile_url: $("setMapTileUrl") ? $("setMapTileUrl").value.trim() : "",
+    map_api_key: $("setMapApiKey") ? $("setMapApiKey").value.trim() : "",
     video_clip_seconds: parseFloat($("setVideoClipSeconds").value) || 3,
     video_clip_max_edge: parseInt($("setVideoClipMaxEdge").value, 10) || 960,
     video_clip_crf: parseInt($("setVideoClipCrf").value, 10) || 28,
@@ -755,6 +768,14 @@ async function saveSettings() {
     });
     state.faceRecognitionEnabled = !!payload.face_recognition_enabled;
     state.faceAutoScan = !!payload.face_auto_scan;
+    state.geocodingProvider = payload.geocoding_provider || "nominatim";
+    state.footprintDefaultView = payload.footprint_default_view || "grid";
+    state.mapTileProvider = payload.map_tile_provider || "carto";
+    state.mapTileUrl = payload.map_tile_url || "";
+    state.mapApiKey = payload.map_api_key || "";
+    if (typeof refreshFootprintsMapLayer === "function") {
+      refreshFootprintsMapLayer();
+    }
     closeModal("settingsModal");
     showToast("设置已保存。", "success");
   } catch (e) {
@@ -1885,6 +1906,11 @@ async function loadPlaybackConfig() {
     state.liveVolume = Number(cfg.live_volume ?? 0);
     state.faceRecognitionEnabled = cfg.face_recognition_enabled !== false;
     state.faceAutoScan = !!cfg.face_auto_scan;
+    state.geocodingProvider = cfg.geocoding_provider || "nominatim";
+    state.footprintDefaultView = cfg.footprint_default_view || "grid";
+    state.mapTileProvider = cfg.map_tile_provider || "carto";
+    state.mapTileUrl = cfg.map_tile_url || "";
+    state.mapApiKey = cfg.map_api_key || "";
   } catch (e) {
     // Defaults are sensible, so a failure here changes nothing visible.
     console.warn("读取播放设置失败", e);

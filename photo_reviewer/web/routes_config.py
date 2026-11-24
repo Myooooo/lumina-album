@@ -24,6 +24,8 @@ from ..api_client import (
 
 from ..config import (
     EDITABLE_FIELDS,
+    FOOTPRINT_VIEW_MODES,
+    MAP_TILE_PROVIDERS,
     PREVIEW_MODES,
     VIDEO_PROCESSING,
 )
@@ -289,6 +291,20 @@ def register(app, cfg, database):
             staged["geocoding_provider"] = raw_provider
         if "geocoding_api_key" in data:
             staged["geocoding_api_key"] = str(data["geocoding_api_key"])
+        if "footprint_default_view" in data:
+            fv = str(data["footprint_default_view"]).strip().lower()
+            if fv not in FOOTPRINT_VIEW_MODES:
+                return jsonify({"error": "footprint_default_view 仅支持 grid 或 map"}), 400
+            staged["footprint_default_view"] = fv
+        if "map_tile_provider" in data:
+            mp = str(data["map_tile_provider"]).strip().lower()
+            if mp not in MAP_TILE_PROVIDERS:
+                return jsonify({"error": "不支持的地图底图源"}), 400
+            staged["map_tile_provider"] = mp
+        if "map_tile_url" in data:
+            staged["map_tile_url"] = str(data["map_tile_url"] or "").strip()[:512]
+        if "map_api_key" in data:
+            staged["map_api_key"] = str(data["map_api_key"] or "").strip()[:256]
 
         for key, value in staged.items():
             setattr(cfg, key, value)

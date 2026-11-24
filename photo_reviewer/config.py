@@ -53,6 +53,10 @@ PERSISTED_FIELDS = (
     "geocoding_fallback",
     "geocoding_interval",
     "geocoding_retries",
+    "footprint_default_view",
+    "map_tile_provider",
+    "map_tile_url",
+    "map_api_key",
     "video_clip_seconds",
     "video_clip_max_edge",
     "video_clip_crf",
@@ -85,6 +89,8 @@ VIDEO_PROCESSING = ("ffmpeg", "none")
 #: What the detail-page preview does when a video is opened. ``off`` keeps the
 #: poster, ``once`` plays the clip and leaves the last frame, ``loop`` repeats.
 PREVIEW_MODES = ("off", "once", "loop")
+MAP_TILE_PROVIDERS = ("carto", "amap", "osm", "custom")
+FOOTPRINT_VIEW_MODES = ("grid", "map")
 
 
 @dataclass
@@ -169,6 +175,18 @@ class Config:
     )
     geocoding_retries: int = field(
         default_factory=lambda: int(os.getenv("PHOTO_GEOCODING_RETRIES", "3"))
+    )
+    footprint_default_view: str = field(
+        default_factory=lambda: os.getenv("PHOTO_FOOTPRINT_DEFAULT_VIEW", "grid")
+    )
+    map_tile_provider: str = field(
+        default_factory=lambda: os.getenv("PHOTO_MAP_TILE_PROVIDER", "carto")
+    )
+    map_tile_url: str = field(
+        default_factory=lambda: os.getenv("PHOTO_MAP_TILE_URL", "")
+    )
+    map_api_key: str = field(
+        default_factory=lambda: os.getenv("PHOTO_MAP_API_KEY", "")
     )
     host: str = field(default_factory=lambda: os.getenv("PHOTO_HOST", "127.0.0.1"))
     # 5050 rather than the more obvious 5000: Windows hands out blocks of
@@ -383,6 +401,10 @@ class Config:
             "geocoding_fallback": self.geocoding_fallback,
             "geocoding_interval": self.geocoding_interval,
             "geocoding_retries": self.geocoding_retries,
+            "footprint_default_view": self.footprint_default_view,
+            "map_tile_provider": self.map_tile_provider,
+            "map_tile_url": self.map_tile_url,
+            "map_api_key": self.map_api_key,
             "image_extensions": list(self.image_extensions),
             "raw_extensions": list(self.raw_extensions),
             "video_extensions": list(self.video_extensions),

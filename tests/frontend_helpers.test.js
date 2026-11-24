@@ -1896,6 +1896,15 @@ section("people & pets (人物与宠物)");
       /title:\s*`\$\{personDisplayName\(cur\.person\)\} · 待确认`/.test(src),
     true
   );
+  check(
+    "settings 地点 tab exposes keyless default map provider (carto) and map view config",
+    /id="setFootprintDefaultView"/.test(html) &&
+      /id="setMapTileProvider"/.test(html) &&
+      /value="carto"/.test(html) &&
+      /id="setMapTileUrl"/.test(html) &&
+      /map_tile_provider:/.test(src),
+    true
+  );
 }
 
 console.log(
