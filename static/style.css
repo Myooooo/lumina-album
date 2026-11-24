@@ -12685,56 +12685,6 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   flex-wrap: wrap;
 }
 
-.footprints-mode-switch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  padding: 3px;
-  border-radius: 999px;
-  background: var(--surface-2, rgba(0, 0, 0, 0.05));
-  border: 1px solid var(--border);
-  gap: 2px;
-}
-
-.footprints-mode-ink {
-  position: absolute;
-  left: 3px;
-  top: 3px;
-  bottom: 3px;
-  width: 0;
-  border-radius: 999px;
-  background: var(--surface, #fff);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-  opacity: 0;
-  pointer-events: none;
-  transition: transform 260ms var(--ease-out), width 260ms var(--ease-out),
-              opacity 160ms var(--ease-out);
-}
-
-.footprints-mode-btn {
-  position: relative;
-  z-index: 1;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 5px 14px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: color 180ms var(--ease-out);
-}
-
-.footprints-mode-btn:hover {
-  color: var(--text);
-}
-
-.footprints-mode-btn.active {
-  background: transparent;
-  color: var(--text);
-  box-shadow: none;
-}
-
 /* The map replaces the grid inside the same sheet: fade/scale it in rather
    than swapping two DOM states with a hard cut. */
 .footprints-map-wrap:not(.hidden) {
@@ -12977,50 +12927,9 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   color: var(--muted);
 }
 
-/* Theme coordination for Vintage & Classic */
-body[data-theme="vintage"] .footprints-mode-switch {
-  background: rgba(255, 245, 230, 0.06);
-  border-color: rgba(235, 146, 52, 0.28);
-}
-
-body[data-theme="vintage"] .footprints-mode-ink {
-  background: rgba(235, 146, 52, 0.22);
-  box-shadow: 0 0 0 1px rgba(235, 146, 52, 0.3);
-}
-
-body[data-theme="vintage"] .footprints-mode-btn.active {
-  background: transparent;
-  color: #f4b165;
-  box-shadow: none;
-}
-
-body[data-theme="paper"] .footprints-mode-switch {
-  background: #f3ecdd;
-  border: 1px dashed #cbbda5;
-}
-
-body[data-theme="paper"] .footprints-mode-ink {
-  background: #fffdf8;
-  box-shadow: 0 1px 0 rgba(138, 114, 88, 0.16), 0 2px 5px rgba(46, 34, 20, 0.08);
-}
-
-body[data-theme="paper"] .footprints-mode-btn.active {
-  color: #6b4f38;
-}
-
-body[data-theme="classic"] .footprints-mode-ink {
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 2px 10px rgba(38, 31, 25, 0.1), inset 0 1px 0 #ffffff;
-}
-
 body[data-theme="vintage"] .footprint-source-badge {
   background: rgba(224, 123, 57, 0.88);
   color: #1a1512;
-}
-
-body[data-theme="classic"] .footprints-mode-switch {
-  background: rgba(120, 120, 128, 0.12);
-  backdrop-filter: blur(12px);
 }
 
 /* ==========================================================================
@@ -13690,4 +13599,91 @@ body[data-theme="vintage"] .video-card-play {
   border-color: rgba(235, 146, 52, 0.5);
   color: #f4b165;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 12px rgba(235, 146, 52, 0.18);
+}
+
+/* CartoDB needs a key now: explain it over the empty tile layer. */
+.footprints-map-key-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  max-width: min(360px, calc(100% - 40px));
+  padding: 13px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 253, 248, 0.95);
+  border: 1px dashed rgba(154, 136, 114, 0.55);
+  color: #6b4f38;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(46, 34, 20, 0.14);
+}
+
+body[data-theme="vintage"] .footprints-map-key-hint {
+  background: rgba(24, 20, 17, 0.95);
+  border-color: rgba(235, 146, 52, 0.45);
+  color: #f4b165;
+  border-radius: 2px;
+}
+
+/* The confirm dialog can ask for one short piece of text (person/pet name,
+   place number/name). It uses the same paper/classic/vintage controls as the
+   rest of the app instead of the browser's native prompt. */
+.confirm-input {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 4px 0 18px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.confirm-input input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+
+.confirm-input input:focus {
+  border-color: var(--primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+body[data-theme="paper"] .confirm-input input {
+  border-radius: 3px;
+  border-color: #cbbda5;
+  background: #fffdf8;
+  font-family: var(--font-hand);
+  font-size: 15px;
+}
+
+body[data-theme="paper"] .confirm-input input:focus {
+  border-color: #9a602c;
+  box-shadow: 0 0 0 3px rgba(154, 96, 44, 0.12);
+}
+
+body[data-theme="vintage"] .confirm-input input {
+  border-radius: 2px;
+  border-color: rgba(235, 146, 52, 0.38);
+  background: #121110;
+  color: #f4b165;
+  font-family: var(--font-mono);
+}
+
+body[data-theme="vintage"] .confirm-input input:focus {
+  border-color: #eb9234;
+  box-shadow: 0 0 0 3px rgba(235, 146, 52, 0.12);
 }

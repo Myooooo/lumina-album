@@ -71,20 +71,20 @@ function syncFootprintsModeButtons() {
   sw.querySelectorAll("[data-fp-mode]").forEach((btn) => {
     const active = btn.dataset.fpMode === fpState.mode;
     btn.classList.toggle("active", active);
+    btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
   });
   const ink = $("footprintsModeInk");
-  const active = sw.querySelector(".footprints-mode-btn.active");
+  const active = sw.querySelector(".footprints-mode-btn.is-active");
   if (!ink || !active) return;
-  const base = sw.getBoundingClientRect();
-  const rect = active.getBoundingClientRect();
-  if (!rect.width) {
+  const width = active.offsetWidth;
+  if (!width) {
     ink.style.opacity = "0";
     return;
   }
   ink.style.opacity = "1";
-  ink.style.width = `${rect.width}px`;
-  ink.style.transform = `translateX(${rect.left - base.left - 3}px)`;
+  ink.style.width = `${width}px`;
+  ink.style.transform = `translateX(${active.offsetLeft}px)`;
 }
 
 function setFootprintsMode(mode) {
@@ -359,6 +359,9 @@ async function openFootprints(options = {}) {
   }
   syncFootprintsModeButtons();
   requestAnimationFrame(syncFootprintsModeButtons);
+  // The view transition keeps the panel hidden for a moment; measure again
+  // once it is actually laid out so the ink is not left at width 0.
+  setTimeout(syncFootprintsModeButtons, 320);
 
   const body = $("footprintsBody");
   const lede = $("footprintsLede");
@@ -724,12 +727,20 @@ async function assignSelectedPhotosToPlace() {
       return;
     }
     const choices = places.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
-    const raw = window.prompt(
-      `将选中的 ${ids.length} 张照片归入哪个自定义地点？（输入序号，或输入新地点名称直接新建）\n${choices}`,
-      "1"
+    const answer = await confirmDialog(
+      `将选中的 ${ids.length} 张照片归入哪个自定义地点？输入序号，或输入新地点名称直接新建。\n${choices}`,
+      {
+        title: "归入地点",
+        confirmText: "继续",
+        input: {
+          label: "地点序号或名称",
+          value: "1",
+          placeholder: "例如：1 或 海边",
+        },
+      }
     );
-    if (raw === null) return;
-    const text = raw.trim();
+    if (!answer || !answer.confirmed) return;
+    const text = String(answer.value || "").trim();
     if (!text) return;
     const num = Number(text);
     if (Number.isInteger(num) && num >= 1 && num <= places.length) {

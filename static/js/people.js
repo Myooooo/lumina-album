@@ -287,9 +287,20 @@ async function loadPeopleGrid() {
 }
 
 async function promptRenamePerson(personId, currentName = "") {
-  const raw = window.prompt("为这位人物或宠物起个名字（留空则恢复未命名）：", currentName || "");
-  if (raw === null) return;
-  const newName = raw.trim();
+  const answer = await confirmDialog(
+    "为这位人物或宠物起个名字；留空则恢复未命名。",
+    {
+      title: "修改名称",
+      confirmText: "保存",
+      input: {
+        label: "名称",
+        value: currentName || "",
+        placeholder: "留空恢复未命名",
+      },
+    }
+  );
+  if (!answer || !answer.confirmed) return;
+  const newName = String(answer.value || "").trim();
   if (newName === (currentName || "").trim()) return;
   try {
     const resp = await fetch(`/api/people/${personId}`, {

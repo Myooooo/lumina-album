@@ -350,6 +350,46 @@ async function main() {
   await window.openSettings();
   await new Promise((resolve) => window.setTimeout(resolve, 120));
 
+  // --- map source fields keep custom values while hidden -----------------
+  const mapProvider = document.getElementById("setMapTileProvider");
+  const mapUrlRow = document.getElementById("setMapTileUrlRow");
+  const mapKeyRow = document.getElementById("setMapApiKeyRow");
+  const mapUrl = document.getElementById("setMapTileUrl");
+  check(
+    "the custom map URL is hidden on the default AMap source",
+    mapUrlRow.classList.contains("hidden"),
+    true
+  );
+  mapUrl.value = "https://example.test/{z}/{x}/{y}.png";
+  mapProvider.value = "custom";
+  mapProvider.dispatchEvent(new window.Event("change", { bubbles: true }));
+  check(
+    "choosing custom reveals the URL field",
+    mapUrlRow.classList.contains("hidden"),
+    false
+  );
+  mapProvider.value = "amap";
+  mapProvider.dispatchEvent(new window.Event("change", { bubbles: true }));
+  check(
+    "switching away hides the URL field",
+    mapUrlRow.classList.contains("hidden"),
+    true
+  );
+  check(
+    "the custom URL value survives the switch",
+    mapUrl.value,
+    "https://example.test/{z}/{x}/{y}.png"
+  );
+  mapProvider.value = "carto";
+  mapProvider.dispatchEvent(new window.Event("change", { bubbles: true }));
+  check(
+    "CartoDB asks for its API key",
+    mapKeyRow.classList.contains("hidden"),
+    false
+  );
+  mapProvider.value = "amap";
+  mapProvider.dispatchEvent(new window.Event("change", { bubbles: true }));
+
   const customTrigger = document.getElementById("customPromptBtn");
   const customMenu = document.getElementById("customPromptMenu");
   const promptTextarea = document.getElementById("setSystemPrompt");
@@ -441,6 +481,12 @@ async function main() {
   );
 
   check(
+    "the confirm dialog can host a themed name input",
+    Boolean(document.getElementById("confirmInputRow")) &&
+      Boolean(document.getElementById("confirmInput")),
+    true
+  );
+  check(
     "settings exposes the face and ffmpeg one-click installers",
     Boolean(document.getElementById("downloadFaceModelsBtn")) &&
       document.getElementById("downloadFaceModelsBtn").textContent.includes("一键下载安装") &&
@@ -463,6 +509,23 @@ async function main() {
     Boolean(document.getElementById("previewExpandBtn")),
     true
   );
+
+  const naming = window.LuminaUI.confirmDialog("为人物改名", {
+    title: "修改名称",
+    input: { label: "名称", value: "旧名字", placeholder: "输入名称" },
+  });
+  await new Promise((resolve) => window.setTimeout(resolve, 30));
+  const confirmInput = document.getElementById("confirmInput");
+  check(
+    "the themed name dialog opens with its current value",
+    confirmInput && confirmInput.value,
+    "旧名字"
+  );
+  confirmInput.value = "新名字";
+  document.getElementById("confirmOkBtn").click();
+  const namingResult = await naming;
+  check("the themed name dialog returns the typed value", namingResult.value, "新名字");
+  check("confirming the name dialog is confirmed", namingResult.confirmed, true);
 
   window.LuminaUI.hideModal(document.getElementById("settingsModal"));
 

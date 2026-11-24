@@ -400,10 +400,10 @@
           <p class="footprints-lede" id="footprintsLede">正在整理走过的地方…</p>
         </div>
         <div class="footprints-header-actions" id="footprintsHeaderActions">
-          <div class="footprints-mode-switch" id="footprintsModeSwitch" role="group" aria-label="切换足迹视图">
-            <span class="footprints-mode-ink" id="footprintsModeInk" aria-hidden="true"></span>
-            <button type="button" class="footprints-mode-btn active" data-fp-mode="grid" aria-pressed="true">卡片</button>
-            <button type="button" class="footprints-mode-btn" data-fp-mode="map" aria-pressed="false">地图</button>
+          <div class="view-switcher footprints-mode-switch" id="footprintsModeSwitch" role="group" aria-label="切换足迹视图">
+            <span class="view-ink footprints-mode-ink" id="footprintsModeInk" aria-hidden="true"></span>
+            <button type="button" class="view-tab footprints-mode-btn is-active" data-fp-mode="grid" aria-pressed="true">卡片</button>
+            <button type="button" class="view-tab footprints-mode-btn" data-fp-mode="map" aria-pressed="false">地图</button>
           </div>
           <button id="footprintsCreatePlaceBtn" class="btn primary" type="button" title="创建自定义地点并自动反查坐标">
             <span class="btn-icon" data-icon="pin"></span>新建地点
@@ -413,6 +413,8 @@
       <div id="footprintsDetailBar" class="footprints-detail-bar hidden"></div>
       <div id="footprintsMapWrap" class="footprints-map-wrap hidden">
         <div id="footprintsMapCanvas" class="footprints-map-canvas"></div>
+        <div id="footprintsMapKeyHint" class="footprints-map-key-hint hidden">CartoDB 底图需要 API Key，请在「设置 → 地点」中填写。</div>
+        <div id="footprintsMapKeyHint" class="footprints-map-key-hint hidden">CartoDB 底图需要 API Key，请在「设置 → 地点」中填写。</div>
         <div class="footprints-map-controls">
           <button id="footprintsMapFitBtn" class="btn small footprints-map-float-btn" type="button" title="缩放以完整显示所有有照片的地点">
             <span class="btn-icon" data-icon="reset"></span>全览足迹
@@ -746,11 +748,11 @@
               </label>
             </div>
             <div class="settings-status" id="setFfmpegStatus">正在检测 ffmpeg…</div>
-            <div class="settings-row-actions">
+            <div class="settings-row-actions people-engine-actions">
               <button id="installFfmpegBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="import"></span>一键下载安装 FFmpeg</button>
               <button id="refreshFfmpegBtn" class="btn" type="button"><span class="btn-icon" data-icon="sync"></span>重新检测</button>
             </div>
-            <p class="settings-section-desc">Windows 会自动下载官方静态版；macOS 使用 Homebrew，Linux 使用 apt。自动安装失败时会给出可操作的手动安装指引。</p>
+            <p class="settings-section-desc">Windows 会自动下载官方静态版，macOS 使用 Homebrew，Linux 使用 apt。</p>
           </div>
 
           <div class="settings-section">
@@ -897,14 +899,15 @@
                 <select id="setMapTileProvider">
                   <option value="amap">高德地图（默认 · 国内推荐 · 自动火星坐标纠偏）</option>
                   <option value="osm">OpenStreetMap（国际 · 免 Key）</option>
+                  <option value="carto">CartoDB（需要 API Key）</option>
                   <option value="custom">自定义 XYZ 瓦片服务</option>
                 </select>
               </label>
               <label class="full-row" id="setMapTileUrlRow">自定义瓦片 URL 模板（仅「自定义」生效）
                 <input id="setMapTileUrl" type="text" placeholder="例如：https://tile.openstreetmap.org/{z}/{x}/{y}.png（支持 {apikey} 占位）" />
               </label>
-              <label class="full-row" id="setMapApiKeyRow">地图底图 API Key（可选，供自定义瓦片 {apikey} 使用）
-                <input id="setMapApiKey" type="password" placeholder="留空表示无需 Key" />
+              <label class="full-row" id="setMapApiKeyRow">地图底图 API Key（CartoDB 需要；自定义瓦片可用 {apikey}）
+                <input id="setMapApiKey" type="password" placeholder="选择 CartoDB 时必填；自定义瓦片可留空" />
               </label>
             </div>
           </div>
@@ -1251,6 +1254,10 @@
       <label id="confirmCheckRow" class="confirm-check hidden">
         <input type="checkbox" id="confirmCheckInput" checked />
         <span id="confirmCheckLabel"></span>
+      </label>
+      <label id="confirmInputRow" class="confirm-input hidden">
+        <span id="confirmInputLabel"></span>
+        <input id="confirmInput" type="text" maxlength="60" autocomplete="off" />
       </label>
       <div class="modal-actions">
         <button id="confirmCancelBtn" class="btn"><span class="btn-icon" data-icon="close"></span>取消</button>

@@ -390,6 +390,16 @@ function onSettingsTabKeydown(e) {
  * album), so the row is a status line: the user needs to know why their videos
  * have no preview before they start hunting through the logs.
  */
+function syncMapTileFields() {
+  const provider = $("setMapTileProvider") ? $("setMapTileProvider").value : "amap";
+  const custom = provider === "custom";
+  const needsKey = custom || provider === "carto";
+  const urlRow = $("setMapTileUrlRow");
+  const keyRow = $("setMapApiKeyRow");
+  if (urlRow) urlRow.classList.toggle("hidden", !custom);
+  if (keyRow) keyRow.classList.toggle("hidden", !needsKey);
+}
+
 async function paintFfmpegStatus() {
   const el = $("setFfmpegStatus");
   if (!el) return;
@@ -778,9 +788,10 @@ async function openSettings() {
     $("setGeocodingInterval").value = cfg.geocoding_interval || 1.0;
     $("setGeocodingRetries").value = cfg.geocoding_retries ?? 3;
     if ($("setFootprintDefaultView")) setSelectValue($("setFootprintDefaultView"), cfg.footprint_default_view || "grid");
-    if ($("setMapTileProvider")) setSelectValue($("setMapTileProvider"), ["amap", "osm", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap");
+    if ($("setMapTileProvider")) setSelectValue($("setMapTileProvider"), ["amap", "osm", "carto", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap");
     if ($("setMapTileUrl")) $("setMapTileUrl").value = cfg.map_tile_url || "";
     if ($("setMapApiKey")) $("setMapApiKey").value = cfg.map_api_key || "";
+    syncMapTileFields();
     $("setVideoClipSeconds").value = cfg.video_clip_seconds ?? 3;
     $("setVideoClipMaxEdge").value = cfg.video_clip_max_edge || 960;
     $("setVideoClipCrf").value = cfg.video_clip_crf ?? 28;
@@ -808,8 +819,9 @@ async function openSettings() {
     state.faceAutoScan = !!cfg.face_auto_scan;
     state.geocodingProvider = cfg.geocoding_provider || "nominatim";
     state.footprintDefaultView = cfg.footprint_default_view || "grid";
-    state.mapTileProvider = ["amap", "osm", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
+    state.mapTileProvider = ["amap", "osm", "carto", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
     state.mapTileUrl = cfg.map_tile_url || "";
+    state.mapApiKey = cfg.map_api_key || "";
     state.mapApiKey = cfg.map_api_key || "";
     paintFfmpegStatus();
     paintPeopleEngineStatus();
@@ -877,6 +889,7 @@ async function saveSettings() {
     state.geocodingProvider = payload.geocoding_provider || "nominatim";
     state.footprintDefaultView = payload.footprint_default_view || "grid";
     state.mapTileProvider = payload.map_tile_provider || "amap";
+    syncMapTileFields();
     state.mapTileUrl = payload.map_tile_url || "";
     state.mapApiKey = payload.map_api_key || "";
     if (typeof refreshFootprintsMapLayer === "function") {
@@ -1907,9 +1920,16 @@ async function handlePreviewInfoClick(event) {
     const pill = renameBtn.closest(".preview-person-pill");
     const faceId = Number(renameBtn.dataset.faceId);
     const currentName = pill ? pill.dataset.personName || "" : "";
-    const name = window.prompt("输入人物或宠物的名字（如与已有同名将自动归入）：", currentName);
-    if (name === null) return;
-    const clean = name.trim();
+    const answer = await confirmDialog(
+      "输入人物或宠物的名字；与已有同名集合会自动归入。",
+      {
+        title: "标注人物或宠物",
+        confirmText: "保存",
+        input: { label: "名称", value: currentName, placeholder: "输入名称" },
+      }
+    );
+    if (!answer || !answer.confirmed) return;
+    const clean = String(answer.value || "").trim();
     if (!clean) return;
     try {
       await api(`/api/faces/${faceId}`, {
@@ -1941,9 +1961,16 @@ async function handlePreviewInfoClick(event) {
       return;
     }
     if (Number.isFinite(faceId)) {
-      const name = window.prompt("给这位人物或宠物起个名字（如与已有同名将自动归入）：", "");
-      if (name === null) return;
-      const clean = name.trim();
+      const answer = await confirmDialog(
+        "给这位人物或宠物起个名字；与已有同名集合会自动归入。",
+        {
+          title: "标注人物或宠物",
+          confirmText: "保存",
+          input: { label: "名称", value: "", placeholder: "输入名称" },
+        }
+      );
+      if (!answer || !answer.confirmed) return;
+      const clean = String(answer.value || "").trim();
       if (!clean) return;
       try {
         await api(`/api/faces/${faceId}`, {
@@ -2014,7 +2041,7 @@ async function loadPlaybackConfig() {
     state.faceAutoScan = !!cfg.face_auto_scan;
     state.geocodingProvider = cfg.geocoding_provider || "nominatim";
     state.footprintDefaultView = cfg.footprint_default_view || "grid";
-    state.mapTileProvider = ["amap", "osm", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
+    state.mapTileProvider = ["amap", "osm", "carto", "custom"].includes(cfg.map_tile_provider) ? cfg.map_tile_provider : "amap";
     state.mapTileUrl = cfg.map_tile_url || "";
     state.mapApiKey = cfg.map_api_key || "";
   } catch (e) {

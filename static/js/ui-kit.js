@@ -331,7 +331,11 @@ window.LuminaUI = (() => {
       const checkRow = getEl("confirmCheckRow");
       const checkInput = getEl("confirmCheckInput");
       const checkLabel = getEl("confirmCheckLabel");
+      const inputRow = getEl("confirmInputRow");
+      const inputEl = getEl("confirmInput");
+      const inputLabel = getEl("confirmInputLabel");
       const wantsCheckbox = !!options.checkbox;
+      const wantsInput = !!options.input;
 
       if (titleEl) {
         titleEl.innerHTML = `<span class="modal-title-icon">${ICONS.sparkles || ""}</span>${options.title || "确认操作"}`;
@@ -340,6 +344,17 @@ window.LuminaUI = (() => {
       if (okBtn) {
         okBtn.innerHTML = `<span class="btn-icon">${ICONS.check || ""}</span>${options.confirmText || "确定"}`;
         okBtn.className = "btn primary" + (options.danger ? " danger" : "");
+      }
+      if (inputRow && inputEl) {
+        if (wantsInput) {
+          const spec = typeof options.input === "object" ? options.input : {};
+          if (inputLabel) inputLabel.textContent = spec.label || "名称";
+          inputEl.value = spec.value || "";
+          inputEl.placeholder = spec.placeholder || "";
+          inputRow.classList.remove("hidden");
+        } else {
+          inputRow.classList.add("hidden");
+        }
       }
       if (checkRow && checkInput && checkLabel) {
         if (wantsCheckbox) {
@@ -352,9 +367,12 @@ window.LuminaUI = (() => {
       }
 
       function result(confirmed) {
-        return wantsCheckbox
-          ? { confirmed, checked: checkInput ? checkInput.checked : false }
-          : confirmed;
+        if (!wantsCheckbox && !wantsInput) return confirmed;
+        return {
+          confirmed,
+          checked: checkInput ? checkInput.checked : false,
+          value: inputEl ? inputEl.value.trim() : "",
+        };
       }
 
       function cleanup() {
@@ -364,11 +382,18 @@ window.LuminaUI = (() => {
         if (okBtn) okBtn.removeEventListener("click", onOk);
         if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
         if (closeBtn) closeBtn.removeEventListener("click", onCancel);
+        if (inputEl) inputEl.removeEventListener("keydown", onInputKey);
         document.removeEventListener("keydown", onKey);
       }
 
       function onOk() { const value = result(true); cleanup(); resolve(value); }
       function onCancel() { const value = result(false); cleanup(); resolve(value); }
+      function onInputKey(e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onOk();
+        }
+      }
       function onKey(e) {
         // Escape is the reflex for "not this" and every other dialog in the app
         // answers it; this one used to require aiming at the × button.
@@ -381,9 +406,16 @@ window.LuminaUI = (() => {
       if (okBtn) okBtn.addEventListener("click", onOk);
       if (cancelBtn) cancelBtn.addEventListener("click", onCancel);
       if (closeBtn) closeBtn.addEventListener("click", onCancel);
+      if (inputEl) inputEl.addEventListener("keydown", onInputKey);
       document.addEventListener("keydown", onKey);
       activeConfirm = onCancel;
       showModal(modal);
+      if (wantsInput && inputEl) {
+        requestAnimationFrame(() => {
+          inputEl.focus();
+          inputEl.select();
+        });
+      }
     });
   }
 

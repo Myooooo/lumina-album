@@ -169,7 +169,7 @@ sudo apt install ffmpeg        # Linux
 | `PHOTO_GEOCODING_INTERVAL` | `1.0` | 地理编码最小间隔（秒） |
 | `PHOTO_GEOCODING_RETRIES` | `3` | 地理编码重试次数 |
 | `PHOTO_FOOTPRINT_DEFAULT_VIEW` | `grid` | 足迹默认视图：`grid`（卡片）或 `map`（地图） |
-| `PHOTO_MAP_TILE_PROVIDER` | `amap` | 地图底图源：`amap`（默认）/ `osm` / `custom`（旧 `carto` 兼容） |
+| `PHOTO_MAP_TILE_PROVIDER` | `amap` | 地图底图源：`amap`（默认）/ `osm` / `carto`（需 Key）/ `custom` |
 | `PHOTO_MAP_TILE_URL` | 空 | 自定义 XYZ 瓦片模板（支持 `{z}/{x}/{y}/{s}/{apikey}`） |
 | `PHOTO_MAP_API_KEY` | 空 | 自定义底图可选 API Key |
 | `PHOTO_FFMPEG_PATH` | 空 | ffmpeg/ffprobe 所在目录（也可由设置页一键安装自动写入） |

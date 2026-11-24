@@ -159,14 +159,17 @@ function fpResolveTileSpec() {
 
   // Legacy CartoDB configs keep working; new installs use AMap above.
   const style = theme === "vintage" ? "dark_all" : "rastertiles/voyager";
+  const apiKey = (state.mapApiKey || "").trim();
   return {
-    key: `carto:${style}`,
+    key: `carto:${style}:${apiKey}`,
     provider: "carto",
     attribution: "© OpenStreetMap · © CARTO",
     needsDarkFilter: false,
+    needsKey: !apiKey,
     urlFor(z, x, y) {
+      if (!apiKey) return "";
       const sub = ["a", "b", "c", "d"][Math.abs(x + y) % 4];
-      return `https://${sub}.basemaps.cartocdn.com/${style}/${z}/${x}/${y}${retina}.png`;
+      return `https://${sub}.basemaps.cartocdn.com/${style}/${z}/${x}/${y}${retina}.png?api_key=${encodeURIComponent(apiKey)}`;
     },
   };
 }
@@ -482,6 +485,8 @@ function fpMapDraw() {
   if (!w || !h) return;
 
   const spec = fpResolveTileSpec();
+  const keyHint = $("footprintsMapKeyHint");
+  if (keyHint) keyHint.classList.toggle("hidden", !spec.needsKey);
   if (fpMapState.tileLayerKey !== spec.key) {
     fpMapState.tileLayerKey = spec.key;
     fpMapState.tileCache.clear();
@@ -514,7 +519,9 @@ function fpMapDraw() {
         img.alt = "";
         img.decoding = "async";
         img.draggable = false;
-        img.src = spec.urlFor(z, wrappedX, ty);
+        const tileUrl = spec.urlFor(z, wrappedX, ty);
+        if (!tileUrl) continue;
+        img.src = tileUrl;
         img.addEventListener("load", () => img.classList.add("is-loaded"), { once: true });
         fpMapState.tileCache.set(key, img);
         tilesEl.appendChild(img);

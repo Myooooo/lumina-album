@@ -388,6 +388,7 @@ function init() {
   });
   if ($("downloadFaceModelsBtn")) $("downloadFaceModelsBtn").addEventListener("click", downloadFaceModels);
   if ($("installFfmpegBtn")) $("installFfmpegBtn").addEventListener("click", installFfmpeg);
+  if ($("setMapTileProvider")) $("setMapTileProvider").addEventListener("change", syncMapTileFields);
   if ($("refreshFfmpegBtn")) $("refreshFfmpegBtn").addEventListener("click", paintFfmpegStatus);
   if ($("ffmpegInstallCancelBtn")) $("ffmpegInstallCancelBtn").addEventListener("click", cancelFfmpegInstall);
   if ($("ffmpegInstallCloseBtn")) $("ffmpegInstallCloseBtn").addEventListener("click", closeFfmpegInstallModal);

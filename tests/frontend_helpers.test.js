@@ -1852,6 +1852,15 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
+    "person naming uses a themed confirm input, not window.prompt",
+    /id="confirmInput"/.test(html) &&
+      /function promptRenamePerson\(/.test(src) &&
+      /confirmDialog\(/.test(src) &&
+      !/window\.prompt/.test(src) &&
+      /\.confirm-input input \{/.test(css),
+    true
+  );
+  check(
     "lightbox renders detected people pills and bounding boxes",
     /function previewPeopleHtml\(/.test(src) &&
       /function renderPreviewFaceBoxes\(/.test(src) &&
@@ -1904,19 +1913,22 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "settings 地点 tab defaults to AMap with OSM as the fallback and keeps custom tiles",
+    "settings 地点 tab defaults to AMap, keeps OSM/Carto and custom tiles",
     /id="setFootprintDefaultView"/.test(html) &&
       /id="setMapTileProvider"/.test(html) &&
       /value="amap"/.test(html) &&
       /value="osm"/.test(html) &&
+      /value="carto"/.test(html) &&
       /id="setMapTileUrl"/.test(html) &&
+      /function syncMapTileFields\(/.test(src) &&
       /map_tile_provider:/.test(src),
     true
   );
   check(
     "footprints mode switch has a sliding ink and smooth map camera",
     /id="footprintsModeInk"/.test(html) &&
-      /\.footprints-mode-ink \{/.test(css) &&
+      /\.view-ink \{/.test(css) &&
+      /class="view-switcher footprints-mode-switch"/.test(html) &&
       /function fpAnimateView\(/.test(src) &&
       /fpMapAnimate|fpAnimateView\(/.test(src) &&
       /fpMapModeIn/.test(css),
