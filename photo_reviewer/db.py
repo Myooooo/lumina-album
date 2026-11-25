@@ -60,6 +60,10 @@ def parse_capture_datetime(value: Any) -> datetime | None:
 
 def photo_capture_time(photo: dict[str, Any]) -> datetime | None:
     """Return the capture time for a photo payload/row."""
+    if photo.get("captured_at"):
+        parsed = parse_capture_datetime(photo.get("captured_at"))
+        if parsed is not None:
+            return parsed
     exif = photo.get("exif") or {}
     if not isinstance(exif, dict):
         exif = {}
@@ -70,8 +74,31 @@ def photo_capture_time(photo: dict[str, Any]) -> datetime | None:
 
 def photo_capture_year(photo: dict[str, Any]) -> int | None:
     """Return the 4-digit capture year for a photo payload/row."""
+    if photo.get("capture_year"):
+        try:
+            return int(photo["capture_year"])
+        except (TypeError, ValueError):
+            pass
     value = photo_capture_time(photo)
     return value.year if value else None
+
+
+def _extract_capture_fields(exif: Any) -> tuple[str | None, int | None]:
+    """Extract materialized ``(captured_at, capture_year)`` from an EXIF dict or JSON string."""
+    data = exif
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except (TypeError, ValueError):
+            data = {}
+    if not isinstance(data, dict):
+        return None, None
+    dt = parse_capture_datetime(
+        data.get("datetime_original") or data.get("DateTimeOriginal")
+    )
+    if dt is None:
+        return None, None
+    return dt.strftime("%Y-%m-%d %H:%M:%S"), int(dt.year)
 
 
 def _time_sort_key(photo: dict[str, Any], descending: bool):
@@ -397,12 +424,44 @@ class Database:
                     conn.execute("ALTER TABLE photos ADD COLUMN lon REAL")
                 if "location_source" not in cols:
                     conn.execute("ALTER TABLE photos ADD COLUMN location_source TEXT")
+                added_capture_cols = False
+                if "captured_at" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN captured_at TEXT")
+                    added_capture_cols = True
+                if "capture_year" not in cols:
+                    conn.execute("ALTER TABLE photos ADD COLUMN capture_year INTEGER")
+                    added_capture_cols = True
+                if added_capture_cols:
+                    cap_expr = _capture_time_sql_expr()
+                    yr_expr = _capture_year_sql_expr()
+                    conn.execute(
+                        f"UPDATE photos SET captured_at = {cap_expr}, "
+                        f"capture_year = CASE WHEN {yr_expr} GLOB '[0-9][0-9][0-9][0-9]' "
+                        f"THEN CAST({yr_expr} AS INTEGER) ELSE NULL END "
+                        f"WHERE exif IS NOT NULL AND exif != '' AND captured_at IS NULL"
+                    )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_photos_place_id ON photos(place_id)"
                 )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_photos_media_kind "
                     "ON photos(media_kind)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_photos_folder_status_score "
+                    "ON photos(folder, status, score)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_photos_folder_status_fav "
+                    "ON photos(folder, status, favorite)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_photos_folder_captured "
+                    "ON photos(folder, status, captured_at)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_photos_folder_year "
+                    "ON photos(folder, status, capture_year)"
                 )
                 conn.executescript(
                     """
@@ -461,6 +520,7 @@ class Database:
         """Insert a photo row, or update it if the path already exists."""
         now = utc_now()
         record.setdefault("created_at", now)
+        captured_at, capture_year = _extract_capture_fields(record.get("exif"))
         with self._lock:
             conn = self._connect()
             try:
@@ -468,12 +528,14 @@ class Database:
                     """
                     INSERT INTO photos
                         (path, original_path, folder, filename, size, width, height, thumb_path,
-                         proxy_path, dimensions, location, exif, phash, score, tags, reason, title, raw_path, model,
+                         proxy_path, dimensions, location, exif, captured_at, capture_year,
+                         phash, score, tags, reason, title, raw_path, model,
                          analyzed_at, status, favorite, geocoded, error, created_at,
                          media_kind, duration_ms, video_info, clip_path, play_path, play_state, live_path)
                     VALUES
                         (:path, :original_path, :folder, :filename, :size, :width, :height, :thumb_path,
-                         :proxy_path, :dimensions, :location, :exif, :phash, :score, :tags, :reason, :title, :raw_path, :model,
+                         :proxy_path, :dimensions, :location, :exif, :captured_at, :capture_year,
+                         :phash, :score, :tags, :reason, :title, :raw_path, :model,
                          :analyzed_at, :status, :favorite, :geocoded, :error, :created_at,
                          :media_kind, :duration_ms, :video_info, :clip_path, :play_path, :play_state, :live_path)
                     ON CONFLICT(path) DO UPDATE SET
@@ -491,6 +553,8 @@ class Database:
                             ELSE excluded.location
                         END,
                         exif=excluded.exif,
+                        captured_at=excluded.captured_at,
+                        capture_year=excluded.capture_year,
                         phash=excluded.phash,
                         score=excluded.score,
                         tags=excluded.tags,
@@ -530,6 +594,8 @@ class Database:
                         "exif": json.dumps(record.get("exif") or {}, ensure_ascii=False)
                         if isinstance(record.get("exif"), dict)
                         else record.get("exif"),
+                        "captured_at": captured_at,
+                        "capture_year": capture_year,
                         "phash": record.get("phash"),
                         "score": record.get("score"),
                         "tags": json.dumps(record.get("tags") or [], ensure_ascii=False)
@@ -653,13 +719,12 @@ class Database:
         # expressions on that column, so LIMIT/OFFSET still apply and the whole
         # library never has to be materialised in Python.
         if year is not None:
-            clauses.append(f"{_capture_year_sql_expr()} = ?")
-            params.append(str(year))
+            clauses.append("capture_year = ?")
+            params.append(int(year))
             where = "WHERE " + " AND ".join(clauses)
         if sort in ("time_asc", "time_desc"):
             direction = "ASC" if sort == "time_asc" else "DESC"
-            capture_time = _capture_time_sql_expr()
-            order = f"({capture_time}) IS NULL ASC, {capture_time} {direction}"
+            order = f"(captured_at IS NULL) ASC, captured_at {direction}"
             sql = f"SELECT * FROM photos {where} ORDER BY {order} LIMIT ? OFFSET ?"
             return self._query_photos(sql, params + [limit, offset])
 
@@ -667,8 +732,7 @@ class Database:
         # scored 8.0 came back in whatever order SQLite happened to store them,
         # which is why a shoot sometimes looked shuffled. Capture time settles
         # the tie, so equal scores read chronologically.
-        capture_time = _capture_time_sql_expr()
-        by_time = f"({capture_time}) IS NULL ASC, {capture_time} DESC"
+        by_time = "(captured_at IS NULL) ASC, captured_at DESC"
         sort_map = {
             "score_asc": f"(score IS NULL) ASC, score ASC, {by_time}",
             "score_desc": f"(score IS NULL) ASC, score DESC, {by_time}",
@@ -746,6 +810,9 @@ class Database:
         status: str = "analyzed",
         error: str | None = None,
     ) -> None:
+        captured_at, capture_year = (
+            _extract_capture_fields(exif) if isinstance(exif, dict) else (None, None)
+        )
         with self._lock:
             conn = self._connect()
             try:
@@ -763,6 +830,8 @@ class Database:
                             ELSE COALESCE(?, location)
                         END,
                         exif=COALESCE(?, exif),
+                        captured_at=COALESCE(?, captured_at),
+                        capture_year=COALESCE(?, capture_year),
                         status=?, error=?, analyzed_at=?
                     WHERE id=?
                     """,
@@ -784,6 +853,8 @@ class Database:
                         json.dumps(exif, ensure_ascii=False)
                         if isinstance(exif, dict)
                         else None,
+                        captured_at,
+                        capture_year,
                         status,
                         error,
                         utc_now(),
@@ -858,18 +929,21 @@ class Database:
     def update_exif(
         self, photo_id: int, location: str | None, exif: dict[str, Any] | None
     ) -> None:
+        captured_at, capture_year = _extract_capture_fields(exif)
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     "UPDATE photos SET "
                     "location=CASE WHEN location_source='manual' THEN location ELSE ? END, "
-                    "exif=? WHERE id=?",
+                    "exif=?, captured_at=?, capture_year=? WHERE id=?",
                     (
                         location,
                         json.dumps(exif or {}, ensure_ascii=False)
                         if isinstance(exif, dict)
                         else None,
+                        captured_at,
+                        capture_year,
                         photo_id,
                     ),
                 )
@@ -1526,12 +1600,11 @@ class Database:
             shifted = date(2000, month, day) + timedelta(days=offset)
             days.add(shifted.strftime("%m-%d"))
 
-        capture = _capture_time_sql_expr()
         clauses = [
-            f"{capture} IS NOT NULL",
+            "captured_at IS NOT NULL",
             "status != 'deleted'",
-            f"substr({capture}, 6, 5) IN ({','.join('?' for _ in days)})",
-            f"CAST(substr({capture}, 1, 4) AS INTEGER) < ?",
+            f"substr(captured_at, 6, 5) IN ({','.join('?' for _ in days)})",
+            "capture_year < ?",
         ]
         params: list[Any] = sorted(days)
         # "Earlier years" is measured on the local calendar: the user's today,
@@ -1543,7 +1616,7 @@ class Database:
         sql = (
             "SELECT * FROM photos WHERE "
             + " AND ".join(clauses)
-            + f" ORDER BY {capture} ASC, id ASC"
+            + " ORDER BY captured_at ASC, id ASC"
         )
         with self._lock:
             conn = self._connect()
@@ -1584,35 +1657,23 @@ class Database:
         return sorted(tags_set)
 
     def capture_years(self, folder: str | None = None) -> list[int]:
-        """Return distinct capture years for active photos."""
-        clauses = ["status != 'deleted'"]
+        """Return distinct capture years for active photos using the indexed column."""
+        clauses = ["status != 'deleted'", "capture_year IS NOT NULL"]
         params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
         where = "WHERE " + " AND ".join(clauses)
-        years = set()
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
-                    f"SELECT exif FROM photos {where}", params
+                    f"SELECT DISTINCT capture_year FROM photos {where} ORDER BY capture_year DESC",
+                    params,
                 ).fetchall()
-                for row in rows:
-                    if not row["exif"]:
-                        continue
-                    try:
-                        exif = json.loads(row["exif"])
-                    except (TypeError, ValueError):
-                        continue
-                    if not isinstance(exif, dict):
-                        continue
-                    year = photo_capture_year({"exif": exif})
-                    if year:
-                        years.add(year)
+                return [int(r["capture_year"]) for r in rows if r["capture_year"]]
             finally:
                 conn.close()
-        return sorted(years, reverse=True)
 
     def all_folders(self) -> list[str]:
         """Return indexed folders, most recently active first."""
@@ -2441,12 +2502,11 @@ class Database:
         if folder:
             clauses.append("ph.folder = ?")
             params.append(folder)
-        capture_time = _capture_time_sql_expr()
         sql = (
             "SELECT DISTINCT ph.* FROM photos ph "
             "JOIN faces f ON f.photo_id = ph.id "
             f"WHERE {' AND '.join(clauses)} "
-            f"ORDER BY ({capture_time}) IS NULL ASC, {capture_time} DESC, ph.id DESC"
+            "ORDER BY (ph.captured_at IS NULL) ASC, ph.captured_at DESC, ph.id DESC"
         )
         return self._query_photos(sql, params)
 

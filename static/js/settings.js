@@ -43,6 +43,7 @@ function resetFilters() {
  */
 async function applyFolderChange(folder) {
   state.folder = folder || "";
+  if (typeof clearPhotoDetailCache === "function") clearPhotoDetailCache();
   // The badge belongs to the album that is actually open, so it is painted
   // before anything is awaited.
   state.folderHidden = isHiddenFolder(state.folder);
@@ -533,7 +534,10 @@ async function paintPeopleEngineStatus() {
   }
 }
 
+let modelDownloadPollInFlight = false;
+
 function stopModelDownloadPoll() {
+  modelDownloadPollInFlight = false;
   if (modelDownloadPollTimer) {
     clearInterval(modelDownloadPollTimer);
     modelDownloadPollTimer = null;
@@ -596,6 +600,8 @@ function paintModelDownloadJob(job) {
 function startModelDownloadPoll() {
   stopModelDownloadPoll();
   modelDownloadPollTimer = setInterval(async () => {
+    if (modelDownloadPollInFlight) return;
+    modelDownloadPollInFlight = true;
     try {
       const data = await api("/api/people/models/download/status");
       const job = data.job || {};
@@ -615,6 +621,8 @@ function startModelDownloadPoll() {
       }
     } catch (e) {
       stopModelDownloadPoll();
+    } finally {
+      modelDownloadPollInFlight = false;
     }
   }, 500);
 }
@@ -734,7 +742,10 @@ function paintFfmpegInstallJob(job) {
   if (closeBtn) closeBtn.classList.toggle("hidden", running);
 }
 
+let ffmpegInstallPollInFlight = false;
+
 function stopFfmpegInstallPoll() {
+  ffmpegInstallPollInFlight = false;
   if (ffmpegInstallPollTimer) {
     clearInterval(ffmpegInstallPollTimer);
     ffmpegInstallPollTimer = null;
@@ -742,6 +753,8 @@ function stopFfmpegInstallPoll() {
 }
 
 async function pollFfmpegInstall() {
+  if (ffmpegInstallPollInFlight) return;
+  ffmpegInstallPollInFlight = true;
   try {
     const data = await api("/api/video/install/status");
     const job = data.job || {};
@@ -757,6 +770,8 @@ async function pollFfmpegInstall() {
     }
   } catch (e) {
     stopFfmpegInstallPoll();
+  } finally {
+    ffmpegInstallPollInFlight = false;
   }
 }
 

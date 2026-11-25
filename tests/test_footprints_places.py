@@ -236,6 +236,49 @@ class FootprintsPlacesTest(unittest.TestCase):
                 except ImportError:
                     pass
 
+    def test_materialized_capture_columns_and_indexed_queries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "library.db"))
+            folder = str(Path(tmp) / "album")
+            try:
+                p1 = db.upsert_photo(
+                    {
+                        "path": f"{folder}/2023.jpg",
+                        "folder": folder,
+                        "filename": "2023.jpg",
+                        "score": 8.0,
+                        "exif": {"datetime_original": "2023:06:15 09:30:00"},
+                        "status": "analyzed",
+                    }
+                )
+                p2 = db.upsert_photo(
+                    {
+                        "path": f"{folder}/2025.jpg",
+                        "folder": folder,
+                        "filename": "2025.jpg",
+                        "score": 9.0,
+                        "exif": {"datetime_original": "2025:06:15 18:45:00"},
+                        "status": "analyzed",
+                    }
+                )
+                self.assertEqual(db.get_photo(p1)["captured_at"], "2023-06-15 09:30:00")
+                self.assertEqual(db.get_photo(p1)["capture_year"], 2023)
+                self.assertEqual(db.capture_years(folder), [2025, 2023])
+
+                only_2023 = db.list_photos(folder=folder, year=2023, sort="time_desc")
+                self.assertEqual([r["id"] for r in only_2023], [p1])
+
+                ordered = db.list_photos(folder=folder, sort="time_desc")
+                self.assertEqual([r["id"] for r in ordered], [p2, p1])
+
+                mems = db.memories_on(6, 15, window=0, folder=folder)
+                self.assertEqual([r["id"] for r in mems], [p1, p2])
+            finally:
+                try:
+                    db.close()
+                except ImportError:
+                    pass
+
     @unittest.skipUnless(_HAS_FLASK_APP, "Flask/Pillow not installed in this Python")
     def test_places_http_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -203,6 +203,24 @@ function paintFolderHiddenBadge() {
    replaces `state.photos` goes through `indexPhotos` so the map cannot drift.
    ========================================================================== */
 
+const MAX_DETAIL_CACHE = 300;
+
+function cachePhotoDetail(id, detail) {
+  if (state.details.has(id)) state.details.delete(id);
+  state.details.set(id, detail);
+  while (state.details.size > MAX_DETAIL_CACHE) {
+    const oldestKey = state.details.keys().next().value;
+    if (oldestKey === undefined) break;
+    state.details.delete(oldestKey);
+    state.detailRequested.delete(oldestKey);
+  }
+}
+
+function clearPhotoDetailCache() {
+  state.details.clear();
+  state.detailRequested.clear();
+}
+
 function indexPhotos(list) {
   state.photos = list;
   const map = new Map();

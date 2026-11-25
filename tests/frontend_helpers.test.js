@@ -2125,6 +2125,20 @@ section("people & pets (人物与宠物)");
       ),
     true
   );
+  check(
+    "Phase 3 DB indexes, materialized capture columns, poller inFlight guards & detail LRU cache are wired",
+    /MAX_DETAIL_CACHE\s*=\s*300/.test(src) &&
+      /function cachePhotoDetail\(/.test(src) &&
+      /modelDownloadPollInFlight/.test(src) &&
+      /ffmpegInstallPollInFlight/.test(src) &&
+      /idx_photos_folder_status_score/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "db.py"), "utf8")
+      ) &&
+      /idx_photos_folder_captured/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "db.py"), "utf8")
+      ),
+    true
+  );
 }
 
 console.log(

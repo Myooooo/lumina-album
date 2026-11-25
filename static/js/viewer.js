@@ -439,7 +439,7 @@ async function ensurePhotoDetail(id) {
   state.detailRequested.add(id);
   try {
     const detail = await api(`/api/photo/${id}/detail`);
-    state.details.set(id, detail);
+    cachePhotoDetail(id, detail);
     const target = photoById(id);
     if (target) applyPhotoDetail(target, detail);
     if (state.currentPreviewId === id) updatePreview({ skipImage: true });
