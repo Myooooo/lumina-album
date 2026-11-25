@@ -210,6 +210,10 @@ class Config:
             if item.strip()
         )
     )
+    # Optional PIN for LAN read-only browsing (env-only security setting).
+    lan_readonly_pin: str = field(
+        default_factory=lambda: os.getenv("PHOTO_LAN_READONLY_PIN", "").strip()
+    )
 
     # Allowed image extensions (processed directly). HEIC/AVIF join the list
     # only when ``pillow-heif`` is installed: promising to index a format the

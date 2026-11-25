@@ -9,6 +9,7 @@
   <link rel="preload" href="/static/fonts/cormorant-garamond-600.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/static/fonts/fonts.css" />
   <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/css/features.css" />
 </head>
 <body data-view="album" data-theme="paper" data-density="comfortable">
   <header class="topbar">
@@ -65,6 +66,7 @@
             </button>
           </div>
         </div>
+        <button id="statsReportBtn" class="btn icon-only" type="button" title="摄影数据年报与装备统计" aria-label="摄影数据年报"><span class="btn-icon" data-icon="sparkles"></span></button>
         <button id="shortcutsBtn" class="btn icon-only" type="button" title="键盘快捷键 (?)" aria-label="键盘快捷键"><span class="btn-icon" data-icon="keyboard"></span></button>
         <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
       </div>
@@ -1368,6 +1370,22 @@
       <img id="fsImage" alt="全屏照片" />
       <!-- Video: the original file, with sound on, played by the browser -->
       <video id="fsVideo" class="fs-video hidden" controls playsinline preload="metadata"></video>
+    </div>
+  </div>
+
+  <!-- Photography Year-in-Review & Gear Stats Modal -->
+  <div id="statsReportModal" class="modal hidden">
+    <div class="modal-content stats-report-content">
+      <button class="modal-close" data-close="statsReportModal" title="关闭 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
+      <div class="stats-report-head">
+        <h2><span class="modal-title-icon" data-icon="sparkles"></span>摄影数据年报</h2>
+        <select id="statsReportYearSelect" class="stats-report-year-select" data-no-custom>
+          <option value="">全部年份</option>
+        </select>
+      </div>
+      <div id="statsReportBody" class="stats-report-body">
+        <div class="people-empty">正在汇总拍摄与装备数据…</div>
+      </div>
     </div>
   </div>
 

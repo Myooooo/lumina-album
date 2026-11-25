@@ -38,6 +38,34 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
     app.config["JSON_AS_ASCII"] = False
 
     @app.before_request
+    def _lan_readonly_guard():
+        """When PHOTO_LAN_READONLY_PIN is set, enforce read-only + PIN for non-loopback clients."""
+        pin = (getattr(cfg, "lan_readonly_pin", "") or "").strip()
+        if not pin:
+            return None
+        remote = (request.remote_addr or "").strip()
+        if remote in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"):
+            return None
+        supplied = (
+            request.headers.get("X-Lumina-Pin")
+            or request.args.get("pin")
+            or request.cookies.get("lumina_lan_pin")
+            or ""
+        ).strip()
+        if supplied != pin:
+            return jsonify({"error": "局域网访问需要口令（请附加 ?pin=口令 或 X-Lumina-Pin 请求头）"}), 401
+        if request.method in _UNSAFE_METHODS and request.path not in ("/api/search", "/api/cull/quality"):
+            return jsonify({"error": "局域网只读模式不允许修改或删除操作"}), 403
+        return None
+
+    @app.after_request
+    def _persist_lan_pin_cookie(response):
+        pin = (getattr(cfg, "lan_readonly_pin", "") or "").strip()
+        if pin and request.args.get("pin", "").strip() == pin:
+            response.set_cookie("lumina_lan_pin", pin, httponly=True, samesite="Lax")
+        return response
+
+    @app.before_request
     def _reject_cross_origin_writes():
         """Block CSRF on every mutating route.
 

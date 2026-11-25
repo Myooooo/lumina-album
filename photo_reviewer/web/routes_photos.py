@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from flask import jsonify, request, url_for
 
-from .. import culling, vectors, video
+from .. import culling, stats_report, vectors, video
 
 from ..api_client import (
     SEMANTIC_CANDIDATE_LIMIT,
@@ -482,3 +482,25 @@ def register(app, cfg, database):
         if not deleted:
             return jsonify({"error": "智能影集不存在"}), 404
         return jsonify({"deleted": True, "id": album_id})
+
+    @app.get("/api/stats/report")
+    def api_stats_report():
+        """Photography Year-in-Review & gear/focal statistics."""
+        raw_folder = request.args.get("folder", "").strip()
+        folder = None if (not raw_folder or raw_folder == "__all__") else raw_folder
+        exclude_folders = hidden_folder_list(database) if folder is None else None
+        year_raw = request.args.get("year", "").strip()
+        year = None
+        if year_raw:
+            try:
+                year = int(year_raw)
+            except (TypeError, ValueError):
+                return jsonify({"error": "year 参数不合法"}), 400
+        rows = database.list_photos(
+            folder=folder,
+            exclude_deleted=True,
+            exclude_folders=exclude_folders,
+            sort="time_desc",
+            limit=50000,
+        )
+        return jsonify(stats_report.build_shooting_report(rows, year=year))

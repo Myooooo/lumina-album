@@ -44,6 +44,17 @@ function init() {
     toggleFolderHistory();
   });
   $("settingsBtn").addEventListener("click", openSettings);
+  const statsReportBtn = $("statsReportBtn");
+  if (statsReportBtn) {
+    statsReportBtn.addEventListener("click", () => openStatsReport(null));
+  }
+  const statsYearSel = $("statsReportYearSelect");
+  if (statsYearSel) {
+    statsYearSel.addEventListener("change", () => {
+      const y = statsYearSel.value ? Number(statsYearSel.value) : null;
+      openStatsReport(y, { keepOpen: true });
+    });
+  }
   const shortcutsBtn = $("shortcutsBtn");
   if (shortcutsBtn) {
     shortcutsBtn.addEventListener("click", () => {
@@ -2037,6 +2048,81 @@ function initCompareModal() {
       compareState.savedSplit = null;
     }
   });
+}
+
+async function openStatsReport(year = null, options = {}) {
+  const modal = $("statsReportModal");
+  const body = $("statsReportBody");
+  const yearSel = $("statsReportYearSelect");
+  if (!modal || !body) return;
+  if (!options.keepOpen) {
+    showModal(modal);
+    pushModal(modal);
+  }
+  body.innerHTML = '<div class="people-empty">正在汇总拍摄与装备数据…</div>';
+  try {
+    const params = new URLSearchParams();
+    if (state.folder) params.set("folder", state.folder);
+    if (year) params.set("year", String(year));
+    const data = await api(`/api/stats/report?${params.toString()}`);
+    if (yearSel) {
+      const years = data.available_years || [];
+      yearSel.innerHTML =
+        '<option value="">全部年份</option>' +
+        years.map((y) => `<option value="${y}">${y} 年</option>`).join("");
+      yearSel.value = year ? String(year) : "";
+    }
+    renderStatsReport(data);
+  } catch (e) {
+    body.innerHTML = `<div class="people-empty">加载摄影年报失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderStatsReport(data) {
+  const body = $("statsReportBody");
+  if (!body) return;
+  const s = data.summary || {};
+  const renderBars = (rows, labelKey, subFn) => {
+    if (!rows || !rows.length) return '<div class="smart-albums-empty">暂无数据</div>';
+    const maxVal = Math.max(1, ...rows.map((r) => Number(r.count) || 0));
+    return `<div class="stats-bar-list">${rows
+      .map((r) => {
+        const pct = Math.round(((Number(r.count) || 0) / maxVal) * 100);
+        return `<div class="stats-bar-row"><div class="stats-bar-meta"><span>${escapeHtml(r[labelKey])}</span><span class="stats-bar-sub">${escapeHtml(subFn(r))}</span></div><div class="stats-bar-track"><div class="stats-bar-fill" style="width:${pct}%"></div></div></div>`;
+      })
+      .join("")}</div>`;
+  };
+  const months = data.months || [];
+  const maxMonth = Math.max(1, ...months.map((m) => Number(m.count) || 0));
+  const monthHtml = months.length
+    ? `<div class="stats-month-bars">${months
+        .map((m) => {
+          const pct = Math.max(4, Math.round(((Number(m.count) || 0) / maxMonth) * 100));
+          return `<div class="stats-month-col" title="${escapeHtml(m.label)}：${m.count} 张"><div class="stats-month-bar" style="height:${pct}%"></div><span class="stats-month-lbl">${escapeHtml(m.label.replace(/^\d{4}-/, ""))}</span></div>`;
+        })
+        .join("")}</div>`
+    : '<div class="smart-albums-empty">暂无拍摄时间记录</div>';
+  const chips = (rows) =>
+    rows && rows.length
+      ? `<div class="stats-chip-cloud">${rows
+          .map((r) => `<span class="stats-chip">${escapeHtml(r.name)} · ${r.count}</span>`)
+          .join("")}</div>`
+      : '<div class="smart-albums-empty">暂无数据</div>';
+  body.innerHTML = `
+    <div class="stats-kpi-grid">
+      <div class="stats-kpi-card"><div class="stats-kpi-value">${s.total || 0}</div><div class="stats-kpi-label">总作品（视频 ${s.videos || 0}）</div></div>
+      <div class="stats-kpi-card"><div class="stats-kpi-value">${s.avg_score != null ? Number(s.avg_score).toFixed(2) : "-"}</div><div class="stats-kpi-label">平均分（8.5+ 共 ${s.high_scores || 0} 张）</div></div>
+      <div class="stats-kpi-card"><div class="stats-kpi-value">${s.favorites || 0}</div><div class="stats-kpi-label">珍藏作品</div></div>
+      <div class="stats-kpi-card"><div class="stats-kpi-value">${s.cities_count || 0}</div><div class="stats-kpi-label">到访城市</div></div>
+    </div>
+    <div class="stats-sections-grid">
+      <section class="stats-panel"><h3>拍摄活跃节奏</h3>${monthHtml}</section>
+      <section class="stats-panel"><h3>常用焦段分布</h3>${renderBars(data.focal_buckets, "bucket", (r) => `${r.count} 张`)}</section>
+      <section class="stats-panel"><h3>常用机身</h3>${renderBars(data.cameras, "name", (r) => `${r.count} 张${r.avg_score != null ? ` · 均分 ${r.avg_score}` : ""}`)}</section>
+      <section class="stats-panel"><h3>常用镜头</h3>${renderBars(data.lenses, "name", (r) => `${r.count} 张${r.avg_score != null ? ` · 均分 ${r.avg_score}` : ""}`)}</section>
+      <section class="stats-panel"><h3>常去城市</h3>${chips(data.top_cities)}</section>
+      <section class="stats-panel"><h3>高频题材标签</h3>${chips(data.top_tags)}</section>
+    </div>`;
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -2231,6 +2231,17 @@ section("people & pets (人物与宠物)");
       /function applySmartAlbum\(/.test(src),
     true
   );
+  check(
+    "Phase 5 Photography Year-in-Review modal, modular features.css, and LAN readonly guard are wired",
+    /href="\/static\/css\/features\.css"/.test(indexHtml) &&
+      /id="statsReportBtn"/.test(indexHtml) &&
+      /id="statsReportModal"/.test(indexHtml) &&
+      /function openStatsReport\(/.test(src) &&
+      /_lan_readonly_guard/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "server.py"), "utf8")
+      ),
+    true
+  );
 }
 
 console.log(

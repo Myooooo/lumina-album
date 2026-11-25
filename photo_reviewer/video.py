@@ -1090,3 +1090,88 @@ def looks_like_video(path: str) -> bool:
     from pathlib import Path
 
     return Path(path).suffix.lower() in VIDEO_EXTENSIONS
+
+
+_HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67", "smpte428"})
+
+
+def hdr_tonemap_vf(color_transfer: str | None = None, max_edge: int = 1280) -> str:
+    """Return an ffmpeg video filter with HDR->SDR Hable tone-mapping when HDR."""
+    scale = f"scale='min({int(max_edge)},iw)':'min({int(max_edge)},ih)':force_original_aspect_ratio=decrease"
+    transfer = (color_transfer or "").strip().lower()
+    if transfer in _HDR_TRANSFERS:
+        return (
+            "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,"
+            "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,"
+            f"format=yuv420p,{scale}"
+        )
+    return scale
+
+
+def extract_video_storyboard(
+    video_path: str,
+    dest_path: str,
+    duration_ms: int | None = None,
+    color_transfer: str | None = None,
+    override_dir: str | None = None,
+) -> bool:
+    """Extract a 3-frame (15%/50%/85%) horizontal contact sheet for richer VLM scoring."""
+    tools = find_tools(override_dir)
+    if not tools or not video_path or not os.path.exists(video_path):
+        return False
+    dur_s = max(1.0, (duration_ms or 0) / 1000.0)
+    stamps = [round(dur_s * r, 2) for r in (0.15, 0.50, 0.85)]
+    vf = hdr_tonemap_vf(color_transfer, max_edge=640)
+    temp_frames = []
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    try:
+        for idx, ts in enumerate(stamps):
+            frame_path = f"{dest_path}.f{idx}.jpg"
+            cmd = [
+                tools.ffmpeg,
+                "-y",
+                "-ss",
+                str(ts),
+                "-i",
+                video_path,
+                "-frames:v",
+                "1",
+                "-vf",
+                vf,
+                "-q:v",
+                "4",
+                frame_path,
+            ]
+            res = _run(cmd, timeout=30.0)
+            if res.returncode != 0 and color_transfer:
+                cmd[cmd.index(vf)] = hdr_tonemap_vf(None, max_edge=640)
+                res = _run(cmd, timeout=30.0)
+            if res.returncode == 0 and os.path.exists(frame_path):
+                temp_frames.append(frame_path)
+        if not temp_frames:
+            return False
+        imgs = [Image.open(p).convert("RGB") for p in temp_frames]
+        try:
+            h = min(im.height for im in imgs)
+            resized = [
+                im.resize((max(1, int(im.width * h / im.height)), h), Image.Resampling.BILINEAR)
+                for im in imgs
+            ]
+            sheet = Image.new("RGB", (sum(im.width for im in resized), h))
+            x = 0
+            for im in resized:
+                sheet.paste(im, (x, 0))
+                x += im.width
+            os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
+            sheet.save(dest_path, "JPEG", quality=82)
+            sheet.close()
+        finally:
+            for im in imgs:
+                im.close()
+        return os.path.exists(dest_path) and os.path.getsize(dest_path) > 0
+    finally:
+        for p in temp_frames:
+            _discard(p)
