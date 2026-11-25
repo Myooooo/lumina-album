@@ -217,25 +217,31 @@ class FFmpegInstaller:
         tools_dir = Path(cfg.data_dir) / "tools" / "ffmpeg"
         tools_dir.mkdir(parents=True, exist_ok=True)
         zip_path = tools_dir / "ffmpeg-release-essentials.zip"
+        part_path = tools_dir / "ffmpeg-release-essentials.zip.part"
         job.stage = "downloading"
         job.command = f"下载 {FFMPEG_WINDOWS_ZIP}"
         job.message = "正在下载 Windows 版 ffmpeg（约 80–120 MB）…"
         req = urllib.request.Request(FFMPEG_WINDOWS_ZIP, headers={"User-Agent": "Lumina-Album/1.0"})
-        with urllib.request.urlopen(req, timeout=60) as resp, open(zip_path, "wb") as out:
-            total = int(resp.headers.get("Content-Length") or 0)
-            done = 0
-            while True:
-                if job.cancel_event.is_set():
-                    job.status = "cancelled"
-                    job.message = "已取消 ffmpeg 安装"
-                    return
-                chunk = resp.read(65536)
-                if not chunk:
-                    break
-                out.write(chunk)
-                done += len(chunk)
-                if total > 0:
-                    job.percent = min(82.0, 4.0 + (done / total) * 78.0)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp, open(part_path, "wb") as out:
+                total = int(resp.headers.get("Content-Length") or 0)
+                done = 0
+                while True:
+                    if job.cancel_event.is_set():
+                        job.status = "cancelled"
+                        job.message = "已取消 ffmpeg 安装"
+                        return
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    done += len(chunk)
+                    if total > 0:
+                        job.percent = min(82.0, 4.0 + (done / total) * 78.0)
+            os.replace(part_path, zip_path)
+        finally:
+            if part_path.exists():
+                part_path.unlink(missing_ok=True)
         job.stage = "extracting"
         job.percent = 86.0
         job.command = f"解压 {zip_path.name}"
@@ -258,32 +264,51 @@ class FFmpegInstaller:
         job.percent = 96.0
         job.message = "ffmpeg 解压完成，正在验证…"
 
+    def _run_cancellable(self, cmd: list[str], job: FFmpegInstallJob, fallback_err: str) -> None:
+        import time
+
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+        deadline = time.monotonic() + 1800.0
+        while proc.poll() is None:
+            if job.cancel_event.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                job.status = "cancelled"
+                job.message = "已取消 ffmpeg 安装"
+                return
+            if time.monotonic() > deadline:
+                proc.kill()
+                raise RuntimeError("安装超时")
+            time.sleep(0.2)
+        output = (proc.stdout.read() if proc.stdout is not None else "") or ""
+        if proc.returncode != 0:
+            lines = output.strip().splitlines()
+            raise RuntimeError(lines[-1] if lines else fallback_err)
+
     def _install_linux(self, job: FFmpegInstallJob) -> None:
         job.stage = "installing"
         job.command = "sudo -n apt-get install -y ffmpeg"
         job.message = "正在通过 apt 安装 ffmpeg…"
-        proc = subprocess.run(
+        self._run_cancellable(
             ["sudo", "-n", "apt-get", "install", "-y", "ffmpeg"],
-            capture_output=True, text=True, timeout=1800,
+            job,
+            "apt-get 安装失败（可能需要管理员权限）",
         )
-        if proc.returncode != 0:
-            raise RuntimeError(
-                (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
-                and (proc.stderr or proc.stdout).strip().splitlines()[-1]
-                or "apt-get 安装失败（可能需要管理员权限）"
-            )
-        job.percent = 95.0
+        if job.status != "cancelled":
+            job.percent = 95.0
 
     def _install_brew(self, job: FFmpegInstallJob, label: str) -> None:
         job.stage = "installing"
         job.command = "brew install ffmpeg"
         job.message = f"正在通过 Homebrew 安装 ffmpeg（{label}）…"
-        proc = subprocess.run(
-            ["brew", "install", "ffmpeg"], capture_output=True, text=True, timeout=1800
-        )
-        if proc.returncode != 0:
-            raise RuntimeError("Homebrew 安装失败")
-        job.percent = 95.0
+        self._run_cancellable(["brew", "install", "ffmpeg"], job, "Homebrew 安装失败")
+        if job.status != "cancelled":
+            job.percent = 95.0
 
 
 def _ffmpeg_install_guide() -> str:

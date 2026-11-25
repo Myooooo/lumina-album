@@ -392,16 +392,17 @@ def face_thumbs_dir(cfg, folder: str | None = None) -> Path:
     return d
 
 
-def migrate_face_thumbnails(database, cfg) -> int:
-    """Move legacy central face crops into their album cache directories.
+_THUMB_MIGRATION_LOCK = threading.Lock()
 
-    Older builds wrote every crop to ``data/face_thumbs``. The library is
-    re-homed lazily too (the thumb route migrates the one it is asked for), but
-    a startup pass keeps the old directory from lingering after a restart.
-    Missing source files or disconnected drives are skipped: a thumbnail is
-    regenerated on demand.
-    """
-    moved = 0
+
+def migrate_face_thumbnails(database, cfg) -> int:
+    """Move legacy central face crops into their album cache directories."""
+    with _THUMB_MIGRATION_LOCK:
+        moved = 0
+        return _migrate_face_thumbnails_locked(database, cfg, moved)
+
+
+def _migrate_face_thumbnails_locked(database, cfg, moved: int = 0) -> int:
     try:
         rows = database.faces_with_thumb_paths()
     except Exception:
@@ -799,34 +800,51 @@ def _has_nvidia_gpu() -> bool:
 
 
 def _pip_install(job: "ModelDownloadJob", args: list[str], stage: str, message: str) -> str | None:
-    """Run one pip command and fold its result into the download job."""
+    """Run one pip command with cancel polling and fold its result into the job."""
+    if job.cancel_event.is_set():
+        raise InterruptedError("已取消下载")
     job.stage = stage
     job.message = message
     job.command = f"{sys.executable} -m pip " + " ".join(args)
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-m", "pip", *args, "--disable-pip-version-check"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=2400,
         )
+        deadline = time.monotonic() + 2400.0
+        while proc.poll() is None:
+            if job.cancel_event.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                raise InterruptedError("已取消下载")
+            if time.monotonic() > deadline:
+                proc.kill()
+                return "pip 安装超时"
+            time.sleep(0.2)
+        output = (proc.stdout.read() if proc.stdout is not None else "") or ""
+    except InterruptedError:
+        raise
     except Exception as exc:
         return str(exc)
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:]
-        return tail[0] if tail else f"pip 退出码 {proc.returncode}"
+        lines = output.strip().splitlines()
+        return lines[-1] if lines else f"pip 退出码 {proc.returncode}"
     return None
 
 
 def _ensure_face_runtime(job: "ModelDownloadJob", include_pets: bool) -> str | None:
     """Install InsightFace and the best ONNX Runtime for this machine.
 
-    The button is intentionally one action: dependencies, the GPU/CPU runtime
-    and the model files. The actual runtime swap cannot take effect in the
-    already-running process, so the job tells the UI that a restart is needed.
+    Skips redundant pip runs when the platform's optimal runtime is already
+    installed, and honors ``job.cancel_event`` at every step.
     """
-    import importlib.util
-
+    if job.cancel_event.is_set():
+        raise InterruptedError("已取消下载")
     job.percent = max(job.percent, 2)
     missing = [
         name
@@ -841,18 +859,19 @@ def _ensure_face_runtime(job: "ModelDownloadJob", include_pets: bool) -> str | N
             return f"人像依赖安装失败：{err}"
 
     active_cuda = False
+    active_dml = False
+    ort_installed = ort is not None or importlib.util.find_spec("onnxruntime") is not None
     try:
         if ort is not None:
             providers = list(ort.get_available_providers())
             active_cuda = "CUDAExecutionProvider" in providers and str(ort.get_device()).upper() == "GPU"
+            active_dml = "DmlExecutionProvider" in providers
     except Exception:
         active_cuda = False
+        active_dml = False
 
     if not active_cuda:
         if _has_nvidia_gpu():
-            # Avoid the known CPU-wheel-overwrites-GPU-wheel trap: remove the
-            # CPU package first, then install the GPU wheel without letting pip
-            # resolve insightface's onnxruntime dependency again.
             _pip_install(job, ["uninstall", "-y", "onnxruntime"], "runtime", "正在移除 CPU 版 ONNX Runtime…")
             version = "onnxruntime-gpu==1.19.2" if sys.version_info < (3, 10) else "onnxruntime-gpu"
             err = _pip_install(
@@ -864,8 +883,6 @@ def _ensure_face_runtime(job: "ModelDownloadJob", include_pets: bool) -> str | N
             job.percent = 24
             if err:
                 return f"CUDA 版 ONNX Runtime 安装失败：{err}。可先重启应用后重试。"
-            # cuDNN 9 / CUDA 12 DLLs. These wheels are what let ORT 1.19 load
-            # on Blackwell without a system-wide CUDA 12 install.
             err = _pip_install(
                 job,
                 [
@@ -884,7 +901,7 @@ def _ensure_face_runtime(job: "ModelDownloadJob", include_pets: bool) -> str | N
             job.command = ""
             job.warnings.append("CUDA 版 ONNX Runtime 已安装，重启应用后生效。")
             job.message = "人像运行时已安装，重启应用后生效；接下来下载模型。"
-        elif sys.platform == "win32":
+        elif sys.platform == "win32" and not active_dml:
             _pip_install(job, ["uninstall", "-y", "onnxruntime"], "runtime", "正在切换 Windows 图形后端…")
             err = _pip_install(
                 job,
@@ -895,7 +912,7 @@ def _ensure_face_runtime(job: "ModelDownloadJob", include_pets: bool) -> str | N
             job.percent = 34
             if err:
                 return f"DirectML 版 ONNX Runtime 安装失败：{err}"
-        else:
+        elif not ort_installed:
             err = _pip_install(job, ["install", "onnxruntime"], "runtime", "正在安装 ONNX Runtime…")
             job.percent = 34
             if err:

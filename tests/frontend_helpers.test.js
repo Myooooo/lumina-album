@@ -2087,6 +2087,14 @@ section("people & pets (人物与宠物)");
       /function refreshFootprintsMapLayer\(/.test(src),
     true
   );
+  check(
+    "map uses integer tileZ during fly-to animation and only applies GCJ-02 to AMap",
+    /const tileZ = Math\.max\(MAP_MIN_ZOOM, Math\.min\(MAP_MAX_ZOOM, Math\.floor\(z\)\)\)/.test(src) &&
+      /spec\.urlFor\(tileZ, wrappedX, ty\)/.test(src) &&
+      /if \(provider === "amap"\)/.test(src) &&
+      /let inFlight = false;/.test(src),
+    true
+  );
 }
 
 console.log(

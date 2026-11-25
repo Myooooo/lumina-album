@@ -139,8 +139,11 @@ function startPeoplePoll(options = {}) {
   stopPeoplePoll();
   const auto = Boolean(options.auto);
   const home = Boolean(options.home);
+  let inFlight = false;
 
   const tick = async () => {
+    if (inFlight) return;
+    inFlight = true;
     try {
       const st = await api("/api/people/status");
       peopleState.status = st;
@@ -186,6 +189,8 @@ function startPeoplePoll(options = {}) {
         if (state.progressHideTimer) clearTimeout(state.progressHideTimer);
         state.progressHideTimer = setTimeout(hideProgress, 2500);
       }
+    } finally {
+      inFlight = false;
     }
   };
 

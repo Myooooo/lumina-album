@@ -75,8 +75,9 @@ function fpWgs84ToGcj02(lat, lon) {
 }
 
 function fpDisplayCoords(lat, lon) {
-  const provider = state.mapTileProvider || "amap";
-  if (provider !== "carto") {
+  const provider = (state.mapTileProvider || "amap").toLowerCase();
+  // Only AMap tiles use GCJ-02; OSM, Carto, and standard custom tiles use WGS-84.
+  if (provider === "amap") {
     return fpWgs84ToGcj02(lat, lon);
   }
   return [lat, lon];
@@ -294,6 +295,7 @@ function ensureFootprintsMapMounted() {
   // Mouse pan
   canvas.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || e.target.closest("button") || e.target.closest(".fp-map-pin")) return;
+    fpMapState.animToken += 1;
     fpMapState.dragging = true;
     fpMapState.dragStartX = e.clientX;
     fpMapState.dragStartY = e.clientY;
@@ -352,6 +354,7 @@ function ensureFootprintsMapMounted() {
     "touchstart",
     (e) => {
       if (e.touches.length !== 1 || e.target.closest("button") || e.target.closest(".fp-map-pin")) return;
+      fpMapState.animToken += 1;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
       const c = fpLatLonToWorld(fpMapState.centerLat, fpMapState.centerLon, fpMapState.zoom);
@@ -385,8 +388,9 @@ function ensureFootprintsMapMounted() {
 }
 
 function fpMapStepZoom(delta, anchorPxX, anchorPxY) {
+  fpMapState.animToken += 1;
   const canvas = $("footprintsMapCanvas");
-  const nextZoom = Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, fpMapState.zoom + delta));
+  const nextZoom = Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, Math.round(fpMapState.zoom) + delta));
   if (nextZoom === fpMapState.zoom) return;
   if (canvas && anchorPxX !== undefined && anchorPxY !== undefined) {
     const w = canvas.clientWidth || 1;
@@ -496,21 +500,25 @@ function fpMapDraw() {
   if (attrEl) attrEl.textContent = spec.attribution;
 
   const z = fpMapState.zoom;
-  const numTiles = Math.pow(2, z);
+  // Always request integer XYZ tile zoom while smoothly scaling during fractional fly-to animation.
+  const tileZ = Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, Math.floor(z)));
+  const tileScale = Math.pow(2, z - tileZ);
+  const tilePx = MAP_TILE_SIZE * tileScale;
+  const numTiles = Math.pow(2, tileZ);
   const centerW = fpLatLonToWorld(fpMapState.centerLat, fpMapState.centerLon, z);
   const topLeftX = centerW.x - w / 2;
   const topLeftY = centerW.y - h / 2;
 
-  const minTileX = Math.floor(topLeftX / MAP_TILE_SIZE) - 1;
-  const maxTileX = Math.floor((topLeftX + w) / MAP_TILE_SIZE) + 1;
-  const minTileY = Math.max(0, Math.floor(topLeftY / MAP_TILE_SIZE) - 1);
-  const maxTileY = Math.min(numTiles - 1, Math.floor((topLeftY + h) / MAP_TILE_SIZE) + 1);
+  const minTileX = Math.floor(topLeftX / tilePx) - 1;
+  const maxTileX = Math.floor((topLeftX + w) / tilePx) + 1;
+  const minTileY = Math.max(0, Math.floor(topLeftY / tilePx) - 1);
+  const maxTileY = Math.min(numTiles - 1, Math.floor((topLeftY + h) / tilePx) + 1);
 
   const needed = new Set();
   for (let ty = minTileY; ty <= maxTileY; ty += 1) {
     for (let tx = minTileX; tx <= maxTileX; tx += 1) {
       const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
-      const key = `${z}/${tx}/${ty}`;
+      const key = `${tileZ}/${tx}/${ty}`;
       needed.add(key);
       let img = fpMapState.tileCache.get(key);
       if (!img) {
@@ -519,16 +527,19 @@ function fpMapDraw() {
         img.alt = "";
         img.decoding = "async";
         img.draggable = false;
-        const tileUrl = spec.urlFor(z, wrappedX, ty);
+        const tileUrl = spec.urlFor(tileZ, wrappedX, ty);
         if (!tileUrl) continue;
         img.src = tileUrl;
         img.addEventListener("load", () => img.classList.add("is-loaded"), { once: true });
         fpMapState.tileCache.set(key, img);
         tilesEl.appendChild(img);
       }
-      const px = Math.round(tx * MAP_TILE_SIZE - topLeftX);
-      const py = Math.round(ty * MAP_TILE_SIZE - topLeftY);
-      img.style.transform = `translate3d(${px}px, ${py}px, 0)`;
+      const px = tx * tilePx - topLeftX;
+      const py = ty * tilePx - topLeftY;
+      img.style.transformOrigin = "0 0";
+      img.style.transform = tileScale === 1
+        ? `translate3d(${Math.round(px)}px, ${Math.round(py)}px, 0)`
+        : `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0) scale(${tileScale.toFixed(4)})`;
     }
   }
 

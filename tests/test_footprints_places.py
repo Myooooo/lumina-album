@@ -9,16 +9,23 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-# Allow geocode pure-logic tests to run even when optional `requests` is absent.
+# Allow geocode pure-logic tests to run even when optional `requests` is absent,
+# without polluting sys.modules for other test modules during unittest discover.
+_INJECTED_REQUESTS = False
 if "requests" not in sys.modules:
     try:
         import requests  # type: ignore  # noqa: F401
     except ImportError:
         fake_req = types.ModuleType("requests")
+        fake_req.__path__ = []  # type: ignore[attr-defined]
         fake_exc = types.SimpleNamespace(RequestException=Exception)
         fake_req.exceptions = fake_exc  # type: ignore[attr-defined]
         fake_req.get = None  # type: ignore[attr-defined]
+        fake_adapters = types.ModuleType("requests.adapters")
+        fake_adapters.HTTPAdapter = object  # type: ignore[attr-defined]
         sys.modules["requests"] = fake_req
+        sys.modules["requests.adapters"] = fake_adapters
+        _INJECTED_REQUESTS = True
 
 from photo_reviewer.db import Database
 from photo_reviewer.footprints import merge_places_and_footprints, photo_coords

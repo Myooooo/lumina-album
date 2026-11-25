@@ -233,7 +233,10 @@ class PeopleAndPetsTest(unittest.TestCase):
                     Path(db.get_face(ids[0])["thumb_path"]).resolve(), target.resolve()
                 )
             finally:
-                db.close()
+                try:
+                    db.close()
+                except ImportError:
+                    pass
 
     def test_manual_model_layout_detection_and_zip_extract(self) -> None:
         import zipfile
@@ -340,7 +343,10 @@ class PeopleAndPetsTest(unittest.TestCase):
                 return None
 
             dl = faces_mod.ModelDownloadCoordinator()
-            with mock.patch.object(faces_mod, "_try_prepare_pet_model", side_effect=_fake_pet):
+            with (
+                mock.patch.object(faces_mod, "_ensure_face_runtime", return_value=None),
+                mock.patch.object(faces_mod, "_try_prepare_pet_model", side_effect=_fake_pet),
+            ):
                 dl.start(cfg, model_name="buffalo_l", include_pets=True)
                 deadline = time.monotonic() + 5.0
                 while dl.status()["status"] == "running" and time.monotonic() < deadline:
@@ -350,6 +356,21 @@ class PeopleAndPetsTest(unittest.TestCase):
             self.assertTrue(called.get("install_deps"))
             self.assertIn("pets", dl_st["downloaded"])
             self.assertTrue(faces_mod.has_pet_model(cfg))
+
+    def test_ensure_face_runtime_skips_redundant_pip_when_installed(self) -> None:
+        from unittest import mock
+        from photo_reviewer import faces as faces_mod
+
+        job = faces_mod.ModelDownloadJob(status="running")
+        with (
+            mock.patch("importlib.util.find_spec", return_value=object()),
+            mock.patch.object(faces_mod, "_has_nvidia_gpu", return_value=False),
+            mock.patch.object(faces_mod, "_pip_install") as m_pip,
+            mock.patch("sys.platform", "darwin"),
+        ):
+            err = faces_mod._ensure_face_runtime(job, include_pets=True)
+            self.assertIsNone(err)
+            m_pip.assert_not_called()
 
 
 if __name__ == "__main__":
