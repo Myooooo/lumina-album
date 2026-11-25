@@ -426,6 +426,52 @@ def vector_engine_status(
     }
 
 
+def batch_cosine_scores(
+    query_vec: list[float],
+    id_blobs: list[tuple[int, bytes]],
+    threshold: float,
+) -> list[tuple[float, int]]:
+    """Compute cosine similarities between ``query_vec`` and packed float32 blobs.
+
+    Uses vectorized NumPy matrix multiplication when NumPy is installed, with an
+    exact pure-Python fallback when NumPy is unavailable or dimensions differ.
+    """
+    if not query_vec or not id_blobs:
+        return []
+    dim = len(query_vec)
+    expected_bytes = dim * 4
+    try:
+        import numpy as np
+
+        valid_ids: list[int] = []
+        rows: list[Any] = []
+        for pid, blob in id_blobs:
+            if blob and len(blob) == expected_bytes:
+                valid_ids.append(pid)
+                rows.append(np.frombuffer(blob, dtype="<f4"))
+        if not rows:
+            return []
+        mat = np.vstack(rows)
+        q = np.asarray(query_vec, dtype=np.float32)
+        sims = np.clip(mat @ q, -1.0, 1.0)
+        hits = np.where(sims >= threshold)[0]
+        return [(float(sims[i]), valid_ids[int(i)]) for i in hits]
+    except ImportError:
+        pass
+    except Exception:
+        logger.debug("NumPy batch cosine fallback triggered", exc_info=True)
+
+    scored: list[tuple[float, int]] = []
+    for pid, blob in id_blobs:
+        vec = decode_embedding(blob)
+        if not vec or len(vec) != dim:
+            continue
+        sim = cosine_similarity(query_vec, vec)
+        if sim >= threshold:
+            scored.append((sim, pid))
+    return scored
+
+
 def vector_text_search(
     database,
     cfg,
@@ -461,21 +507,13 @@ def vector_text_search(
         if min_similarity is not None
         else float(getattr(cfg, "vector_min_similarity", 0.22))
     )
-    candidate_ids = [p["id"] for p in candidates]
+    by_id = {p["id"]: p for p in candidates}
+    candidate_ids = list(by_id.keys())
     emb_map = database.list_photo_embeddings(model, photo_ids=candidate_ids)
-    scored: list[tuple[float, dict[str, Any]]] = []
-    for photo in candidates:
-        blob = emb_map.get(photo["id"])
-        if not blob:
-            continue
-        vec = decode_embedding(blob)
-        if not vec:
-            continue
-        sim = cosine_similarity(q_vec, vec)
-        if sim >= threshold:
-            scored.append((sim, photo))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    top = scored[: max(1, int(top_k))]
+    id_blobs = [(pid, emb_map[pid]) for pid in candidate_ids if pid in emb_map]
+    scored_ids = batch_cosine_scores(q_vec, id_blobs, threshold)
+    scored_ids.sort(key=lambda item: item[0], reverse=True)
+    top = [(s, by_id[pid]) for s, pid in scored_ids[: max(1, int(top_k))] if pid in by_id]
     return {
         "clip_ready": True,
         "model": model,
@@ -503,31 +541,27 @@ def vector_image_search(
     if not res:
         return {"model": active_vector_model(cfg), "photos": [], "scores": {}}
     model, target_vec = res
-    candidate_ids = [p["id"] for p in candidates if p["id"] != target_photo["id"]]
+    by_id = {p["id"]: p for p in candidates if p["id"] != target_photo["id"]}
+    candidate_ids = list(by_id.keys())
     emb_map = database.list_photo_embeddings(model, photo_ids=candidate_ids)
 
     # Lazily backfill missing visual descriptors for small/medium sets so
     # image-to-image search works immediately even before a manual index run.
-    scored: list[tuple[float, dict[str, Any]]] = []
     backfilled = 0
-    for photo in candidates:
-        pid = photo["id"]
-        if pid == target_photo["id"]:
+    for pid in candidate_ids:
+        if pid in emb_map or backfilled >= 240:
             continue
-        blob = emb_map.get(pid)
-        vec = decode_embedding(blob) if blob else None
-        if vec is None and backfilled < 240:
-            computed = ensure_photo_embedding(database, cfg, photo, model=model)
-            if computed and computed[0] == model:
-                vec = computed[1]
-                backfilled += 1
-        if not vec:
-            continue
-        sim = cosine_similarity(target_vec, vec)
-        if sim >= min_similarity:
-            scored.append((sim, photo))
-    scored.sort(key=lambda item: item[0], reverse=True)
-    top = scored[: max(1, int(top_k))]
+        computed = ensure_photo_embedding(database, cfg, by_id[pid], model=model)
+        if computed and computed[0] == model:
+            blob = encode_embedding(computed[1])
+            if blob:
+                emb_map[pid] = blob
+            backfilled += 1
+
+    id_blobs = [(pid, emb_map[pid]) for pid in candidate_ids if pid in emb_map]
+    scored_ids = batch_cosine_scores(target_vec, id_blobs, min_similarity)
+    scored_ids.sort(key=lambda item: item[0], reverse=True)
+    top = [(s, by_id[pid]) for s, pid in scored_ids[: max(1, int(top_k))] if pid in by_id]
     return {
         "model": model,
         "photos": [p for _s, p in top],

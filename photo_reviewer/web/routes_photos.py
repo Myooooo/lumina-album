@@ -495,11 +495,9 @@ def register(app, cfg, database):
                 year = int(year_raw)
             except (TypeError, ValueError):
                 return jsonify({"error": "year 参数不合法"}), 400
-        rows = database.list_photos(
+        rows = database.stats_report_rows(
             folder=folder,
-            exclude_deleted=True,
             exclude_folders=exclude_folders,
-            sort="time_desc",
             limit=50000,
         )
         return jsonify(stats_report.build_shooting_report(rows, year=year))

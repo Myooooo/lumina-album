@@ -1868,6 +1868,51 @@ class Database:
             finally:
                 conn.close()
 
+    def stats_report_rows(
+        self,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+        limit: int = 50000,
+    ) -> list[dict[str, Any]]:
+        """Lean projection for Photography Year-in-Review statistics.
+
+        Avoids reading and JSON-decoding unused columns (``dimensions``,
+        ``video_info``, ``reason``, ``thumb_path``, ``proxy_path``, etc.).
+        """
+        where = ["status != 'deleted'"]
+        params: list[Any] = []
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders)
+        where.extend(f_clauses)
+        params.extend(f_params)
+        sql = (
+            "SELECT id, captured_at, capture_year, exif, score, favorite, "
+            "media_kind, location, tags "
+            f"FROM photos WHERE {' AND '.join(where)} "
+            "ORDER BY (captured_at IS NULL) ASC, captured_at DESC LIMIT ?"
+        )
+        params.append(int(limit))
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            finally:
+                conn.close()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
+            except (TypeError, ValueError):
+                d["tags"] = []
+            try:
+                d["exif"] = json.loads(d["exif"]) if d.get("exif") else {}
+            except (TypeError, ValueError):
+                d["exif"] = {}
+            if not d.get("media_kind"):
+                d["media_kind"] = "photo"
+            out.append(d)
+        return out
+
     def duplicate_candidates(
         self,
         folder: str | None = None,

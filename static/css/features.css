@@ -16,9 +16,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  font-size: 12.5px;
+  height: 34px;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
 }
 
@@ -455,15 +457,7 @@ body[data-theme="vintage"] .duplicates-similarity input[type="range"]::-moz-rang
   border: 1.5px solid #161310;
 }
 
-/* ---------- Smart Albums Button & Create Row Alignment ---------- */
-.stats-smart-album-btn {
-  height: 34px;
-  padding: 0 13px;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-}
-
+/* ---------- Smart Albums Create Row Alignment ---------- */
 .smart-albums-create-row .btn {
   height: 36px;
   padding: 0 14px;
@@ -473,7 +467,7 @@ body[data-theme="vintage"] .duplicates-similarity input[type="range"]::-moz-rang
   white-space: nowrap;
 }
 
-/* ---------- Compare Modal Fixed-Width File Pickers ---------- */
+/* ---------- Compare Modal Fixed-Width File Pickers & 3-Theme Select Polish ---------- */
 .compare-pickers {
   display: flex;
   align-items: center;
@@ -502,9 +496,39 @@ body[data-theme="vintage"] .duplicates-similarity input[type="range"]::-moz-rang
   height: 32px;
   flex-shrink: 0;
   padding: 0 28px 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.stats-report-year-select:focus-visible,
+.compare-picker-label select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+body[data-theme="paper"] .compare-picker-label select {
+  border-radius: 2px;
+  border-color: var(--ink-line, #2a241e);
+}
+
+body[data-theme="classic"] .stats-report-year-select,
+body[data-theme="classic"] .compare-picker-label select {
+  border-radius: 999px;
+}
+
+body[data-theme="vintage"] .compare-picker-label select {
+  border-radius: 2px;
+  background: #1b1714;
+  border-color: rgba(235, 146, 52, 0.32);
+  color: #f3e8d8;
 }
 
 @media (max-width: 640px) {

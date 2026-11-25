@@ -634,6 +634,35 @@ def register(app, cfg, database):
             }
         )
 
+    _trips_cache: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
+    _TRIPS_CACHE_TTL = 45.0
+
+    def _get_clustered_trips(
+        folder: str | None,
+        exclude_folders: list[str] | None,
+        rows: list[dict[str, Any]],
+        max_gap: int = 3,
+        min_photos: int = 3,
+    ) -> list[dict[str, Any]]:
+        max_id = max((int(p["id"]) for p in rows), default=0)
+        key = (
+            folder or "",
+            tuple(sorted(exclude_folders or ())),
+            max_gap,
+            min_photos,
+            len(rows),
+            max_id,
+        )
+        now = time.monotonic()
+        hit = _trips_cache.get(key)
+        if hit and now - hit[0] < _TRIPS_CACHE_TTL:
+            return hit[1]
+        clustered = trips_mod.cluster_trips(rows, max_gap_days=max_gap, min_photos=min_photos)
+        if len(_trips_cache) >= 16:
+            _trips_cache.clear()
+        _trips_cache[key] = (now, clustered)
+        return clustered
+
     @app.get("/api/trips")
     def api_trips():
         """Auto-clustered Trips & Stories for the current folder or library."""
@@ -653,7 +682,9 @@ def register(app, cfg, database):
             sort="time_asc",
             limit=20000,
         )
-        trip_list = trips_mod.cluster_trips(rows, max_gap_days=max_gap, min_photos=min_photos)
+        trip_list = _get_clustered_trips(
+            folder, exclude_folders, rows, max_gap=max_gap, min_photos=min_photos
+        )
         return jsonify({"trips": trip_list, "total": len(trip_list)})
 
     @app.get("/api/trips/<trip_id>")
@@ -666,7 +697,7 @@ def register(app, cfg, database):
             sort="time_asc",
             limit=20000,
         )
-        trip_list = trips_mod.cluster_trips(rows)
+        trip_list = _get_clustered_trips(folder, exclude_folders, rows)
         target = next((t for t in trip_list if t["id"] == trip_id), None)
         if not target:
             return jsonify({"error": "未找到该旅程"}), 404
