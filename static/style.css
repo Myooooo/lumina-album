@@ -14341,3 +14341,81 @@ body[data-theme="vintage"] .fp-map-error-banner {
   }
 }
 
+
+/* ==========================================================================
+   Phase 1: Local Vector Search, Similar Banner & Duplicate Mode Selector
+   ========================================================================== */
+
+.similar-search-banner {
+  max-width: var(--page-max, 1400px);
+  margin: 0 auto 14px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: var(--shadow-card);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dup-mode-select {
+  height: 30px;
+  padding: 0 26px 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background-color: var(--panel-solid);
+  color: var(--text);
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.vector-engine-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-deep);
+}
+
+.vector-engine-meta {
+  flex: 1;
+  min-width: 220px;
+}
+
+.vector-engine-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.vector-engine-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+body[data-theme="paper"] .similar-search-banner,
+body[data-theme="paper"] .vector-engine-row,
+body[data-theme="paper"] .dup-mode-select {
+  border-radius: 2px;
+  border-color: var(--ink-line, #2a241e);
+}
+
+body[data-theme="vintage"] .similar-search-banner,
+body[data-theme="vintage"] .vector-engine-row,
+body[data-theme="vintage"] .dup-mode-select {
+  border-radius: 2px;
+  background-color: #1b1714;
+  border-color: rgba(235, 146, 52, 0.28);
+  color: #f3e8d8;
+}

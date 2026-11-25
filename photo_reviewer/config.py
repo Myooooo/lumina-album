@@ -76,6 +76,9 @@ PERSISTED_FIELDS = (
     "face_match_threshold",
     "face_min_cluster_size",
     "face_models_dir",
+    "vector_search_enabled",
+    "vector_model",
+    "vector_min_similarity",
     "ffmpeg_path",
 )
 
@@ -373,6 +376,15 @@ class Config:
     face_models_dir: str = field(
         default_factory=lambda: os.getenv("PHOTO_FACE_MODELS_DIR", "")
     )
+    vector_search_enabled: bool = field(
+        default_factory=lambda: _env_bool("PHOTO_VECTOR_SEARCH_ENABLED", True)
+    )
+    vector_model: str = field(
+        default_factory=lambda: os.getenv("PHOTO_VECTOR_MODEL", "cn-clip-vit-b16")
+    )
+    vector_min_similarity: float = field(
+        default_factory=lambda: float(os.getenv("PHOTO_VECTOR_MIN_SIMILARITY", "0.22"))
+    )
 
     def __post_init__(self) -> None:
         data = Path(self.data_dir)
@@ -428,6 +440,9 @@ class Config:
             "face_match_threshold": self.face_match_threshold,
             "face_min_cluster_size": self.face_min_cluster_size,
             "face_models_dir": self.face_models_dir,
+            "vector_search_enabled": self.vector_search_enabled,
+            "vector_model": self.vector_model,
+            "vector_min_similarity": self.vector_min_similarity,
             "ffmpeg_path": self.ffmpeg_path,
         }
 

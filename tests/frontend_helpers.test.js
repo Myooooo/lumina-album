@@ -911,7 +911,7 @@ check(
 );
 check(
   "visual goes through the search endpoint, not the list endpoint",
-  /mode === "semantic" \|\| mode === "smart" \|\| mode === "visual"/.test(src),
+  /mode === "semantic" \|\| mode === "smart" \|\| mode === "vector" \|\| mode === "visual"/.test(src),
   true
 );
 check(
@@ -1700,7 +1700,7 @@ section("cross-view stability");
   );
   check(
     "segmented search capsule integrates searchMode, searchInput, and searchBtn",
-    /class="search-capsule"[\s\S]{0,600}id="searchMode"[\s\S]{0,400}id="searchInput"[\s\S]{0,300}id="searchBtn"/.test(
+    /class="search-capsule"[\s\S]{0,600}id="searchMode"[\s\S]{0,600}id="searchInput"[\s\S]{0,300}id="searchBtn"/.test(
       htmlDoc
     ) && /\.search-capsule \{/.test(stylesheet),
     true
@@ -2190,6 +2190,16 @@ section("people & pets (人物与宠物)");
       /syncPeopleKindSwitch\(\)/.test(
         fs.readFileSync(path.join(__dirname, "..", "static", "js", "core.js"), "utf8")
       ),
+    true
+  );
+  check(
+    "Phase 1 keyword & vector search modes, image-to-image search, and vector duplicates are wired",
+    /<option value="keyword">关键词<\/option>/.test(indexHtml) &&
+      /<option value="vector">向量搜图<\/option>/.test(indexHtml) &&
+      /id="previewSimilarBtn"/.test(indexHtml) &&
+      /id="dupModeSelect"/.test(indexHtml) &&
+      /function findSimilarPhotos\(/.test(src) &&
+      /function refreshVectorEngineStatus\(/.test(src),
     true
   );
 }

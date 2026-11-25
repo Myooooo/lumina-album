@@ -202,6 +202,8 @@
             <label><span class="label-icon" data-icon="scan"></span>搜索方式</label>
             <select id="searchMode">
               <option value="smart">探索回忆</option>
+              <option value="keyword">关键词</option>
+              <option value="vector">向量搜图</option>
               <option value="visual">看图搜索</option>
             </select>
           </div>
@@ -235,6 +237,10 @@
       </select>
     </div>
 
+    <div id="similarSearchBanner" class="similar-search-banner hidden" role="status">
+      <span class="similar-banner-text" id="similarSearchText">正在查看相似画面</span>
+      <button id="similarSearchClearBtn" class="btn small" type="button"><span class="btn-icon" data-icon="close"></span>返回全部</button>
+    </div>
     <main id="gallery" class="gallery"></main>
     <div class="gallery-load-more-wrap">
       <button id="loadMoreBtn" class="btn gallery-load-more hidden"><span class="btn-icon" data-icon="chevronDown"></span>展开更多回忆</button>
@@ -311,6 +317,7 @@
         <button id="previewDeleteBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
         <button id="previewRestoreBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
         <button id="previewPermanentDeleteBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
+        <button id="previewSimilarBtn" class="btn" title="寻找构图与色调相似的画面"><span class="btn-icon" data-icon="sparkles"></span>找相似画面</button>
         <button id="previewEditBtn" class="btn" title="编辑回忆信息"><span class="btn-icon" data-icon="edit"></span>编辑回忆</button>
         <button id="previewReanalyzeBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
         <button id="previewFavoriteBtn" class="btn" title="珍藏"><span class="btn-icon" data-icon="heart"></span><span>珍藏</span></button>
@@ -498,6 +505,13 @@
 
       <div class="duplicates-toolbar">
         <label class="duplicates-similarity">
+          <span>比对方式</span>
+          <select id="dupModeSelect" class="dup-mode-select" data-no-custom>
+            <option value="phash">感知哈希</option>
+            <option value="vector">向量语义</option>
+          </select>
+        </label>
+        <label class="duplicates-similarity">
           <span>相似程度</span>
           <input id="dupThreshold" type="range" min="0" max="12" step="1" value="6" />
           <output id="dupThresholdLabel">宽松</output>
@@ -668,6 +682,19 @@
                 <input id="promptPresetName" type="text" maxlength="30" placeholder="给这套提示词起个名字（可留空）" />
                 <button id="savePromptPresetBtn" class="btn small" type="button"><span class="btn-icon" data-icon="check"></span>保存为自定义</button>
                 <button id="deletePromptPresetBtn" class="btn small prompt-delete-btn hidden" type="button"><span class="btn-icon" data-icon="trash"></span>删除</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h3 class="settings-section-title">本地向量搜图引擎</h3>
+            <div class="vector-engine-row">
+              <div class="vector-engine-meta">
+                <div id="vectorEngineStatus" class="vector-engine-status">正在检查向量索引状态…</div>
+                <div id="vectorIndexHint" class="form-hint">支持本地视觉向量以图搜图与向量相似回忆；放入 CLIP ONNX 模型后支持全库自然语言向量搜图。</div>
+              </div>
+              <div class="vector-engine-actions">
+                <button id="vectorIndexStartBtn" class="btn small" type="button"><span class="btn-icon" data-icon="sparkles"></span>建立向量索引</button>
+                <button id="vectorIndexCancelBtn" class="btn small danger hidden" type="button"><span class="btn-icon" data-icon="close"></span>取消</button>
               </div>
             </div>
           </div>

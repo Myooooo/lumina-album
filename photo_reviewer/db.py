@@ -510,6 +510,15 @@ class Database:
                         updated_at TEXT NOT NULL
                     );
                     CREATE INDEX IF NOT EXISTS idx_places_name ON places(name);
+                    CREATE TABLE IF NOT EXISTS photo_embeddings (
+                        photo_id INTEGER NOT NULL,
+                        model TEXT NOT NULL,
+                        dim INTEGER NOT NULL,
+                        embedding BLOB NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (photo_id, model)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_photo_embeddings_model ON photo_embeddings(model);
                     """
                 )
                 conn.commit()
@@ -1330,6 +1339,10 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
+                conn.executemany(
+                    "DELETE FROM photo_embeddings WHERE photo_id=?",
+                    [(pid,) for pid in ids],
+                )
                 conn.executemany(
                     "DELETE FROM photos WHERE id=?", [(pid,) for pid in ids]
                 )
@@ -2814,6 +2827,106 @@ class Database:
             finally:
                 conn.close()
         return removed
+
+    # ------------------------------------------------------------------
+    # Multimodal photo embeddings (CLIP / SigLIP & visual descriptors)
+    # ------------------------------------------------------------------
+
+    def upsert_photo_embedding(
+        self, photo_id: int, model: str, dim: int, embedding: bytes
+    ) -> None:
+        now = utc_now()
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO photo_embeddings (photo_id, model, dim, embedding, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(photo_id, model) DO UPDATE SET
+                        dim=excluded.dim,
+                        embedding=excluded.embedding,
+                        updated_at=excluded.updated_at
+                    """,
+                    (int(photo_id), str(model), int(dim), embedding, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_photo_embedding(self, photo_id: int, model: str) -> bytes | None:
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT embedding FROM photo_embeddings WHERE photo_id=? AND model=?",
+                    (int(photo_id), str(model)),
+                ).fetchone()
+                return bytes(row["embedding"]) if row and row["embedding"] is not None else None
+            finally:
+                conn.close()
+
+    def list_photo_embeddings(
+        self, model: str, photo_ids: Sequence[int] | None = None
+    ) -> dict[int, bytes]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                if photo_ids is not None:
+                    ids = [int(pid) for pid in photo_ids]
+                    if not ids:
+                        return {}
+                    out: dict[int, bytes] = {}
+                    for i in range(0, len(ids), 500):
+                        chunk = ids[i : i + 500]
+                        placeholders = ",".join("?" for _ in chunk)
+                        rows = conn.execute(
+                            f"SELECT photo_id, embedding FROM photo_embeddings WHERE model=? AND photo_id IN ({placeholders})",
+                            [str(model), *chunk],
+                        ).fetchall()
+                        for r in rows:
+                            if r["embedding"] is not None:
+                                out[int(r["photo_id"])] = bytes(r["embedding"])
+                    return out
+                rows = conn.execute(
+                    "SELECT photo_id, embedding FROM photo_embeddings WHERE model=?",
+                    (str(model),),
+                ).fetchall()
+                return {
+                    int(r["photo_id"]): bytes(r["embedding"])
+                    for r in rows
+                    if r["embedding"] is not None
+                }
+            finally:
+                conn.close()
+
+    def count_photo_embeddings(self, model: str, folder: str | None = None) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                if folder:
+                    row = conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM photo_embeddings e
+                        JOIN photos p ON p.id = e.photo_id
+                        WHERE e.model=? AND p.folder=? AND p.status != 'deleted'
+                        """,
+                        (str(model), canonical_folder(folder)),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM photo_embeddings e
+                        JOIN photos p ON p.id = e.photo_id
+                        WHERE e.model=? AND p.status != 'deleted'
+                        """,
+                        (str(model),),
+                    ).fetchone()
+                return int(row["c"]) if row else 0
+            finally:
+                conn.close()
 
 
 # Global database instance, initialized when the app starts.

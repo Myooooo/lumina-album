@@ -117,13 +117,25 @@ function init() {
     const mode = $("searchMode").value;
     const input = $("searchInput");
     if (input) {
-      input.placeholder =
-        mode === "visual"
-          ? "描述画面细节，让模型看图寻找（如：逆光的侧影、红衣女孩）…"
-          : "例如：去年秋天的金黄落叶、西湖落日…";
+      if (mode === "keyword") {
+        input.placeholder = "按标题、标签、地点或文件名即时匹配（不调用模型）…";
+      } else if (mode === "vector") {
+        input.placeholder = "输入自然语言，用本地多模态向量全库搜图…";
+      } else if (mode === "visual") {
+        input.placeholder = "描述画面细节，让模型看图寻找（如：逆光的侧影、红衣女孩）…";
+      } else {
+        input.placeholder = "例如：去年秋天的金黄落叶、西湖落日…";
+      }
     }
     loadPhotos();
   });
+  const clearSimilarBtn = $("similarSearchClearBtn");
+  if (clearSimilarBtn) {
+    clearSimilarBtn.addEventListener("click", () => {
+      hideSimilarSearchBanner();
+      loadPhotos();
+    });
+  }
 
   $("deleteSelectedBtn").addEventListener("click", () => deletePhotos([...state.selected]));
   $("restoreSelectedBtn").addEventListener("click", () => restorePhotos([...state.selected]));
@@ -163,6 +175,10 @@ function init() {
       const targetId = Number(thumb.dataset.photoId);
       if (Number.isFinite(targetId)) jumpToPreview(targetId);
     });
+  }
+  const previewSimilarBtn = $("previewSimilarBtn");
+  if (previewSimilarBtn) {
+    previewSimilarBtn.addEventListener("click", () => findSimilarPhotos(state.currentPreviewId));
   }
   $("previewEditBtn").addEventListener("click", openEditPreview);
   $("previewDeleteBtn").addEventListener("click", () => deletePhotos([state.currentPreviewId]));
@@ -374,6 +390,10 @@ function init() {
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
+  const vecStartBtn = $("vectorIndexStartBtn");
+  if (vecStartBtn) vecStartBtn.addEventListener("click", startVectorIndex);
+  const vecCancelBtn = $("vectorIndexCancelBtn");
+  if (vecCancelBtn) vecCancelBtn.addEventListener("click", cancelVectorIndex);
   // Keep the percentage beside each slider in step while it is dragged.
   ["setVideoPreviewVolume", "setLiveVolume"].forEach((id) => {
     const input = $(id);
@@ -1501,6 +1521,7 @@ async function loadDuplicates(threshold) {
     const params = new URLSearchParams();
     if (state.folder) params.set("folder", state.folder);
     if (threshold !== undefined) params.set("threshold", String(threshold));
+    if (dupState.mode && dupState.mode !== "phash") params.set("mode", dupState.mode);
     const data = await api(`/api/duplicates?${params.toString()}`);
     dupState.groups = data.groups || [];
     dupState.threshold = data.threshold;
@@ -1665,6 +1686,13 @@ function initDuplicates() {
     });
   }
 
+  const dupModeSelect = $("dupModeSelect");
+  if (dupModeSelect) {
+    dupModeSelect.addEventListener("change", () => {
+      dupState.mode = dupModeSelect.value || "phash";
+      loadDuplicates(dupState.threshold);
+    });
+  }
   const slider = $("dupThreshold");
   if (slider) {
     // Re-query on release rather than on every pixel: each step re-runs the

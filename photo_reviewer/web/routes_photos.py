@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from flask import jsonify, request, url_for
 
-from .. import video
+from .. import vectors, video
 
 from ..api_client import (
     SEMANTIC_CANDIDATE_LIMIT,
@@ -186,7 +186,7 @@ def register(app, cfg, database):
         result_map = {}
         visual_checked = 0
 
-        if mode == "smart":
+        if mode in ("keyword", "smart"):
             keyword_photos = database.list_photos(
                 folder=folder,
                 status=status,
@@ -203,18 +203,52 @@ def register(app, cfg, database):
                 result_map[p["id"]] = p
 
         semantic_warning = None
+        vector_scores = None
+        if mode == "vector" and query:
+            vec_candidates = database.list_photos(
+                folder=folder,
+                status=status,
+                min_score=min_score,
+                tag=tag,
+                favorite=favorite,
+                year=year,
+                exclude_deleted=exclude_deleted,
+                sort=sort,
+                limit=20000,
+            )
+            vres = vectors.vector_text_search(database, cfg, query, vec_candidates)
+            semantic_warning = vres.get("warning")
+            if vres.get("clip_ready") and vres.get("photos"):
+                vector_scores = vres.get("scores") or {}
+                photos = vres["photos"]
+                return jsonify(
+                    {
+                        "photos": [_photo_payload(p) for p in photos],
+                        "warning": semantic_warning,
+                        "vector_scores": vector_scores,
+                        "model": vres.get("model"),
+                        "checked": None,
+                    }
+                )
+            if not vres.get("clip_ready"):
+                kw_fallback = database.list_photos(
+                    folder=folder,
+                    status=status,
+                    min_score=min_score,
+                    search=query,
+                    tag=tag,
+                    favorite=favorite,
+                    year=year,
+                    exclude_deleted=exclude_deleted,
+                    sort=sort,
+                    limit=2000,
+                )
+                for p in kw_fallback:
+                    result_map[p["id"]] = p
+
         if mode == "smart" and query:
-            # One cheap request before the expensive one. Without it a stopped
-            # model server costs the whole retry budget before anything is
-            # reported - the same reason `/api/analyze/batch` probes first.
-            #
-            # A short timeout: the reader is watching a spinner, and the common
-            # case is a closed port, which the OS refuses in microseconds. The
-            # default three seconds is right for a batch run, not for a keystroke.
             reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)
             if not reachable:
-                # `smart` still has its keyword recall; return that with an
-                # explanation rather than making the reader wait for a timeout.
                 semantic_warning = why
             else:
                 try:
@@ -226,13 +260,7 @@ def register(app, cfg, database):
                 except SemanticSearchError as exc:
                     semantic_warning = str(exc)
 
-        # Visual search looks at the pictures instead of the captions, so it can
-        # find things no caption happens to describe. It costs a real request per
-        # few photos, which is why it is its own mode and why the candidate list is
-        # narrowed first by whatever filters the caller already set.
         if mode == "visual" and query:
-            # This mode *is* the model looking at pictures; there is no local
-            # fallback, so an unreachable server is answered at once.
             reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)
             if not reachable:
                 return jsonify({"error": why, "unreachable": True}), 503
@@ -259,12 +287,66 @@ def register(app, cfg, database):
             {
                 "photos": [_photo_payload(p) for p in photos],
                 "warning": semantic_warning,
-                # How many pictures the model actually looked at. Without it the
-                # visual mode looks like it scanned the library when it only
-                # examined the first few dozen.
+                "vector_scores": vector_scores,
                 "checked": visual_checked if mode == "visual" else None,
             }
         )
+
+    @app.get("/api/photo/<int:photo_id>/similar")
+    def api_photo_similar(photo_id: int):
+        """Image-to-image visual similarity search."""
+        photo = database.get_photo(photo_id)
+        if not photo:
+            return jsonify({"error": "照片不存在"}), 404
+        folder = request.args.get("folder", "").strip() or photo.get("folder") or None
+        try:
+            limit = max(4, min(int(request.args.get("limit", 48)), 120))
+        except (TypeError, ValueError):
+            limit = 48
+        try:
+            min_sim = float(request.args.get("min_similarity", 0.68))
+        except (TypeError, ValueError):
+            min_sim = 0.68
+        candidates = database.list_photos(
+            folder=folder,
+            exclude_deleted=True,
+            sort="time_desc",
+            limit=5000,
+        )
+        res = vectors.vector_image_search(
+            database, cfg, photo, candidates, top_k=limit, min_similarity=min_sim
+        )
+        return jsonify(
+            {
+                "target": _photo_payload(photo),
+                "model": res.get("model"),
+                "scores": res.get("scores") or {},
+                "photos": [_photo_payload(p) for p in res.get("photos", [])],
+            }
+        )
+
+    @app.get("/api/vectors/status")
+    def api_vectors_status():
+        folder = request.args.get("folder", "").strip() or None
+        return jsonify(
+            {
+                "engine": vectors.vector_engine_status(database, cfg, folder=folder),
+                "job": vectors.VECTOR_INDEX_MANAGER.status(),
+            }
+        )
+
+    @app.post("/api/vectors/index")
+    def api_vectors_index():
+        data = request.get_json(force=True, silent=True) or {}
+        folder = (data.get("folder") or "").strip() or None
+        force = bool(data.get("force"))
+        job = vectors.VECTOR_INDEX_MANAGER.start(database, cfg, folder=folder, force=force)
+        return jsonify(job)
+
+    @app.post("/api/vectors/index/cancel")
+    def api_vectors_index_cancel():
+        vectors.VECTOR_INDEX_MANAGER.cancel()
+        return jsonify(vectors.VECTOR_INDEX_MANAGER.status())
 
     @app.get("/api/stats")
     def api_stats():

@@ -810,11 +810,65 @@ function closeFfmpegInstallModal() {
   paintFfmpegStatus();
 }
 
+let vectorIndexPollTimer = null;
+
+async function refreshVectorEngineStatus() {
+  const statusEl = $("vectorEngineStatus");
+  const startBtn = $("vectorIndexStartBtn");
+  const cancelBtn = $("vectorIndexCancelBtn");
+  if (!statusEl) return;
+  try {
+    const q = state.folder ? `?folder=${encodeURIComponent(state.folder)}` : "";
+    const data = await api(`/api/vectors/status${q}`);
+    const eng = data.engine || {};
+    const job = data.job || {};
+    const running = job.status === "running";
+    if (startBtn) startBtn.disabled = running;
+    if (cancelBtn) cancelBtn.classList.toggle("hidden", !running);
+    if (running) {
+      statusEl.textContent = job.message || `正在建立向量索引 ${job.done || 0}/${job.total || 0}…`;
+      if (!vectorIndexPollTimer) {
+        vectorIndexPollTimer = setTimeout(() => {
+          vectorIndexPollTimer = null;
+          refreshVectorEngineStatus();
+        }, 1000);
+      }
+      return;
+    }
+    const modeLabel = eng.clip_ready ? `CLIP (${eng.active_model})` : "视觉特征向量 (内建)";
+    statusEl.textContent = `${modeLabel} · 已索引 ${eng.indexed_count || 0}/${eng.total_photos || 0} 张 · 加速：${eng.accelerator || "CPU"}`;
+  } catch (e) {
+    statusEl.textContent = "无法读取向量引擎状态";
+  }
+}
+
+async function startVectorIndex() {
+  try {
+    await api("/api/vectors/index", {
+      method: "POST",
+      body: JSON.stringify({ folder: state.folder || "" }),
+    });
+    refreshVectorEngineStatus();
+  } catch (e) {
+    showToast("启动向量索引失败：" + e.message, "error");
+  }
+}
+
+async function cancelVectorIndex() {
+  try {
+    await api("/api/vectors/index/cancel", { method: "POST" });
+    refreshVectorEngineStatus();
+  } catch (e) {
+    showToast("取消向量索引失败：" + e.message, "error");
+  }
+}
+
 async function openSettings() {
   try {
     await loadPromptPresets();
     renderCustomPromptMenu();
     closeCustomPromptMenu();
+    refreshVectorEngineStatus();
     const cfg = await api("/api/config");
     $("setApiBase").value = cfg.api_base_url || "";
     $("setApiKey").value = cfg.api_key || "";

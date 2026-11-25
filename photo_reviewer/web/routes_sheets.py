@@ -14,11 +14,14 @@ from flask import Response, jsonify, request
 
 from ..db import photo_capture_year
 
+from .. import vectors
 from ..duplicates import (
     DEFAULT_THRESHOLD,
     group_duplicates,
+    group_duplicates_vector,
     summarise,
 )
+from ..faces import decode_embedding
 
 from ..exporter import (
     build_html,
@@ -581,6 +584,9 @@ def register(app, cfg, database):
         is a judgement call the reviewer should make, not one to bury.
         """
         folder = request.args.get("folder", "").strip() or None
+        dup_mode = (request.args.get("mode", "phash") or "phash").strip().lower()
+        if dup_mode not in ("phash", "vector"):
+            dup_mode = "phash"
         raw_threshold = request.args.get("threshold", "").strip()
         try:
             threshold = int(raw_threshold) if raw_threshold else DEFAULT_THRESHOLD
@@ -589,9 +595,22 @@ def register(app, cfg, database):
         threshold = max(0, min(threshold, 24))
 
         candidates = database.duplicate_candidates(folder)
-        groups = group_duplicates(candidates, threshold=threshold)
+        if dup_mode == "vector":
+            model = vectors.active_vector_model(cfg)
+            raw_embs = database.list_photo_embeddings(model, photo_ids=[c["id"] for c in candidates])
+            embs = {}
+            for pid, blob in raw_embs.items():
+                vec = decode_embedding(blob)
+                if vec:
+                    embs[pid] = vec
+            # Map dHash threshold slider (0..14) cleanly onto cosine similarity (0.98..0.86)
+            min_sim = max(0.84, min(0.985, 0.98 - threshold * 0.008))
+            groups = group_duplicates_vector(candidates, embs, min_similarity=min_sim)
+        else:
+            groups = group_duplicates(candidates, threshold=threshold)
         return jsonify(
             {
+                "mode": dup_mode,
                 "threshold": threshold,
                 "summary": summarise(groups),
                 "groups": [

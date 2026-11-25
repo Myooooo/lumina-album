@@ -3,9 +3,52 @@
    ========================================================================== */
 "use strict";
 
+function hideSimilarSearchBanner() {
+  const banner = $("similarSearchBanner");
+  if (banner) banner.classList.add("hidden");
+  state.similarTargetId = null;
+}
+
+async function findSimilarPhotos(photoId) {
+  if (!photoId) return;
+  showLoading("正在按视觉向量寻找相似画面…");
+  try {
+    const params = new URLSearchParams();
+    if (state.folder) params.set("folder", state.folder);
+    const data = await api(`/api/photo/${photoId}/similar?${params.toString()}`);
+    closeModal("previewModal");
+    if (state.view !== "album") showView("album");
+    const target = data.target || photoById(photoId);
+    const photos = data.photos || [];
+    state.similarTargetId = photoId;
+    indexPhotos(photos);
+    state.offset = photos.length;
+    state.hasMore = false;
+    state.renderedCount = 0;
+    renderGallery({ animate: true });
+    updateLoadMoreButton();
+    const banner = $("similarSearchBanner");
+    const text = $("similarSearchText");
+    if (banner && text) {
+      const label = (target && (target.title || target.filename)) || `#${photoId}`;
+      text.textContent = photos.length
+        ? `与「${label}」画面相似的 ${photos.length} 张照片`
+        : `暂未在当前相册找到与「${label}」相似的画面`;
+      banner.classList.remove("hidden");
+    }
+  } catch (e) {
+    showToast("以图搜图失败：" + e.message, "error");
+  } finally {
+    hideLoading();
+  }
+}
+
 async function loadPhotos(options = {}) {
   const quiet = !!options.quiet;
-  if (!quiet) updateFilterHighlights();
+  if (!quiet) {
+    hideSimilarSearchBanner();
+    updateFilterHighlights();
+  }
   const shouldSkeleton = !quiet && !state.photos.length;
   if (shouldSkeleton) renderSkeleton();
 
@@ -15,7 +58,7 @@ async function loadPhotos(options = {}) {
   let data;
   let hasMore = false;
   try {
-    if ((mode === "semantic" || mode === "smart" || mode === "visual") && query) {
+    if ((mode === "semantic" || mode === "smart" || mode === "vector" || mode === "visual") && query) {
       const statusVal = $("statusFilter").value;
       const body = {
         folder: state.folder || undefined,
@@ -28,7 +71,9 @@ async function loadPhotos(options = {}) {
         year: $("yearFilter").value || undefined,
         sort: $("sortFilter").value,
       };
-      if (!quiet) showLoading("正在用大模型寻找相关回忆…");
+      const loadingMsg =
+        mode === "vector" ? "正在本地向量检索回忆…" : "正在用大模型寻找相关回忆…";
+      if (!quiet) showLoading(loadingMsg);
       try {
         data = await api("/api/search", {
           method: "POST",

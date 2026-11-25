@@ -303,6 +303,78 @@ def _complete_linkage(
     return clusters
 
 
+def group_duplicates_vector(
+    photos: Iterable[dict[str, Any]],
+    embeddings: dict[int, list[float]],
+    min_similarity: float = 0.94,
+) -> list[DuplicateGroup]:
+    """Cluster visually/semantically near-duplicate photos by cosine similarity.
+
+    Uses complete-linkage clustering just like :func:`group_duplicates` so burst
+    sequences don't chain into giant unrelated groups.
+    """
+    threshold = max(0.70, min(float(min_similarity), 0.995))
+    items: list[tuple[int, dict[str, Any], list[float]]] = []
+    for photo in photos:
+        vec = embeddings.get(photo["id"])
+        if vec:
+            items.append((photo["id"], photo, vec))
+    if len(items) < 2:
+        return []
+
+    by_id = {pid: photo for pid, photo, _ in items}
+    neighbours: dict[int, set[int]] = {pid: set() for pid, _, _ in items}
+    sims: dict[tuple[int, int], float] = {}
+
+    for i in range(len(items)):
+        pid_a, photo_a, vec_a = items[i]
+        for j in range(i + 1, len(items)):
+            pid_b, photo_b, vec_b = items[j]
+            if not _compatible(photo_a, photo_b):
+                continue
+            dot = sum(x * y for x, y in zip(vec_a, vec_b))
+            if dot >= threshold:
+                key = (pid_a, pid_b) if pid_a < pid_b else (pid_b, pid_a)
+                sims[key] = dot
+                neighbours[pid_a].add(pid_b)
+                neighbours[pid_b].add(pid_a)
+
+    pairs = [(-sim, left, right) for (left, right), sim in sims.items()]
+    pairs.sort()
+
+    assigned: set[int] = set()
+    clusters: list[list[int]] = []
+    for _neg_sim, left, right in pairs:
+        if left in assigned or right in assigned:
+            continue
+        members = [left, right]
+        assigned.update((left, right))
+        candidates = (neighbours[left] | neighbours[right]) - assigned
+        grown = True
+        while grown:
+            grown = False
+            for cand in sorted(candidates):
+                if cand in assigned:
+                    continue
+                if all(
+                    sims.get((cand, m) if cand < m else (m, cand), 0.0) >= threshold
+                    for m in members
+                ):
+                    members.append(cand)
+                    assigned.add(cand)
+                    candidates |= neighbours[cand]
+                    grown = True
+        clusters.append(sorted(members))
+
+    groups = [
+        DuplicateGroup(photos=sorted((by_id[pid] for pid in members), key=lambda p: p["id"]))
+        for members in clusters
+        if len(members) > 1
+    ]
+    groups.sort(key=lambda group: (-group.size, group.photos[0]["id"]))
+    return groups
+
+
 def summarise(groups: list[DuplicateGroup]) -> dict[str, int]:
     """Counts for the header of the review page."""
     return {
