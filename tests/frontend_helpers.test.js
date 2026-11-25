@@ -2202,6 +2202,15 @@ section("people & pets (人物与宠物)");
       /function refreshVectorEngineStatus\(/.test(src),
     true
   );
+  check(
+    "Phase 2 Trips & Stories tab, map route overlay, and themed export are wired",
+    /data-fp-mode="trips"/.test(indexHtml) &&
+      /function loadFootprintsTrips\(/.test(src) &&
+      /function showTripRouteOnMap\(/.test(src) &&
+      /function drawTripRouteOverlay\(/.test(src) &&
+      /theme:\s*\(state && state\.theme\)\s*\|\|\s*"paper"/.test(src),
+    true
+  );
 }
 
 console.log(

@@ -14,6 +14,7 @@ from flask import Response, jsonify, request
 
 from ..db import photo_capture_year
 
+from .. import trips as trips_mod
 from .. import vectors
 from ..duplicates import (
     DEFAULT_THRESHOLD,
@@ -127,6 +128,9 @@ def register(app, cfg, database):
             "X-Export-Truncated": "1" if included < requested else "0",
         }
 
+        theme = (data.get("theme") or "paper").strip().lower()
+        if theme not in ("paper", "classic", "vintage"):
+            theme = "paper"
         stamp = datetime.now().astimezone().strftime("%Y%m%d-%H%M")
         if fmt == "html":
             document = build_html(
@@ -134,12 +138,11 @@ def register(app, cfg, database):
                 title=title,
                 subtitle=subtitle,
                 colophon="由拾光相册整理",
+                theme=theme,
             )
             payload = document.encode("utf-8")
             return Response(
                 payload,
-                # Not "text/html; charset=utf-8": Flask appends the charset to a
-                # text mimetype, and passing it too produced the doubled header.
                 mimetype="text/html",
                 headers={
                     "Content-Disposition":
@@ -149,7 +152,7 @@ def register(app, cfg, database):
                 },
             )
 
-        image = build_tall_image(photos, title=title, subtitle=subtitle)
+        image = build_tall_image(photos, title=title, subtitle=subtitle, theme=theme)
         if image is None:
             return jsonify({"error": "没有可以导出的照片"}), 400
         try:
@@ -623,3 +626,36 @@ def register(app, cfg, database):
                 ],
             }
         )
+
+    @app.get("/api/trips")
+    def api_trips():
+        """Auto-clustered Trips & Stories for the current folder or library."""
+        folder = request.args.get("folder", "").strip() or None
+        try:
+            max_gap = max(1, min(int(request.args.get("max_gap_days", 3)), 14))
+        except (TypeError, ValueError):
+            max_gap = 3
+        try:
+            min_photos = max(2, min(int(request.args.get("min_photos", 3)), 50))
+        except (TypeError, ValueError):
+            min_photos = 3
+        rows = database.list_photos(
+            folder=folder, exclude_deleted=True, sort="time_asc", limit=20000
+        )
+        trip_list = trips_mod.cluster_trips(rows, max_gap_days=max_gap, min_photos=min_photos)
+        return jsonify({"trips": trip_list, "total": len(trip_list)})
+
+    @app.get("/api/trips/<trip_id>")
+    def api_trip_detail(trip_id: str):
+        folder = request.args.get("folder", "").strip() or None
+        rows = database.list_photos(
+            folder=folder, exclude_deleted=True, sort="time_asc", limit=20000
+        )
+        trip_list = trips_mod.cluster_trips(rows)
+        target = next((t for t in trip_list if t["id"] == trip_id), None)
+        if not target:
+            return jsonify({"error": "未找到该旅程"}), 404
+        by_id = {p["id"]: p for p in rows}
+        photos = [_photo_payload(by_id[pid]) for pid in target["photo_ids"] if pid in by_id]
+        highlights = [_photo_payload(by_id[pid]) for pid in target["highlight_ids"] if pid in by_id]
+        return jsonify({"trip": target, "photos": photos, "highlights": highlights})

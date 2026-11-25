@@ -259,7 +259,12 @@ function ensureFootprintsMapMounted() {
 
   canvas.innerHTML = `
     <div class="fp-map-tiles" id="fpMapTiles" aria-hidden="true"></div>
+    <svg class="fp-map-route" id="fpMapRoute" aria-hidden="true"></svg>
     <div class="fp-map-pins" id="fpMapPins"></div>
+    <div class="fp-map-route-banner hidden" id="fpMapRouteBanner">
+      <span id="fpMapRouteTitle">旅程轨迹</span>
+      <button type="button" class="btn small" id="fpMapRouteClearBtn">清除轨迹</button>
+    </div>
     <div class="fp-map-zoom-stack">
       <button type="button" class="fp-map-zoom-btn" id="fpMapZoomIn" title="放大" aria-label="放大">+</button>
       <button type="button" class="fp-map-zoom-btn" id="fpMapZoomOut" title="缩小" aria-label="缩小">−</button>
@@ -796,6 +801,7 @@ function fpMapDraw() {
       fpMapState.pinCache.delete(key);
     }
   }
+  drawTripRouteOverlay();
 }
 
 function closeFootprintsMapDrawer() {
@@ -880,6 +886,61 @@ function openFootprintsMapDrawer(place, placeIndex) {
   fpMapDraw();
 }
 
+function drawTripRouteOverlay() {
+  const svg = $("fpMapRoute");
+  const banner = $("fpMapRouteBanner");
+  const titleEl = $("fpMapRouteTitle");
+  const canvas = $("footprintsMapCanvas");
+  if (!svg || !canvas) return;
+  const trip = fpMapState.activeTripRoute;
+  const route = trip && Array.isArray(trip.route) ? trip.route : [];
+  if (!route.length) {
+    svg.innerHTML = "";
+    if (banner) banner.classList.add("hidden");
+    return;
+  }
+  const w = canvas.clientWidth || 960;
+  const h = canvas.clientHeight || 560;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  const pts = route
+    .map((pt) => {
+      const xy = fpLatLonToScreen(Number(pt.lat), Number(pt.lon), w, h);
+      return `${xy.x.toFixed(1)},${xy.y.toFixed(1)}`;
+    })
+    .join(" ");
+  const dots = route
+    .map((pt, i) => {
+      const xy = fpLatLonToScreen(Number(pt.lat), Number(pt.lon), w, h);
+      return `<circle class="fp-route-dot" cx="${xy.x.toFixed(1)}" cy="${xy.y.toFixed(1)}" r="${i === 0 || i === route.length - 1 ? 5.5 : 4}" />`;
+    })
+    .join("");
+  svg.innerHTML = `<polyline class="fp-route-line" points="${pts}" />${dots}`;
+  if (banner && titleEl) {
+    titleEl.textContent = `旅程轨迹 · ${trip.title}（${route.length} 个经停点）`;
+    banner.classList.remove("hidden");
+  }
+}
+
+function clearTripRouteOnMap() {
+  fpMapState.activeTripRoute = null;
+  drawTripRouteOverlay();
+}
+
+function showTripRouteOnMap(trip) {
+  if (!trip || !Array.isArray(trip.route) || !trip.route.length) {
+    showToast("这段旅程暂无 GPS 坐标可绘制轨迹", "info");
+    return;
+  }
+  fpMapState.activeTripRoute = trip;
+  setFootprintsMode("map");
+  requestAnimationFrame(() => {
+    const pseudoPlaces = trip.route.map((pt) => ({ lat: pt.lat, lon: pt.lon, count: 1 }));
+    fitFootprintsMapToPlaces(pseudoPlaces);
+    fpMapDraw();
+    drawTripRouteOverlay();
+  });
+}
+
 function renderFootprintsMap(places, bounds) {
   fpMapState.places = places || [];
   fpMapState.bounds = bounds || null;
@@ -887,10 +948,17 @@ function renderFootprintsMap(places, bounds) {
   const drawer = $("footprintsMapDrawer");
   if (drawer) drawer.classList.add("hidden");
   ensureFootprintsMapMounted();
-  // Defer fitBounds one frame so container dimensions are laid out after unhiding.
+  const clearBtn = $("fpMapRouteClearBtn");
+  if (clearBtn && !clearBtn._bound) {
+    clearBtn._bound = true;
+    clearBtn.addEventListener("click", clearTripRouteOnMap);
+  }
   requestAnimationFrame(() => {
-    fitFootprintsMapToPlaces(fpMapState.places);
+    if (!fpMapState.activeTripRoute) {
+      fitFootprintsMapToPlaces(fpMapState.places);
+    }
     fpMapDraw();
+    drawTripRouteOverlay();
   });
 }
 

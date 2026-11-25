@@ -415,11 +415,34 @@ footer.colophon .mark {
 """
 
 
+_HTML_THEME_OVERRIDES = {
+    "classic": """
+      body { background: #f3f5f8; color: #1d232a; }
+      .masthead h1 { color: #14191f; }
+      .masthead .rule { background: #c5d0dc; }
+      .memory { background: rgba(255,255,255,0.92); border: 1px solid #e2e8f0; border-radius: 16px; box-shadow: 0 12px 32px rgba(15,23,42,0.08); }
+      .memory img { border-radius: 10px; }
+      .memory .tag { background: #eef2f6; color: #475569; }
+    """,
+    "vintage": """
+      body { background: #121110; color: #f3e8d8; }
+      .masthead h1 { color: #f4b165; }
+      .masthead .sub, .colophon, .memory .meta { color: #b5a088; }
+      .masthead .rule { background: rgba(235,146,52,0.45); }
+      .memory { background: #1b1714; border: 1px solid rgba(235,146,52,0.28); border-radius: 4px; box-shadow: 0 14px 36px rgba(0,0,0,0.45); }
+      .memory .title { color: #f4b165; }
+      .memory .caption { color: #e8dccb; }
+      .memory .tag { background: rgba(235,146,52,0.16); color: #f4b165; border-radius: 2px; }
+    """,
+}
+
+
 def build_html(
     photos: list[ExportPhoto],
     title: str = "拾光回忆",
     subtitle: str = "",
     colophon: str = "",
+    theme: str = "paper",
 ) -> str:
     """One self-contained HTML document for ``photos``."""
     figures = []
@@ -469,15 +492,17 @@ def build_html(
     colophon_line = (
         f'<footer class="colophon">{html.escape(colophon)}</footer>' if colophon else ""
     )
+    theme_key = (theme or "paper").strip().lower()
+    theme_css = _HTML_THEME_OVERRIDES.get(theme_key, "")
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>{html.escape(title)}</title>
-<style>{_HTML_STYLE}</style>
+<style>{_HTML_STYLE}{theme_css}</style>
 </head>
-<body>
+<body data-theme="{html.escape(theme_key)}">
   <div class="page">
     <header class="masthead">
       <h1>{html.escape(title)}</h1>
@@ -597,11 +622,40 @@ def _rounded(draw, box, radius: int, fill: str) -> None:
         draw.rectangle(box, fill=fill)
 
 
+_TALL_THEMES = {
+    "paper": {
+        "bg": None,
+        "accent": "#b37d56",
+        "title": "#2c241d",
+        "sub": "#8e8072",
+        "rule": "#c8b4a0",
+        "card": "#fffefb",
+    },
+    "classic": {
+        "bg": (243, 245, 248),
+        "accent": "#4a6b82",
+        "title": "#14191f",
+        "sub": "#64748b",
+        "rule": "#cbd5e1",
+        "card": "#ffffff",
+    },
+    "vintage": {
+        "bg": (18, 17, 16),
+        "accent": "#eb9234",
+        "title": "#f4b165",
+        "sub": "#b5a088",
+        "rule": "#5c4329",
+        "card": "#1b1714",
+    },
+}
+
+
 def build_tall_image(
     photos: list[ExportPhoto],
     title: str = "拾光回忆",
     subtitle: str = "",
     width: int = TALL_IMAGE_WIDTH,
+    theme: str = "paper",
 ) -> Image.Image | None:
     """Stack ``photos`` into one long PNG-ready image, or ``None`` if empty.
 
@@ -659,25 +713,30 @@ def build_tall_image(
     total_height += _TALL_MARGIN
     total_height = min(total_height, 30000)  # a hard ceiling Pillow can allocate
 
-    canvas = _paper_gradient(width, total_height)
+    palette = _TALL_THEMES.get((theme or "paper").strip().lower(), _TALL_THEMES["paper"])
+    canvas = (
+        Image.new("RGB", (width, total_height), palette["bg"])
+        if palette["bg"] is not None
+        else _paper_gradient(width, total_height)
+    )
     draw = ImageDraw.Draw(canvas)
 
     # ---- Masthead -------------------------------------------------------
     y = _TALL_MARGIN + 26
     draw.text(
-        (width // 2, y), "拾 光 相 册", font=sub_font, fill="#b37d56", anchor="ma"
+        (width // 2, y), "拾 光 相 册", font=sub_font, fill=palette["accent"], anchor="ma"
     )
     y += 40
-    draw.text((width // 2, y), title, font=title_font, fill="#2c241d", anchor="ma")
+    draw.text((width // 2, y), title, font=title_font, fill=palette["title"], anchor="ma")
     y += 62
     if subtitle:
         draw.text(
-            (width // 2, y), subtitle, font=sub_font, fill="#8e7072".replace("70", "80"),
+            (width // 2, y), subtitle, font=sub_font, fill=palette["sub"],
             anchor="ma",
         )
         y += 36
     draw.line(
-        (width // 2 - 27, y + 12, width // 2 + 27, y + 12), fill="#c8b4a0", width=1
+        (width // 2 - 27, y + 12, width // 2 + 27, y + 12), fill=palette["rule"], width=1
     )
     y = _TALL_MARGIN + header_height
 
@@ -696,12 +755,12 @@ def build_tall_image(
         if meta_line:
             print_height += _TALL_META_BLOCK
 
-        # The print: paper mount, then the picture inset by `_TALL_MOUNT`.
+        # The print: themed mount, then the picture inset by `_TALL_MOUNT`.
         _rounded(
             draw,
             (_TALL_MARGIN, y, _TALL_MARGIN + print_width, y + print_height),
             _TALL_RADIUS,
-            "#fffefb",
+            palette["card"],
         )
         cursor = y + _TALL_MOUNT
         if image is not None:

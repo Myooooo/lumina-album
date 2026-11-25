@@ -105,14 +105,13 @@ function syncFootprintsModeButtons() {
 }
 
 function setFootprintsMode(mode) {
-  const next = mode === "map" ? "map" : "grid";
+  const next = mode === "map" ? "map" : mode === "trips" ? "trips" : "grid";
   fpState.mode = next;
   fpState.modeInitialized = true;
   syncFootprintsModeButtons();
   const mapWrap = $("footprintsMapWrap");
   const body = $("footprintsBody");
   if (state.footprintPlace) {
-    // Inside a specific place, always show its photo grid.
     if (mapWrap) mapWrap.classList.add("hidden");
     if (body) body.classList.remove("hidden");
     return;
@@ -128,10 +127,161 @@ function setFootprintsMode(mode) {
         canvas.innerHTML = '<div class="footprints-empty"><p>地图模式准备中…</p></div>';
       }
     }
+  } else if (next === "trips") {
+    if (mapWrap) mapWrap.classList.add("hidden");
+    if (body) body.classList.remove("hidden");
+    loadFootprintsTrips();
   } else {
     if (mapWrap) mapWrap.classList.add("hidden");
     if (body) body.classList.remove("hidden");
     renderFootprintsGrid();
+  }
+}
+
+async function loadFootprintsTrips() {
+  const body = $("footprintsBody");
+  if (!body) return;
+  body.innerHTML = '<div class="footprints-empty"><p>正在按时间与地点整理旅程故事…</p></div>';
+  try {
+    const q = state.folder ? `?folder=${encodeURIComponent(state.folder)}` : "";
+    const data = await api(`/api/trips${q}`);
+    fpState.trips = data.trips || [];
+    renderTripsGrid();
+  } catch (e) {
+    body.innerHTML = `<div class="footprints-empty"><p>整理旅程失败：${escapeHtml(e.message)}</p></div>`;
+  }
+}
+
+function renderTripsGrid() {
+  const body = $("footprintsBody");
+  if (!body) return;
+  const trips = fpState.trips || [];
+  if (!trips.length) {
+    body.innerHTML = `
+      <div class="footprints-empty">
+        <span class="footprints-empty-icon" data-icon="pin"></span>
+        <p>还没有可串联的旅程故事。</p>
+        <p class="footprints-empty-hint">当同一段日期内有 3 张及以上带拍摄时间的照片时，这里会自动生成旅程卡片。</p>
+      </div>`;
+    renderAllIcons(body);
+    return;
+  }
+  body.innerHTML = `<div class="trips-grid">${trips
+    .map((trip) => {
+      const thumb = `/api/thumbnail/${trip.cover_photo_id}${
+        trip.cover_thumb_version ? `?v=${encodeURIComponent(trip.cover_thumb_version)}` : ""
+      }`;
+      const cities = (trip.cities || [])
+        .slice(0, 3)
+        .map((c) => `<span class="trip-city-chip">${escapeHtml(c)}</span>`)
+        .join("");
+      const dateRange =
+        trip.start_date === trip.end_date
+          ? trip.start_date
+          : `${trip.start_date} ~ ${trip.end_date}`;
+      const hasRoute = Array.isArray(trip.route) && trip.route.length > 0;
+      return `
+        <article class="trip-card" data-trip-id="${escapeHtml(trip.id)}">
+          <div class="trip-card-cover">
+            <img src="${thumb}" alt="${escapeHtml(trip.title)}" loading="lazy" decoding="async" />
+            <span class="trip-card-badge">${trip.photo_count} 张 · ${trip.days} 天</span>
+          </div>
+          <div class="trip-card-body">
+            <h3 class="trip-card-title">${escapeHtml(trip.title)}</h3>
+            <div class="trip-card-dates">${escapeHtml(dateRange)}</div>
+            ${cities ? `<div class="trip-card-cities">${cities}</div>` : ""}
+            <div class="trip-card-actions">
+              <button type="button" class="btn small primary" data-trip-open="${escapeHtml(trip.id)}">查看故事</button>
+              ${hasRoute ? `<button type="button" class="btn small" data-trip-route="${escapeHtml(trip.id)}">地图轨迹</button>` : ""}
+              <button type="button" class="btn small" data-trip-export-html="${escapeHtml(trip.id)}">导出网页</button>
+              <button type="button" class="btn small" data-trip-export-png="${escapeHtml(trip.id)}">导出长图</button>
+            </div>
+          </div>
+        </article>`;
+    })
+    .join("")}</div>`;
+
+  body.querySelectorAll("[data-trip-open]").forEach((btn) => {
+    btn.addEventListener("click", () => openTripDetail(btn.dataset.tripOpen));
+  });
+  body.querySelectorAll("[data-trip-route]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const trip = (fpState.trips || []).find((t) => t.id === btn.dataset.tripRoute);
+      if (trip && typeof showTripRouteOnMap === "function") showTripRouteOnMap(trip);
+    });
+  });
+  body.querySelectorAll("[data-trip-export-html]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const trip = (fpState.trips || []).find((t) => t.id === btn.dataset.tripExportHtml);
+      if (trip && typeof exportSelection === "function") {
+        exportSelection("html", {
+          ids: trip.highlight_ids && trip.highlight_ids.length ? trip.highlight_ids : trip.photo_ids,
+          title: trip.title,
+          subtitle: `${trip.start_date} ~ ${trip.end_date} · 共 ${trip.photo_count} 张`,
+          button: btn,
+        });
+      }
+    });
+  });
+  body.querySelectorAll("[data-trip-export-png]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const trip = (fpState.trips || []).find((t) => t.id === btn.dataset.tripExportPng);
+      if (trip && typeof exportSelection === "function") {
+        exportSelection("png", {
+          ids: trip.highlight_ids && trip.highlight_ids.length ? trip.highlight_ids : trip.photo_ids,
+          title: trip.title,
+          subtitle: `${trip.start_date} ~ ${trip.end_date} · 共 ${trip.photo_count} 张`,
+          button: btn,
+        });
+      }
+    });
+  });
+}
+
+async function openTripDetail(tripId, showAll = false) {
+  const body = $("footprintsBody");
+  if (!body) return;
+  body.innerHTML = '<div class="footprints-empty"><p>正在展开旅程回忆…</p></div>';
+  try {
+    const q = state.folder ? `?folder=${encodeURIComponent(state.folder)}` : "";
+    const data = await api(`/api/trips/${encodeURIComponent(tripId)}${q}`);
+    const trip = data.trip;
+    const list = showAll ? data.photos || [] : data.highlights || [];
+    const hasRoute = Array.isArray(trip.route) && trip.route.length > 0;
+    body.innerHTML = `
+      <div class="trip-detail-bar">
+        <button type="button" class="btn small" id="tripBackBtn">返回旅程</button>
+        <strong class="trip-detail-title">${escapeHtml(trip.title)}</strong>
+        <span class="trip-detail-sub">${escapeHtml(trip.start_date)} ~ ${escapeHtml(trip.end_date)} · 显示 ${list.length}/${trip.photo_count} 张</span>
+        <div class="trip-detail-actions">
+          <button type="button" class="btn small${!showAll ? " primary" : ""}" id="tripHighlightsBtn">高光精选 (${(data.highlights || []).length})</button>
+          <button type="button" class="btn small${showAll ? " primary" : ""}" id="tripAllPhotosBtn">全部照片 (${trip.photo_count})</button>
+          ${hasRoute ? `<button type="button" class="btn small" id="tripRouteBtn">地图轨迹</button>` : ""}
+        </div>
+      </div>
+      <div class="gallery trip-photo-grid">${list.map((p) => memoryPolaroidHtml(p)).join("")}</div>`;
+    watchPolaroids(body);
+    const back = $("tripBackBtn");
+    if (back) back.addEventListener("click", renderTripsGrid);
+    const hiBtn = $("tripHighlightsBtn");
+    if (hiBtn) hiBtn.addEventListener("click", () => openTripDetail(tripId, false));
+    const allBtn = $("tripAllPhotosBtn");
+    if (allBtn) allBtn.addEventListener("click", () => openTripDetail(tripId, true));
+    const routeBtn = $("tripRouteBtn");
+    if (routeBtn) {
+      routeBtn.addEventListener("click", () => {
+        if (typeof showTripRouteOnMap === "function") showTripRouteOnMap(trip);
+      });
+    }
+    body.querySelectorAll(".polaroid-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        const pid = Number(card.dataset.id);
+        if (!Number.isFinite(pid)) return;
+        openPreview(pid, { ids: list.map((p) => p.id), title: trip.title });
+      });
+    });
+  } catch (e) {
+    body.innerHTML = `<div class="footprints-empty"><p>读取旅程失败：${escapeHtml(e.message)}</p></div>`;
   }
 }
 

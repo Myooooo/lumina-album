@@ -1175,10 +1175,14 @@ async function exportKeepsake(options) {
   }
   showToast(`正在整理${label}…`, "info");
   try {
+    const exportPayload = Object.assign(
+      { theme: (state && state.theme) || "paper" },
+      options.payload || {}
+    );
     const resp = await fetch("/api/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(options.payload),
+      body: JSON.stringify(exportPayload),
     });
     if (!resp.ok) {
       let detail = "";

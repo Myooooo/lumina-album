@@ -14419,3 +14419,198 @@ body[data-theme="vintage"] .dup-mode-select {
   border-color: rgba(235, 146, 52, 0.28);
   color: #f3e8d8;
 }
+
+/* ==========================================================================
+   Phase 2: Trips & Stories Cards, Detail Bar & Map Route Polyline
+   ========================================================================== */
+
+.trips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 18px;
+}
+
+.trip-card {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .trip-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-modal);
+  }
+}
+
+.trip-card-cover {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+.trip-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.trip-card-badge {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(24, 20, 17, 0.78);
+  color: #f9f6f0;
+  font-size: 11.5px;
+  font-weight: 600;
+  backdrop-filter: blur(6px);
+}
+
+.trip-card-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trip-card-title {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.trip-card-dates {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--muted);
+}
+
+.trip-card-cities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.trip-city-chip {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary-dark);
+}
+
+.trip-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.trip-detail-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+}
+
+.trip-detail-title {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.trip-detail-sub {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.trip-detail-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fp-map-route {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.fp-route-line {
+  fill: none;
+  stroke: var(--primary, #ae764e);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 7 6;
+  opacity: 0.9;
+}
+
+.fp-route-dot {
+  fill: var(--primary, #ae764e);
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.fp-map-route-banner {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 9;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 12.5px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+}
+
+body[data-theme="paper"] .trip-card,
+body[data-theme="paper"] .trip-detail-bar,
+body[data-theme="paper"] .fp-map-route-banner {
+  border-radius: 3px;
+  border: 1.5px solid var(--ink-line, #2a241e);
+  box-shadow: 3px 3px 0 rgba(42, 36, 30, 0.14);
+  backdrop-filter: none;
+}
+
+body[data-theme="vintage"] .trip-card,
+body[data-theme="vintage"] .trip-detail-bar,
+body[data-theme="vintage"] .fp-map-route-banner {
+  border-radius: 3px;
+  background: #1b1714;
+  border-color: rgba(235, 146, 52, 0.28);
+  color: #f3e8d8;
+}
+
+body[data-theme="vintage"] .fp-route-line {
+  stroke: #eb9234;
+}
+
+body[data-theme="vintage"] .fp-route-dot {
+  fill: #eb9234;
+  stroke: #1b1714;
+}
