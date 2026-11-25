@@ -3502,7 +3502,6 @@ select {
 .settings-content { max-width: 720px; }
 
 .settings-pane { margin-top: 4px; }
-.settings-pane[hidden] { display: none; }
 
 /* Replayed every time a tab is opened: the pane goes from display:none to
    displayed, so the animation restarts on its own without JS bookkeeping. */
@@ -5602,8 +5601,6 @@ body:not([data-view="album"]) .topbar {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-
-
 @media (hover: hover) and (pointer: fine) {
       .footprint-card:hover {
     transform: translateY(-4px);
@@ -5614,8 +5611,6 @@ body:not([data-view="album"]) .topbar {
     transform: scale(1.04);
   }
 }
-
-
 
 .footprint-card:active {
   transform: translateY(-1px) scale(0.985);
@@ -6371,8 +6366,6 @@ body[data-theme="paper"] .footprint-photos {
   gap: 32px 28px;
 }
 
-
-
 body[data-theme="paper"] .polaroid-inner {
   background: var(--paper-cotton);
   border-radius: 2px;
@@ -6390,8 +6383,6 @@ body[data-theme="paper"] .polaroid-card:hover .polaroid-inner {
     0 16px 34px rgba(46, 34, 20, 0.13),
     0 4px 10px rgba(46, 34, 20, 0.06);
 }
-
-
 
 body[data-theme="paper"] .polaroid-photo-frame {
   aspect-ratio: 4 / 3;
@@ -6969,8 +6960,6 @@ body[data-theme="vintage"] .classic-icon {
 
 /* Darkroom Topbar, Tabs & Controls (unified overrides live in theme block below) */
 
-
-
 body[data-theme="vintage"] .search-capsule .search-mode-segment .custom-select-trigger {
   background: rgba(255, 240, 220, 0.05);
   color: var(--text-secondary);
@@ -7013,8 +7002,6 @@ body[data-theme="vintage"] .tape {
 body[data-theme="vintage"] .polaroid-inner {
   overflow: hidden;
 }
-
-
 
 body[data-theme="vintage"] .vintage-film-stock,
 body[data-theme="vintage"] .vintage-film-frame {
@@ -7133,8 +7120,6 @@ body[data-theme="vintage"] .score-pill {
   border: 1px solid rgba(214, 184, 148, 0.18);
 }
 
-
-
 body[data-theme="vintage"] .card-actions {
   border-top-color: rgba(214, 184, 148, 0.16);
 }
@@ -7143,8 +7128,6 @@ body[data-theme="vintage"] .card-actions {
 body[data-theme="vintage"] .modal {
   background: rgba(8, 6, 4, 0.78);
 }
-
-
 
 body[data-theme="vintage"] .modal-close {
   background: #2a211a;
@@ -7502,10 +7485,6 @@ body[data-theme="paper"] .dup-group {
 
 body[data-theme="paper"] .dup-card {
   border-radius: 4px;
-}
-
-body[data-theme="paper"] .dup-shot {
-  border-radius: 2px;
 }
 
 /* --- Vintage Analog: Darkroom 35mm Cine Reel Video Cards --- */
@@ -12098,14 +12077,6 @@ body[data-theme="vintage"] .preview-face-label {
   color: #141210;
 }
 
-
-
-
-
-
-
-
-
 /* ==========================================================================
    Redesigned Settings Panel (7 Tabs + Clean Section Cards),
    Model Download Progress Modal & People Tab Progress Bar
@@ -13663,11 +13634,6 @@ body[data-theme="vintage"] .live-badge-label {
   text-shadow: 0 0 6px rgba(255, 92, 28, 0.55);
 }
 
-body[data-theme="vintage"] .polaroid-card.is-video .live-badge {
-  top: 12px;
-  left: 12px;
-}
-
 /* Vintage checkboxes: dark film stock, amber tick, no white glare. */
 body[data-theme="vintage"] .card-check input[type="checkbox"],
 body[data-theme="vintage"] .import-check input[type="checkbox"],
@@ -14132,10 +14098,6 @@ body[data-theme="vintage"] .force-label input[type="checkbox"]:checked {
   background: #eb9234;
   border-color: #eb9234;
   box-shadow: 0 0 8px rgba(235, 146, 52, 0.25);
-}
-
-body[data-theme="vintage"] .force-label input[type="checkbox"]:checked::after {
-  border-color: #141210;
 }
 
 /* A quiet "background scan is still working" marker in the people header. The
