@@ -19,25 +19,47 @@ async function loadSmartAlbums() {
   }
 }
 
+function summarizeSmartAlbumRules(r) {
+  if (!r || typeof r !== "object") return "默认全部";
+  const parts = [];
+  if (r.folder === "__all__") parts.push("全部可见相册");
+  if (r.min_score) parts.push(`${r.min_score}分+`);
+  if (r.tag) parts.push(`#${r.tag}`);
+  if (r.year) parts.push(`${r.year}年`);
+  if (r.favorite === "1" || r.status === "favorite") parts.push("已珍藏");
+  if (r.kind === "video") parts.push("视频");
+  else if (r.kind === "live") parts.push("实况");
+  if (r.search) parts.push(`「${r.search}」`);
+  return parts.length ? parts.join(" · ") : "当前目录全部回忆";
+}
+
 function renderSmartAlbums() {
   const list = $("smartAlbumsList");
-  if (!list) return;
+  const badge = $("smartAlbumsCount");
   const albums = state.smartAlbums || [];
+  if (badge) {
+    badge.textContent = String(albums.length);
+    badge.classList.toggle("hidden", !albums.length);
+  }
+  if (!list) return;
   if (!albums.length) {
-    list.innerHTML = '<span class="smart-albums-empty">可将任意筛选/搜索组合存为虚拟智能影集</span>';
+    list.innerHTML = '<div class="people-empty">还没有创建智能影集，可在上方输入名称保存当前筛选条件。</div>';
     return;
   }
   list.innerHTML = albums
     .map(
       (a) =>
-        `<span class="smart-album-chip" data-smart-album-id="${a.id}"><button type="button" class="smart-album-chip-btn" data-smart-apply="${a.id}">${escapeHtml(a.name)}</button><button type="button" class="smart-album-chip-del" data-smart-del="${a.id}" title="删除影集" aria-label="删除影集">×</button></span>`
+        `<div class="smart-album-row" data-smart-album-id="${a.id}"><div class="smart-album-row-info"><div class="smart-album-row-name">${escapeHtml(a.name)}</div><div class="smart-album-row-meta">${escapeHtml(summarizeSmartAlbumRules(a.rules))}</div></div><div class="smart-album-row-actions"><button type="button" class="btn small primary" data-smart-apply="${a.id}">打开</button><button type="button" class="btn small danger" data-smart-del="${a.id}">删除</button></div></div>`
     )
     .join("");
   list.querySelectorAll("[data-smart-apply]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = Number(btn.dataset.smartApply);
       const album = (state.smartAlbums || []).find((x) => x.id === id);
-      if (album) applySmartAlbum(album);
+      if (album) {
+        closeModal("smartAlbumsModal");
+        applySmartAlbum(album);
+      }
     });
   });
   list.querySelectorAll("[data-smart-del]").forEach((btn) => {
@@ -46,6 +68,19 @@ function renderSmartAlbums() {
       deleteSmartAlbum(Number(btn.dataset.smartDel));
     });
   });
+}
+
+function openSmartAlbumsModal() {
+  const modal = $("smartAlbumsModal");
+  if (!modal) return;
+  loadSmartAlbums();
+  showModal(modal);
+  pushModal(modal);
+  const inp = $("smartAlbumNameInput");
+  if (inp) {
+    inp.value = "";
+    setTimeout(() => inp.focus(), 60);
+  }
 }
 
 function applySmartAlbum(album) {
@@ -62,7 +97,8 @@ function applySmartAlbum(album) {
   if (r.year !== undefined) setSelectValue($("yearFilter"), r.year || "");
   if (r.favorite !== undefined) setSelectValue($("favoriteFilter"), r.favorite || "");
   if (r.sort !== undefined) setSelectValue($("sortFilter"), r.sort || "score_desc");
-  if (r.search_mode !== undefined) setSelectValue($("searchMode"), r.search_mode || "smart");
+  const modeVal = r.search_mode === "vector" ? "smart" : r.search_mode || "smart";
+  if (r.search_mode !== undefined) setSelectValue($("searchMode"), modeVal);
   const searchEl = $("searchInput");
   if (searchEl && r.search !== undefined) searchEl.value = r.search || "";
   if (state.view !== "album") showView("album");
@@ -70,16 +106,12 @@ function applySmartAlbum(album) {
   showToast(`已打开智能影集「${album.name}」`, "info");
 }
 
-async function saveCurrentSmartAlbum() {
-  const ans = await confirmDialog("将当前的目录范围、筛选条件与搜索词保存为一个虚拟智能影集（不挪动原图）。", {
-    title: "存为虚拟智能影集",
-    confirmText: "保存影集",
-    input: { label: "影集名称", value: "", placeholder: "例如：京都 8.5+ 精选、全部猫咪" },
-  });
-  if (!ans || !ans.confirmed) return;
-  const name = (ans.value || "").trim();
+async function saveCurrentSmartAlbum(explicitName = "") {
+  const inp = $("smartAlbumNameInput");
+  const name = (explicitName || (inp ? inp.value : "")).trim();
   if (!name) {
-    showToast("请填写影集名称", "warning");
+    showToast("请先输入影集名称", "warning");
+    if (inp) inp.focus();
     return;
   }
   const rules = {
@@ -99,8 +131,9 @@ async function saveCurrentSmartAlbum() {
       method: "POST",
       body: JSON.stringify({ name, rules }),
     });
+    if (inp) inp.value = "";
     showToast(`已保存智能影集「${name}」`, "success");
-    loadSmartAlbums();
+    await loadSmartAlbums();
   } catch (e) {
     showToast("保存智能影集失败：" + e.message, "error");
   }
@@ -167,7 +200,7 @@ async function loadPhotos(options = {}) {
   let data;
   let hasMore = false;
   try {
-    if ((mode === "semantic" || mode === "smart" || mode === "vector" || mode === "visual") && query) {
+    if ((mode === "semantic" || mode === "smart" || mode === "visual") && query) {
       const statusVal = $("statusFilter").value;
       const body = {
         folder: state.folder || undefined,
@@ -180,9 +213,7 @@ async function loadPhotos(options = {}) {
         year: $("yearFilter").value || undefined,
         sort: $("sortFilter").value,
       };
-      const loadingMsg =
-        mode === "vector" ? "正在本地向量检索回忆…" : "正在用大模型寻找相关回忆…";
-      if (!quiet) showLoading(loadingMsg);
+      if (!quiet) showLoading("正在寻找相关回忆…");
       try {
         data = await api("/api/search", {
           method: "POST",

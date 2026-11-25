@@ -30,7 +30,7 @@ VISUAL_SEARCH_BATCH = 4
 #: by `smart` - same model call, no local recall, and a hard 502 instead of a
 #: graceful fallback. `visual` stays because it answers a different question by
 #: different means.
-SEARCH_MODES = ("keyword", "smart", "vector", "visual")
+SEARCH_MODES = ("smart", "keyword", "visual")
 
 #: How long to wait for the model's `/models` before deciding it is down. Short on
 #: purpose: this sits between a keypress and a spinner, and a refused connection is
@@ -40,4 +40,4 @@ SEARCH_PROBE_TIMEOUT = 1.0
 #: Modes that are no longer offered but are still accepted, so a bookmarked request
 #: or an old cached page does not fail with "不支持的搜索方式". They are mapped onto
 #: the mode that supersedes them.
-_LEGACY_SEARCH_MODES = {"semantic": "smart"}
+_LEGACY_SEARCH_MODES = {"semantic": "smart", "vector": "smart"}

@@ -911,7 +911,7 @@ check(
 );
 check(
   "visual goes through the search endpoint, not the list endpoint",
-  /mode === "semantic" \|\| mode === "smart" \|\| mode === "vector" \|\| mode === "visual"/.test(src),
+  /mode === "semantic" \|\| mode === "smart" \|\| mode === "visual"/.test(src),
   true
 );
 check(
@@ -1404,7 +1404,7 @@ section("photobook layout and motion system");
 
   check(
     "album stats and filters are wrapped in the sticky console bar",
-    /id="albumStickyBar" class="album-sticky-bar"[\s\S]{0,600}id="statsBar"[\s\S]{0,1800}class="filters"/.test(
+    /id="albumStickyBar" class="album-sticky-bar"[\s\S]{0,600}id="statsBar"[\s\S]{0,2400}class="filters"/.test(
       html
     ),
     true
@@ -2193,9 +2193,9 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "Phase 1 keyword & vector search modes, image-to-image search, and vector duplicates are wired",
+    "Phase 1 streamlined 3 search modes, image-to-image search, and vector duplicates are wired",
     /<option value="keyword">关键词<\/option>/.test(indexHtml) &&
-      /<option value="vector">向量搜图<\/option>/.test(indexHtml) &&
+      !/<option value="vector">向量搜图<\/option>/.test(indexHtml) &&
       /id="previewSimilarBtn"/.test(indexHtml) &&
       /id="dupModeSelect"/.test(indexHtml) &&
       /function findSimilarPhotos\(/.test(src) &&
@@ -2203,11 +2203,14 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "Phase 2 Trips & Stories tab, map route overlay, and themed export are wired",
+    "Phase 2 Trips & Stories tab restoration, real keepsake export with loading overlay, and map route are wired",
     /data-fp-mode="trips"/.test(indexHtml) &&
+      /fpState\.mode === "trips"/.test(src) &&
       /function loadFootprintsTrips\(/.test(src) &&
       /function showTripRouteOnMap\(/.test(src) &&
       /function drawTripRouteOverlay\(/.test(src) &&
+      !/exportSelection\(/.test(src) &&
+      /showLoading\(`正在生成\$\{label\}回忆/.test(src) &&
       /theme:\s*\(state && state\.theme\)\s*\|\|\s*"paper"/.test(src),
     true
   );
@@ -2223,19 +2226,24 @@ section("people & pets (人物与宠物)");
     true
   );
   check(
-    "Phase 4 cross-folder all-visible view & Virtual Smart Albums are wired",
-    /id="smartAlbumsBar"/.test(indexHtml) &&
-      /id="saveSmartAlbumBtn"/.test(indexHtml) &&
+    "Phase 4 cross-folder all-visible view & Virtual Smart Albums modal trigger on stats bar are wired",
+    /id="smartAlbumsBtn"/.test(indexHtml) &&
+      /id="smartAlbumsModal"/.test(indexHtml) &&
+      !/id="smartAlbumsBar"/.test(indexHtml) &&
       /全部可见相册/.test(src) &&
+      /function openSmartAlbumsModal\(/.test(src) &&
       /function saveCurrentSmartAlbum\(/.test(src) &&
       /function applySmartAlbum\(/.test(src),
     true
   );
   check(
-    "Phase 5 Photography Year-in-Review modal, modular features.css, and LAN readonly guard are wired",
+    "Phase 5 scrollable Photography Year-in-Review modal, dedicated icons, modular features.css & LAN guard are wired",
     /href="\/static\/css\/features\.css"/.test(indexHtml) &&
-      /id="statsReportBtn"/.test(indexHtml) &&
-      /id="statsReportModal"/.test(indexHtml) &&
+      /id="statsReportBtn"[^>]*><span[^>]*data-icon="barChart"/.test(indexHtml) &&
+      /id="statsReportBody" class="modal-body stats-report-body"/.test(indexHtml) &&
+      /data-icon="similarPhotos"/.test(indexHtml) &&
+      /data-icon="smartAlbum"/.test(indexHtml) &&
+      /data-icon="exportFolder"/.test(indexHtml) &&
       /function openStatsReport\(/.test(src) &&
       /_lan_readonly_guard/.test(
         fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "server.py"), "utf8")

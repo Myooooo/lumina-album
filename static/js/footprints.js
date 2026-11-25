@@ -210,30 +210,30 @@ function renderTripsGrid() {
       if (trip && typeof showTripRouteOnMap === "function") showTripRouteOnMap(trip);
     });
   });
+  const triggerTripExport = (trip, format, button) => {
+    if (!trip || typeof exportKeepsake !== "function") return;
+    const ids = trip.highlight_ids && trip.highlight_ids.length ? trip.highlight_ids : trip.photo_ids;
+    exportKeepsake({
+      format,
+      button,
+      payload: {
+        ids,
+        format,
+        title: trip.title,
+        subtitle: `${trip.start_date} ~ ${trip.end_date} · 共 ${trip.photo_count} 张`,
+      },
+    });
+  };
   body.querySelectorAll("[data-trip-export-html]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const trip = (fpState.trips || []).find((t) => t.id === btn.dataset.tripExportHtml);
-      if (trip && typeof exportSelection === "function") {
-        exportSelection("html", {
-          ids: trip.highlight_ids && trip.highlight_ids.length ? trip.highlight_ids : trip.photo_ids,
-          title: trip.title,
-          subtitle: `${trip.start_date} ~ ${trip.end_date} · 共 ${trip.photo_count} 张`,
-          button: btn,
-        });
-      }
+      triggerTripExport(trip, "html", btn);
     });
   });
   body.querySelectorAll("[data-trip-export-png]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const trip = (fpState.trips || []).find((t) => t.id === btn.dataset.tripExportPng);
-      if (trip && typeof exportSelection === "function") {
-        exportSelection("png", {
-          ids: trip.highlight_ids && trip.highlight_ids.length ? trip.highlight_ids : trip.photo_ids,
-          title: trip.title,
-          subtitle: `${trip.start_date} ~ ${trip.end_date} · 共 ${trip.photo_count} 张`,
-          button: btn,
-        });
-      }
+      triggerTripExport(trip, "png", btn);
     });
   });
 }
@@ -257,6 +257,8 @@ async function openTripDetail(tripId, showAll = false) {
           <button type="button" class="btn small${!showAll ? " primary" : ""}" id="tripHighlightsBtn">高光精选 (${(data.highlights || []).length})</button>
           <button type="button" class="btn small${showAll ? " primary" : ""}" id="tripAllPhotosBtn">全部照片 (${trip.photo_count})</button>
           ${hasRoute ? `<button type="button" class="btn small" id="tripRouteBtn">地图轨迹</button>` : ""}
+          <button type="button" class="btn small" id="tripDetailExportHtmlBtn">导出网页</button>
+          <button type="button" class="btn small" id="tripDetailExportPngBtn">导出长图</button>
         </div>
       </div>
       <div class="gallery trip-photo-grid">${list.map((p) => memoryPolaroidHtml(p)).join("")}</div>`;
@@ -267,6 +269,23 @@ async function openTripDetail(tripId, showAll = false) {
     if (hiBtn) hiBtn.addEventListener("click", () => openTripDetail(tripId, false));
     const allBtn = $("tripAllPhotosBtn");
     if (allBtn) allBtn.addEventListener("click", () => openTripDetail(tripId, true));
+    const detailExport = (format, button) => {
+      if (typeof exportKeepsake !== "function") return;
+      exportKeepsake({
+        format,
+        button,
+        payload: {
+          ids: list.map((p) => p.id),
+          format,
+          title: trip.title,
+          subtitle: `${trip.start_date} ~ ${trip.end_date} · 共 ${list.length} 张`,
+        },
+      });
+    };
+    const expHtml = $("tripDetailExportHtmlBtn");
+    if (expHtml) expHtml.addEventListener("click", () => detailExport("html", expHtml));
+    const expPng = $("tripDetailExportPngBtn");
+    if (expPng) expPng.addEventListener("click", () => detailExport("png", expPng));
     const routeBtn = $("tripRouteBtn");
     if (routeBtn) {
       routeBtn.addEventListener("click", () => {
@@ -310,6 +329,8 @@ function renderFootprints(data) {
   fpState.bounds = data.bounds || null;
   if (fpState.mode === "map" && !state.footprintPlace) {
     setFootprintsMode("map");
+  } else if (fpState.mode === "trips" && !state.footprintPlace) {
+    setFootprintsMode("trips");
   } else {
     renderFootprintsGrid();
   }

@@ -51,12 +51,10 @@ class VectorSearchTest(unittest.TestCase):
             }
         )
 
-    def test_search_modes_preserve_keyword_and_add_vector(self) -> None:
-        self.assertIn("keyword", SEARCH_MODES)
-        self.assertIn("vector", SEARCH_MODES)
-        self.assertIn("smart", SEARCH_MODES)
-        self.assertIn("visual", SEARCH_MODES)
+    def test_search_modes_preserve_keyword_and_unify_vector_into_smart(self) -> None:
+        self.assertEqual(SEARCH_MODES, ("smart", "keyword", "visual"))
         self.assertNotIn("keyword", _LEGACY_SEARCH_MODES)
+        self.assertEqual(_LEGACY_SEARCH_MODES.get("vector"), "smart")
 
     def test_embeddings_crud_and_delete_cascade(self) -> None:
         pid1 = self._insert_photo("a.jpg")

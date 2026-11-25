@@ -208,61 +208,38 @@ def register(app, cfg, database):
 
         semantic_warning = None
         vector_scores = None
-        if mode == "vector" and query:
-            vec_candidates = database.list_photos(
-                folder=folder,
-                status=status,
-                min_score=min_score,
-                tag=tag,
-                favorite=favorite,
-                year=year,
-                exclude_deleted=exclude_deleted,
-                sort=sort,
-                limit=20000,
-            )
-            vres = vectors.vector_text_search(database, cfg, query, vec_candidates)
-            semantic_warning = vres.get("warning")
-            if vres.get("clip_ready") and vres.get("photos"):
-                vector_scores = vres.get("scores") or {}
-                photos = vres["photos"]
-                return jsonify(
-                    {
-                        "photos": [_photo_payload(p) for p in photos],
-                        "warning": semantic_warning,
-                        "vector_scores": vector_scores,
-                        "model": vres.get("model"),
-                        "checked": None,
-                    }
-                )
-            if not vres.get("clip_ready"):
-                kw_fallback = database.list_photos(
+        if mode == "smart" and query:
+            if vectors.has_clip_onnx_model(cfg):
+                vec_candidates = database.list_photos(
                     folder=folder,
                     status=status,
                     min_score=min_score,
-                    search=query,
                     tag=tag,
                     favorite=favorite,
                     year=year,
                     exclude_deleted=exclude_deleted,
                     sort=sort,
-                    limit=2000,
+                    limit=20000,
                 )
-                for p in kw_fallback:
-                    result_map[p["id"]] = p
-
-        if mode == "smart" and query:
-            reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)
-            if not reachable:
-                semantic_warning = why
+                vres = vectors.vector_text_search(database, cfg, query, vec_candidates)
+                semantic_warning = vres.get("warning")
+                if vres.get("photos"):
+                    vector_scores = vres.get("scores") or {}
+                    for p in vres["photos"]:
+                        result_map[p["id"]] = p
             else:
-                try:
-                    ids = semantic_search(query, all_candidates, cfg)
-                    by_id = {p["id"]: p for p in all_candidates}
-                    for pid in ids:
-                        if pid in by_id:
-                            result_map[pid] = by_id[pid]
-                except SemanticSearchError as exc:
-                    semantic_warning = str(exc)
+                reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)
+                if not reachable:
+                    semantic_warning = why
+                else:
+                    try:
+                        ids = semantic_search(query, all_candidates, cfg)
+                        by_id = {p["id"]: p for p in all_candidates}
+                        for pid in ids:
+                            if pid in by_id:
+                                result_map[pid] = by_id[pid]
+                    except SemanticSearchError as exc:
+                        semantic_warning = str(exc)
 
         if mode == "visual" and query:
             reachable, why = probe_endpoint(cfg, timeout=SEARCH_PROBE_TIMEOUT)

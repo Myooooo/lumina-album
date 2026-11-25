@@ -66,7 +66,7 @@
             </button>
           </div>
         </div>
-        <button id="statsReportBtn" class="btn icon-only" type="button" title="摄影数据年报与装备统计" aria-label="摄影数据年报"><span class="btn-icon" data-icon="sparkles"></span></button>
+        <button id="statsReportBtn" class="btn icon-only" type="button" title="摄影数据年报与装备统计" aria-label="摄影数据年报"><span class="btn-icon" data-icon="barChart"></span></button>
         <button id="shortcutsBtn" class="btn icon-only" type="button" title="键盘快捷键 (?)" aria-label="键盘快捷键"><span class="btn-icon" data-icon="keyboard"></span></button>
         <button id="settingsBtn" class="btn icon-only" title="设置"><span class="btn-icon" data-icon="settings"></span></button>
       </div>
@@ -145,8 +145,13 @@
           <span class="stat-label">已收起</span>
           <span class="stat-num" id="statDeleted">0</span>
         </div>
-        <div class="stats-actions hidden" id="trashActions">
-          <button id="emptyTrashBtn" class="btn danger"><span class="btn-icon" data-icon="trash"></span>清空回收站</button>
+        <div class="stats-right-tools">
+          <div class="stats-actions hidden" id="trashActions">
+            <button id="emptyTrashBtn" class="btn danger"><span class="btn-icon" data-icon="trash"></span>清空回收站</button>
+          </div>
+          <button id="smartAlbumsBtn" class="btn small stats-smart-album-btn" type="button" title="打开或创建虚拟智能影集">
+            <span class="btn-icon" data-icon="smartAlbum"></span><span>智能影集</span><span id="smartAlbumsCount" class="stats-smart-album-count hidden">0</span>
+          </button>
         </div>
       </section>
 
@@ -205,7 +210,6 @@
             <select id="searchMode">
               <option value="smart">探索回忆</option>
               <option value="keyword">关键词</option>
-              <option value="vector">向量搜图</option>
               <option value="visual">看图搜索</option>
             </select>
           </div>
@@ -239,12 +243,6 @@
       </select>
     </div>
 
-    <div id="smartAlbumsBar" class="smart-albums-bar">
-      <div id="smartAlbumsList" class="smart-albums-list"></div>
-      <button id="saveSmartAlbumBtn" class="btn small smart-album-save-btn" type="button" title="将当前筛选与搜索条件保存为虚拟智能影集">
-        <span class="btn-icon" data-icon="sparkles"></span>存为智能影集
-      </button>
-    </div>
     <div id="similarSearchBanner" class="similar-search-banner hidden" role="status">
       <span class="similar-banner-text" id="similarSearchText">正在查看相似画面</span>
       <button id="similarSearchClearBtn" class="btn small" type="button"><span class="btn-icon" data-icon="close"></span>返回全部</button>
@@ -277,7 +275,7 @@
     <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
     <button id="compareSelectedBtn" class="btn" title="同步放大对比选中的照片（至少选 2 张）"><span class="btn-icon" data-icon="compare"></span>对比选片</button>
     <button id="assignPlaceSelectedBtn" class="btn" title="归入自定义地点（仅改数据库，不动原图 EXIF）"><span class="btn-icon" data-icon="pin"></span>归入地点</button>
-    <button id="exportOriginalsSelectedBtn" class="btn" title="拷贝/硬链接原图与同名 RAW 到指定目录"><span class="btn-icon" data-icon="folder"></span>导出原图/RAW</button>
+    <button id="exportOriginalsSelectedBtn" class="btn" title="拷贝/硬链接原图与同名 RAW 到指定目录"><span class="btn-icon" data-icon="exportFolder"></span>导出原图/RAW</button>
     <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
     <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
     <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
@@ -327,7 +325,7 @@
         <button id="previewDeleteBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
         <button id="previewRestoreBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
         <button id="previewPermanentDeleteBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
-        <button id="previewSimilarBtn" class="btn" title="寻找构图与色调相似的画面"><span class="btn-icon" data-icon="sparkles"></span>找相似画面</button>
+        <button id="previewSimilarBtn" class="btn" title="寻找构图与色调相似的画面"><span class="btn-icon" data-icon="similarPhotos"></span>找相似画面</button>
         <button id="previewEditBtn" class="btn" title="编辑回忆信息"><span class="btn-icon" data-icon="edit"></span>编辑回忆</button>
         <button id="previewReanalyzeBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
         <button id="previewFavoriteBtn" class="btn" title="珍藏"><span class="btn-icon" data-icon="heart"></span><span>珍藏</span></button>
@@ -1377,14 +1375,30 @@
   <div id="statsReportModal" class="modal hidden">
     <div class="modal-content stats-report-content">
       <button class="modal-close" data-close="statsReportModal" title="关闭 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
-      <div class="stats-report-head">
-        <h2><span class="modal-title-icon" data-icon="sparkles"></span>摄影数据年报</h2>
+      <h2><span class="modal-title-icon" data-icon="barChart"></span>摄影数据年报</h2>
+      <div class="stats-report-toolbar">
+        <span class="stats-report-subtitle">按拍摄时间、机身镜头、焦段与足迹汇总当前相册数据</span>
         <select id="statsReportYearSelect" class="stats-report-year-select" data-no-custom>
           <option value="">全部年份</option>
         </select>
       </div>
-      <div id="statsReportBody" class="stats-report-body">
+      <div id="statsReportBody" class="modal-body stats-report-body">
         <div class="people-empty">正在汇总拍摄与装备数据…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Virtual Smart Albums Modal -->
+  <div id="smartAlbumsModal" class="modal hidden">
+    <div class="modal-content smart-albums-modal-content">
+      <button class="modal-close" data-close="smartAlbumsModal" title="关闭 (Esc)"><span class="btn-icon" data-icon="close"></span></button>
+      <h2><span class="modal-title-icon" data-icon="smartAlbum"></span>虚拟智能影集</h2>
+      <div class="smart-albums-create-row">
+        <input id="smartAlbumNameInput" type="text" maxlength="40" placeholder="将当前筛选/搜索存为新影集，输入名称…" />
+        <button id="createSmartAlbumBtn" class="btn primary small" type="button"><span class="btn-icon" data-icon="check"></span>存为影集</button>
+      </div>
+      <div id="smartAlbumsList" class="modal-body smart-albums-modal-body">
+        <div class="people-empty">还没有创建智能影集</div>
       </div>
     </div>
   </div>

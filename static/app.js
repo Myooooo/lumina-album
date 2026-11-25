@@ -130,8 +130,6 @@ function init() {
     if (input) {
       if (mode === "keyword") {
         input.placeholder = "按标题、标签、地点或文件名即时匹配（不调用模型）…";
-      } else if (mode === "vector") {
-        input.placeholder = "输入自然语言，用本地多模态向量全库搜图…";
       } else if (mode === "visual") {
         input.placeholder = "描述画面细节，让模型看图寻找（如：逆光的侧影、红衣女孩）…";
       } else {
@@ -147,9 +145,19 @@ function init() {
       loadPhotos();
     });
   }
-  const saveSmartBtn = $("saveSmartAlbumBtn");
-  if (saveSmartBtn) {
-    saveSmartBtn.addEventListener("click", saveCurrentSmartAlbum);
+  const smartAlbumsBtn = $("smartAlbumsBtn");
+  if (smartAlbumsBtn) {
+    smartAlbumsBtn.addEventListener("click", openSmartAlbumsModal);
+  }
+  const createSmartBtn = $("createSmartAlbumBtn");
+  if (createSmartBtn) {
+    createSmartBtn.addEventListener("click", () => saveCurrentSmartAlbum());
+  }
+  const smartNameInput = $("smartAlbumNameInput");
+  if (smartNameInput) {
+    smartNameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") saveCurrentSmartAlbum();
+    });
   }
   if (typeof loadSmartAlbums === "function") loadSmartAlbums();
 
@@ -1200,7 +1208,7 @@ async function exportKeepsake(options) {
     button.disabled = true;
     button.classList.add("loading");
   }
-  showToast(`正在整理${label}…`, "info");
+  showLoading(`正在生成${label}回忆，照片较多时请稍候…`);
   try {
     const exportPayload = Object.assign(
       { theme: (state && state.theme) || "paper" },
@@ -1231,14 +1239,8 @@ async function exportKeepsake(options) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    // Revoking immediately cancels the download in some browsers; one tick is
-    // enough for the click to have been handled.
     setTimeout(() => URL.revokeObjectURL(url), 1500);
     showToast(`${label}已保存：${filename}`, "success");
-    // A keepsake is capped at one document's worth of pictures. When the server
-    // had to leave some out it says so in the response headers, and staying
-    // quiet about it would read as "these were all my photos" when they were
-    // not - so the limit is named, with the number actually included.
     const requested = Number(resp.headers.get("X-Export-Requested") || 0);
     const included = Number(resp.headers.get("X-Export-Included") || requested);
     const limit = Number(resp.headers.get("X-Export-Limit") || included);
@@ -1251,6 +1253,7 @@ async function exportKeepsake(options) {
   } catch (e) {
     showToast(`导出失败：${e.message}`, "error");
   } finally {
+    hideLoading();
     if (button) {
       button.disabled = false;
       button.classList.remove("loading");
