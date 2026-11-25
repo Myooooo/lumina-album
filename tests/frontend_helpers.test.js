@@ -2262,6 +2262,34 @@ section("people & pets (人物与宠物)");
       /确定删除虚拟智能影集/.test(src),
     true
   );
+  {
+    const featuresCss = fs.readFileSync(
+      path.join(__dirname, "..", "static", "css", "features.css"),
+      "utf8"
+    );
+    const serverPy = fs.readFileSync(
+      path.join(__dirname, "..", "photo_reviewer", "server.py"),
+      "utf8"
+    );
+    check(
+      "Audit hardening (P0-P2): gallery concurrency guard, vector poll cleanup, smart album sync, compare modal safety, CSS dedup & LAN guard",
+      /let loadPhotosSeq = 0;/.test(src) &&
+        /new AbortController\(\)/.test(src) &&
+        /function stopVectorIndexPoll\(\)/.test(src) &&
+        /let vectorStatusInFlight = false;/.test(src) &&
+        /stopVectorIndexPoll\(\)/.test(src) &&
+        /function ensureSelectOption\(/.test(src) &&
+        /function resetCompareModalState\(\)/.test(src) &&
+        /compareState\.qualitySeq/.test(src) &&
+        /value: "hardlink"/.test(src) &&
+        (featuresCss.match(/^\.stats-smart-album-btn\s*\{/gm) || []).length === 1 &&
+        /body\[data-theme="vintage"\] \.compare-picker-label select/.test(featuresCss) &&
+        /hmac\.compare_digest/.test(serverPy) &&
+        /_LAN_READONLY_BLOCKED_PREFIXES/.test(serverPy) &&
+        /"\/api\/export"/.test(serverPy),
+      true
+    );
+  }
 }
 
 console.log(
