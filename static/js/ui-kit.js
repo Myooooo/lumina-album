@@ -6,6 +6,13 @@
 window.LuminaUI = (() => {
   const getEl = (id) => document.getElementById(id);
   const ICONS = window.LuminaIcons || {};
+  const escapeUiHtml = (text) =>
+    String(text ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
 
   //: Must match the ``modalPopOut`` / ``modalBackdropOut`` durations in style.css.
   const EXIT_MS = 170;
@@ -139,7 +146,7 @@ window.LuminaUI = (() => {
     trigger.setAttribute("aria-expanded", "false");
     const prefixText = select.dataset.prefix || "";
     const prefixMarkup = prefixText
-      ? `<span class="custom-select-prefix">${prefixText} ·</span>`
+      ? `<span class="custom-select-prefix">${escapeUiHtml(prefixText)} ·</span>`
       : "";
     trigger.innerHTML = `${prefixMarkup}<span class="custom-select-label"></span><span class="custom-select-arrow"></span>`;
     wrapper.appendChild(trigger);
@@ -338,11 +345,11 @@ window.LuminaUI = (() => {
       const wantsInput = !!options.input;
 
       if (titleEl) {
-        titleEl.innerHTML = `<span class="modal-title-icon">${ICONS.sparkles || ""}</span>${options.title || "确认操作"}`;
+        titleEl.innerHTML = `<span class="modal-title-icon">${ICONS.sparkles || ""}</span>${escapeUiHtml(options.title || "确认操作")}`;
       }
       if (msgEl) msgEl.textContent = message;
       if (okBtn) {
-        okBtn.innerHTML = `<span class="btn-icon">${ICONS.check || ""}</span>${options.confirmText || "确定"}`;
+        okBtn.innerHTML = `<span class="btn-icon">${ICONS.check || ""}</span>${escapeUiHtml(options.confirmText || "确定")}`;
         okBtn.className = "btn primary" + (options.danger ? " danger" : "");
       }
       if (inputRow && inputEl) {

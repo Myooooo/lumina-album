@@ -2095,6 +2095,21 @@ section("people & pets (人物与宠物)");
       /let inFlight = false;/.test(src),
     true
   );
+  check(
+    "Phase 1 security & consistency guards are in place (XSS escape, folder whitelist, config secret redaction, lazy face thumb)",
+    /escapeUiHtml\(options\.title/.test(src) &&
+      /escapeUiHtml\(options\.confirmText/.test(src) &&
+      /_is_allowed_folder\(path\)/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "web", "routes_files.py"), "utf8")
+      ) &&
+      /MASKED_SECRET_SENTINEL/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "web", "routes_config.py"), "utf8")
+      ) &&
+      /migrate_single_face_thumbnail/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "web", "routes_people.py"), "utf8")
+      ),
+    true
+  );
 }
 
 console.log(

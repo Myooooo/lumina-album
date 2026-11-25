@@ -53,12 +53,32 @@ from .helpers import (
 logger = logging.getLogger(__name__)
 
 
+MASKED_SECRET_SENTINEL = "••••••••"
+_SERVER_ONLY_SECRET_KEYS = ("api_key", "geocoding_api_key")
+
+
+def _is_configured_secret(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text) and text != "YOUR_API_KEY"
+
+
+def _redacted_config_dict(cfg) -> dict[str, Any]:
+    """Return config dict with server-only API keys masked."""
+    payload = cfg.to_dict()
+    for key in _SERVER_ONLY_SECRET_KEYS:
+        configured = _is_configured_secret(payload.get(key))
+        payload[f"has_{key}"] = configured
+        if configured:
+            payload[key] = MASKED_SECRET_SENTINEL
+    return payload
+
+
 def register(app, cfg, database):
     """Register these routes on ``app``."""
 
     @app.get("/api/config")
     def api_config():
-        return jsonify(cfg.to_dict())
+        return jsonify(_redacted_config_dict(cfg))
 
     @app.get("/api/ui-state")
     def api_ui_state():
@@ -275,7 +295,9 @@ def register(app, cfg, database):
                 str(data["api_base_url"]).strip() or cfg.api_base_url
             )
         if "api_key" in data:
-            staged["api_key"] = str(data["api_key"])
+            incoming_key = str(data["api_key"])
+            if incoming_key != MASKED_SECRET_SENTINEL:
+                staged["api_key"] = incoming_key
         if "model" in data:
             staged["model"] = str(data["model"]).strip() or cfg.model
         if "system_prompt" in data:
@@ -292,7 +314,9 @@ def register(app, cfg, database):
                 raw_provider = "nominatim"
             staged["geocoding_provider"] = raw_provider
         if "geocoding_api_key" in data:
-            staged["geocoding_api_key"] = str(data["geocoding_api_key"])
+            incoming_geo_key = str(data["geocoding_api_key"])
+            if incoming_geo_key != MASKED_SECRET_SENTINEL:
+                staged["geocoding_api_key"] = incoming_geo_key
         if "footprint_default_view" in data:
             fv = str(data["footprint_default_view"]).strip().lower()
             if fv not in FOOTPRINT_VIEW_MODES:
@@ -311,7 +335,7 @@ def register(app, cfg, database):
         for key, value in staged.items():
             setattr(cfg, key, value)
         _save_settings_to_db(database, cfg)
-        return jsonify(cfg.to_dict())
+        return jsonify(_redacted_config_dict(cfg))
 
     @app.get("/api/prompt-presets")
     def api_prompt_presets():

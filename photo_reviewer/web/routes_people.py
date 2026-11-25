@@ -17,7 +17,7 @@ from ..faces import (
     crop_entity_thumbnail,
     engine_status,
     face_thumbs_dir,
-    migrate_face_thumbnails,
+    migrate_single_face_thumbnail,
     match_and_cluster_library,
     recompute_person_centroid,
 )
@@ -287,11 +287,9 @@ def register(app, cfg, database):
         if not face:
             return jsonify({"error": "人脸不存在"}), 404
         thumb_path = face.get("thumb_path")
-        if thumb_path and os.path.isfile(thumb_path) and "face_thumbs" in str(thumb_path) and Path(thumb_path).parent == Path(cfg.data_dir) / "face_thumbs":
+        if thumb_path and os.path.isfile(thumb_path):
             try:
-                migrate_face_thumbnails(database, cfg)
-                face = database.get_face(face_id) or face
-                thumb_path = face.get("thumb_path")
+                thumb_path = migrate_single_face_thumbnail(database, cfg, face) or thumb_path
             except Exception:
                 pass
         if thumb_path and os.path.isfile(thumb_path):

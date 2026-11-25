@@ -486,7 +486,10 @@ class Database:
                         thumb_path=excluded.thumb_path,
                         proxy_path=excluded.proxy_path,
                         dimensions=excluded.dimensions,
-                        location=excluded.location,
+                        location=CASE
+                            WHEN photos.location_source = 'manual' THEN photos.location
+                            ELSE excluded.location
+                        END,
                         exif=excluded.exif,
                         phash=excluded.phash,
                         score=excluded.score,
@@ -755,7 +758,10 @@ class Database:
                         height=COALESCE(?, height), thumb_path=COALESCE(?, thumb_path),
                         proxy_path=COALESCE(?, proxy_path),
                         dimensions=COALESCE(?, dimensions),
-                        location=COALESCE(?, location),
+                        location=CASE
+                            WHEN location_source = 'manual' THEN location
+                            ELSE COALESCE(?, location)
+                        END,
                         exif=COALESCE(?, exif),
                         status=?, error=?, analyzed_at=?
                     WHERE id=?
@@ -802,11 +808,23 @@ class Database:
         with self._lock:
             conn = self._connect()
             try:
+                row = conn.execute(
+                    "SELECT location, place_id, location_source FROM photos WHERE id=?",
+                    (photo_id,),
+                ).fetchone()
+                old_loc = (row["location"] or "").strip() if row else ""
+                new_loc = (location or "").strip()
+                if old_loc != new_loc:
+                    new_place_id = None
+                    new_loc_source = "manual" if new_loc else None
+                else:
+                    new_place_id = row["place_id"] if row else None
+                    new_loc_source = row["location_source"] if row else None
                 conn.execute(
                     """
                     UPDATE photos SET
                         score=?, dimensions=?, tags=?, reason=?, title=?, location=?,
-                        analyzed_at=?
+                        place_id=?, location_source=?, analyzed_at=?
                     WHERE id=?
                     """,
                     (
@@ -815,7 +833,9 @@ class Database:
                         json.dumps(tags, ensure_ascii=False),
                         reason,
                         title,
-                        location,
+                        new_loc or None,
+                        new_place_id,
+                        new_loc_source,
                         utc_now(),
                         photo_id,
                     ),
@@ -842,7 +862,9 @@ class Database:
             conn = self._connect()
             try:
                 conn.execute(
-                    "UPDATE photos SET location=?, exif=? WHERE id=?",
+                    "UPDATE photos SET "
+                    "location=CASE WHEN location_source='manual' THEN location ELSE ? END, "
+                    "exif=? WHERE id=?",
                     (
                         location,
                         json.dumps(exif or {}, ensure_ascii=False)

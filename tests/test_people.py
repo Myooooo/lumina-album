@@ -372,6 +372,53 @@ class PeopleAndPetsTest(unittest.TestCase):
             self.assertIsNone(err)
             m_pip.assert_not_called()
 
+    def test_migrate_single_face_thumbnail_only_moves_target(self) -> None:
+        from photo_reviewer.faces import face_thumbs_dir, migrate_single_face_thumbnail
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "library.db"))
+            cfg = _DummyConfig(tmp)
+            folder = Path(tmp) / "album"
+            folder.mkdir()
+            try:
+                pid = db.upsert_photo(
+                    {
+                        "path": str(folder / "a.jpg"),
+                        "folder": str(folder),
+                        "filename": "a.jpg",
+                        "status": "analyzed",
+                    }
+                )
+                ids = db.replace_auto_faces_for_photo(
+                    pid,
+                    [
+                        {"entity_kind": "person", "bbox_x": 0.1, "bbox_y": 0.1, "bbox_w": 0.2, "bbox_h": 0.2, "det_score": 0.9, "embedding": encode_embedding([1.0, 0.0])},
+                        {"entity_kind": "person", "bbox_x": 0.5, "bbox_y": 0.1, "bbox_w": 0.2, "bbox_h": 0.2, "det_score": 0.85, "embedding": encode_embedding([0.0, 1.0])},
+                    ],
+                    "buffalo_l",
+                )
+                old = Path(tmp) / "face_thumbs"
+                old.mkdir()
+                f1 = old / f"face_{ids[0]}.jpg"
+                f2 = old / f"face_{ids[1]}.jpg"
+                f1.write_bytes(b"thumb-1")
+                f2.write_bytes(b"thumb-2")
+                db.update_face_thumb(ids[0], str(f1))
+                db.update_face_thumb(ids[1], str(f2))
+
+                moved = migrate_single_face_thumbnail(db, cfg, db.get_face(ids[0]))
+                target1 = face_thumbs_dir(cfg, str(folder)) / f"face_{ids[0]}.jpg"
+                self.assertEqual(Path(moved).resolve(), target1.resolve())
+                self.assertTrue(target1.is_file())
+                self.assertFalse(f1.exists())
+                # Second legacy face must remain untouched (no full-library sweep).
+                self.assertTrue(f2.is_file())
+            finally:
+                try:
+                    db.close()
+                except ImportError:
+                    pass
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -395,6 +395,42 @@ def face_thumbs_dir(cfg, folder: str | None = None) -> Path:
 _THUMB_MIGRATION_LOCK = threading.Lock()
 
 
+def migrate_single_face_thumbnail(database, cfg, face: dict[str, Any], photo: dict[str, Any] | None = None) -> str | None:
+    """Lazily migrate a single legacy central face thumbnail into its album cache."""
+    if not face:
+        return None
+    old = face.get("thumb_path") or ""
+    if not old or not os.path.isfile(old):
+        return old or None
+    legacy_dir = (Path(cfg.data_dir) / "face_thumbs").resolve()
+    try:
+        if Path(old).resolve().parent != legacy_dir:
+            return old
+    except OSError:
+        return old
+    if photo is None:
+        photo = database.get_photo(face["photo_id"])
+    folder = (photo.get("folder") if photo else "") or os.path.dirname((photo or {}).get("path") or "")
+    if not folder:
+        return old
+    target = face_thumbs_dir(cfg, folder) / f"face_{int(face['id'])}.jpg"
+    if os.path.abspath(old) == os.path.abspath(str(target)):
+        return str(target)
+    with _THUMB_MIGRATION_LOCK:
+        try:
+            if not os.path.isfile(old):
+                return str(target) if target.exists() else None
+            if target.exists():
+                os.remove(old)
+            else:
+                shutil.move(old, target)
+            database.update_face_thumb(int(face["id"]), str(target))
+            return str(target)
+        except OSError:
+            logger.debug("could not lazily migrate face thumb %s", old, exc_info=True)
+            return old
+
+
 def migrate_face_thumbnails(database, cfg) -> int:
     """Move legacy central face crops into their album cache directories."""
     with _THUMB_MIGRATION_LOCK:

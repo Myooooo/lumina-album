@@ -163,6 +163,79 @@ class FootprintsPlacesTest(unittest.TestCase):
                 except ImportError:
                     pass
 
+    def test_manual_location_survives_upsert_and_metadata_edit_syncs_place(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Database(str(Path(tmp) / "library.db"))
+            folder = str(Path(tmp) / "album")
+            try:
+                path = f"{folder}/img.jpg"
+                p1 = db.upsert_photo(
+                    {
+                        "path": path,
+                        "folder": folder,
+                        "filename": "img.jpg",
+                        "location": "自动识别旧地点",
+                        "exif": {"datetime_original": "2025:05:01 10:00:00"},
+                        "status": "analyzed",
+                    }
+                )
+                place_id = db.create_place(
+                    name="手工西湖",
+                    city="杭州市",
+                    address="浙江省杭州市西湖",
+                    lat=30.2489,
+                    lon=120.1497,
+                )
+                db.assign_photos_to_place(place_id, [p1])
+                self.assertEqual(db.get_photo(p1)["location_source"], "manual")
+
+                # Re-indexing (upsert_photo) and update_exif must NOT clobber manual location.
+                db.upsert_photo(
+                    {
+                        "path": path,
+                        "folder": folder,
+                        "filename": "img.jpg",
+                        "location": "重新索引地点",
+                        "exif": {"datetime_original": "2025:05:01 10:00:00"},
+                        "status": "analyzed",
+                    }
+                )
+                self.assertEqual(db.get_photo(p1)["location"], "浙江省杭州市西湖")
+                db.update_exif(p1, "EXIF反向地理地点", {"datetime_original": "2025:05:01 10:00:00"})
+                self.assertEqual(db.get_photo(p1)["location"], "浙江省杭州市西湖")
+
+                # Editing other metadata with unchanged location keeps place_id intact.
+                db.update_metadata(
+                    p1,
+                    score=8.5,
+                    dimensions={"technical": 8.0, "memory": 9.0, "uniqueness": 8.5},
+                    tags=["西湖"],
+                    reason="不错",
+                    title="西湖晨光",
+                    location="浙江省杭州市西湖",
+                )
+                self.assertEqual(db.get_photo(p1)["place_id"], place_id)
+
+                # Changing location in metadata editor clears stale place_id.
+                db.update_metadata(
+                    p1,
+                    score=8.5,
+                    dimensions={"technical": 8.0, "memory": 9.0, "uniqueness": 8.5},
+                    tags=["西湖"],
+                    reason="不错",
+                    title="西湖晨光",
+                    location="杭州市灵隐寺",
+                )
+                row = db.get_photo(p1)
+                self.assertIsNone(row["place_id"])
+                self.assertEqual(row["location"], "杭州市灵隐寺")
+                self.assertEqual(row["location_source"], "manual")
+            finally:
+                try:
+                    db.close()
+                except ImportError:
+                    pass
+
     @unittest.skipUnless(_HAS_FLASK_APP, "Flask/Pillow not installed in this Python")
     def test_places_http_api(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

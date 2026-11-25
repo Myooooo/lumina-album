@@ -108,6 +108,46 @@ def register(app, cfg, database):
             return jsonify({"error": str(exc)}), 400
         return jsonify({"folders": folders})
 
+    def _allowed_folder_roots() -> list[str]:
+        from ..faces import models_root
+
+        roots: list[str] = []
+        for item in database.all_folders():
+            if item:
+                roots.append(canonical_path(item))
+        for item in hidden_folder_list(database):
+            if item:
+                roots.append(canonical_path(item))
+        for card in database.list_card_albums():
+            for field in ("folder", "source"):
+                val = card.get(field)
+                if val:
+                    roots.append(canonical_path(val))
+        ui_state = database.get_ui_state()
+        for field in ("folder", "import_source"):
+            val = ui_state.get(field)
+            if isinstance(val, str) and val.strip():
+                roots.append(canonical_path(val))
+        history = ui_state.get("folder_history")
+        if isinstance(history, list):
+            for val in history:
+                if isinstance(val, str) and val.strip():
+                    roots.append(canonical_path(val))
+        roots.append(canonical_path(str(models_root(cfg))))
+        roots.append(canonical_path(str(Path(cfg.data_dir).resolve())))
+        return roots
+
+    def _is_allowed_folder(path: str) -> bool:
+        norm_target = os.path.normcase(canonical_path(path))
+        for root in _allowed_folder_roots():
+            norm_root = os.path.normcase(root)
+            try:
+                if os.path.commonpath([norm_target, norm_root]) == norm_root:
+                    return True
+            except ValueError:
+                continue
+        return False
+
     @app.post("/api/open-folder")
     def api_open_folder():
         data = request.get_json(force=True, silent=True) or {}
@@ -115,6 +155,8 @@ def register(app, cfg, database):
         if not path:
             return jsonify({"error": "请提供文件夹路径"}), 400
         path = canonical_path(path)
+        if not _is_allowed_folder(path):
+            return jsonify({"error": "不允许打开未关联的系统目录"}), 403
         if not os.path.isdir(path):
             return jsonify({"error": "文件夹不存在"}), 404
         try:
