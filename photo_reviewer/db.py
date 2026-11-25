@@ -1615,8 +1615,35 @@ class Database:
             finally:
                 conn.close()
 
+    @staticmethod
+    def _folder_filter_clauses(
+        folder: str | None,
+        exclude_folders: Sequence[str] | None,
+        prefix: str = "",
+    ) -> tuple[list[str], list[Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        col = f"{prefix}folder"
+        if folder:
+            clauses.append(f"{col} = ?")
+            params.append(folder)
+        elif exclude_folders:
+            cleaned_ex = list(
+                {v for f in exclude_folders if f for v in (str(f), canonical_path(f)) if v}
+            )
+            if cleaned_ex:
+                placeholders = ",".join("?" for _ in cleaned_ex)
+                clauses.append(f"{col} NOT IN ({placeholders})")
+                params.extend(cleaned_ex)
+        return clauses, params
+
     def memories_on(
-        self, month: int, day: int, window: int = 0, folder: str | None = None
+        self,
+        month: int,
+        day: int,
+        window: int = 0,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Photos taken on this calendar day in earlier years.
 
@@ -1646,9 +1673,9 @@ class Database:
         # "Earlier years" is measured on the local calendar: the user's today,
         # not UTC's, which can be a different date for most of the world.
         params.append(datetime.now().astimezone().year)
-        if folder:
-            clauses.append("folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders)
+        clauses.extend(f_clauses)
+        params.extend(f_params)
         sql = (
             "SELECT * FROM photos WHERE "
             + " AND ".join(clauses)
@@ -1662,14 +1689,18 @@ class Database:
             finally:
                 conn.close()
 
-    def all_tags(self, folder: str | None = None) -> list[str]:
-        """Return all distinct tags for a folder (or across all folders)."""
-        clauses = []
+    def all_tags(
+        self,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+    ) -> list[str]:
+        """Return all distinct tags for a folder (or across all visible folders)."""
+        clauses = ["status != 'deleted'"]
         params: list[Any] = []
-        if folder:
-            clauses.append("folder = ?")
-            params.append(folder)
-        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders)
+        clauses.extend(f_clauses)
+        params.extend(f_params)
+        where = "WHERE " + " AND ".join(clauses)
         tags_set = set()
         with self._lock:
             conn = self._connect()
@@ -1692,13 +1723,17 @@ class Database:
                 conn.close()
         return sorted(tags_set)
 
-    def capture_years(self, folder: str | None = None) -> list[int]:
+    def capture_years(
+        self,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+    ) -> list[int]:
         """Return distinct capture years for active photos using the indexed column."""
         clauses = ["status != 'deleted'", "capture_year IS NOT NULL"]
         params: list[Any] = []
-        if folder:
-            clauses.append("folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders)
+        clauses.extend(f_clauses)
+        params.extend(f_params)
         where = "WHERE " + " AND ".join(clauses)
         with self._lock:
             conn = self._connect()
@@ -1803,16 +1838,20 @@ class Database:
             finally:
                 conn.close()
 
-    def located_photos(self, folder: str | None = None) -> list[dict[str, Any]]:
+    def located_photos(
+        self,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Every photo that carries a place or custom place binding, for the footprint view."""
         where = [
             "(place_id IS NOT NULL OR (location IS NOT NULL AND location != ''))",
             "status != 'deleted'",
         ]
         params: list[Any] = []
-        if folder:
-            where.append("folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders)
+        where.extend(f_clauses)
+        params.extend(f_params)
         sql = (
             "SELECT id, path, raw_path, original_path, location, place_id, lat, lon, "
             "location_source, filename, size, width, height, thumb_path, proxy_path, "
@@ -1829,7 +1868,11 @@ class Database:
             finally:
                 conn.close()
 
-    def duplicate_candidates(self, folder: str | None = None) -> list[dict[str, Any]]:
+    def duplicate_candidates(
+        self,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """The columns duplicate detection needs, and nothing else.
 
         Deliberately not ``list_photos``: that decodes tags, dimensions, EXIF and
@@ -1839,9 +1882,9 @@ class Database:
         """
         where = ["phash IS NOT NULL", "phash != ''", "status != 'deleted'"]
         params: list[Any] = []
-        if folder:
-            where.append("folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders)
+        where.extend(f_clauses)
+        params.extend(f_params)
         sql = (
             "SELECT id, phash, width, height, size, status, folder, filename, "
             "thumb_path, media_kind, score, favorite, path, original_path, raw_path "
@@ -2470,13 +2513,18 @@ class Database:
         include_hidden: bool = False,
         kind: str | None = None,
         min_unnamed_count: int = 2,
+        exclude_folders: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["ph.status != 'deleted'", "f.status IN ('manual', 'auto')"]
         params: list[Any] = []
-        if folder:
-            clauses.append("ph.folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders, prefix="ph.")
+        clauses.extend(f_clauses)
+        params.extend(f_params)
         where_faces = " AND ".join(clauses)
+        pending_f_clauses, pending_f_params = self._folder_filter_clauses(
+            folder, exclude_folders, prefix="php."
+        )
+        pending_folder_sql = ("AND " + " AND ".join(pending_f_clauses)) if pending_f_clauses else ""
         people_clauses = []
         if not include_hidden:
             people_clauses.append("pe.is_hidden = 0")
@@ -2493,7 +2541,7 @@ class Database:
                        SELECT COUNT(*) FROM faces fp
                        JOIN photos php ON php.id = fp.photo_id
                        WHERE fp.person_id = pe.id AND fp.status = 'pending' AND php.status != 'deleted'
-                       {'AND php.folder = ?' if folder else ''}
+                       {pending_folder_sql}
                    ), 0) AS pending_count,
                    MIN(f.id) AS fallback_face_id
             FROM people pe
@@ -2504,7 +2552,7 @@ class Database:
             HAVING (pe.name != '' OR COUNT(DISTINCT f.photo_id) >= ?)
             ORDER BY pe.is_favorite DESC, (pe.name = '') ASC, photo_count DESC, pe.id ASC
         """
-        query_params = ([folder] if folder else []) + params + [max(1, int(min_unnamed_count))]
+        query_params = pending_f_params + params + [max(1, int(min_unnamed_count))]
         with self._lock:
             conn = self._connect()
             try:
@@ -2530,14 +2578,18 @@ class Database:
                 conn.close()
 
     def person_photos(
-        self, person_id: int, folder: str | None = None, pending: bool = False
+        self,
+        person_id: int,
+        folder: str | None = None,
+        pending: bool = False,
+        exclude_folders: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         status_clause = "f.status = 'pending'" if pending else "f.status IN ('manual', 'auto')"
         clauses = ["f.person_id = ?", status_clause, "ph.status != 'deleted'"]
         params: list[Any] = [int(person_id)]
-        if folder:
-            clauses.append("ph.folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders, prefix="ph.")
+        clauses.extend(f_clauses)
+        params.extend(f_params)
         sql = (
             "SELECT DISTINCT ph.* FROM photos ph "
             "JOIN faces f ON f.photo_id = ph.id "
@@ -2547,13 +2599,16 @@ class Database:
         return self._query_photos(sql, params)
 
     def person_pending_faces(
-        self, person_id: int, folder: str | None = None
+        self,
+        person_id: int,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         clauses = ["f.person_id = ?", "f.status = 'pending'", "ph.status != 'deleted'"]
         params: list[Any] = [int(person_id)]
-        if folder:
-            clauses.append("ph.folder = ?")
-            params.append(folder)
+        f_clauses, f_params = self._folder_filter_clauses(folder, exclude_folders, prefix="ph.")
+        clauses.extend(f_clauses)
+        params.extend(f_params)
         sql = (
             "SELECT f.id AS face_id, f.photo_id, f.det_score, f.entity_kind, ph.filename, ph.title "
             "FROM faces f JOIN photos ph ON ph.id = f.photo_id "
@@ -2923,30 +2978,27 @@ class Database:
             finally:
                 conn.close()
 
-    def count_photo_embeddings(self, model: str, folder: str | None = None) -> int:
+    def count_photo_embeddings(
+        self,
+        model: str,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+    ) -> int:
+        clauses = ["e.model = ?", "p.status != 'deleted'"]
+        params: list[Any] = [str(model)]
+        norm_folder = canonical_path(folder) if folder else None
+        f_clauses, f_params = self._folder_filter_clauses(norm_folder, exclude_folders, prefix="p.")
+        clauses.extend(f_clauses)
+        params.extend(f_params)
+        sql = (
+            "SELECT COUNT(*) AS c FROM photo_embeddings e "
+            "JOIN photos p ON p.id = e.photo_id "
+            f"WHERE {' AND '.join(clauses)}"
+        )
         with self._lock:
             conn = self._connect()
             try:
-                if folder:
-                    row = conn.execute(
-                        """
-                        SELECT COUNT(*) AS c
-                        FROM photo_embeddings e
-                        JOIN photos p ON p.id = e.photo_id
-                        WHERE e.model=? AND p.folder=? AND p.status != 'deleted'
-                        """,
-                        (str(model), canonical_path(folder)),
-                    ).fetchone()
-                else:
-                    row = conn.execute(
-                        """
-                        SELECT COUNT(*) AS c
-                        FROM photo_embeddings e
-                        JOIN photos p ON p.id = e.photo_id
-                        WHERE e.model=? AND p.status != 'deleted'
-                        """,
-                        (str(model),),
-                    ).fetchone()
+                row = conn.execute(sql, params).fetchone()
                 return int(row["c"]) if row else 0
             finally:
                 conn.close()

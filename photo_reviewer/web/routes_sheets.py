@@ -42,6 +42,7 @@ from .helpers import (
     _duplicate_payload,
     _is_raw_file,
     _photo_payload,
+    resolve_folder_scope,
 )
 
 from pathlib import Path
@@ -85,7 +86,7 @@ def register(app, cfg, database):
                 if row and row.get("status") != "deleted":
                     rows.append(row)
         else:
-            folder = data.get("folder", "").strip() or None
+            folder, exclude_folders = resolve_folder_scope(database, data.get("folder", ""))
             today = datetime.now().astimezone()
             try:
                 month = int(data.get("month", today.month))
@@ -102,7 +103,11 @@ def register(app, cfg, database):
             except (TypeError, ValueError):
                 return jsonify({"error": "window 参数不合法"}), 400
             rows = database.memories_on(
-                month, day, window=max(0, min(window, 30)), folder=folder
+                month,
+                day,
+                window=max(0, min(window, 30)),
+                folder=folder,
+                exclude_folders=exclude_folders,
             )
             # The day's memories have to be held to the same ceiling as a manual
             # selection: both are embedded inline, so an unusually rich date
@@ -208,9 +213,9 @@ def register(app, cfg, database):
         load instantaneously; callers then fetch full photos on demand via
         ``GET /api/footprints/photos``.
         """
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         summary_only = request.args.get("summary", "0").strip().lower() in ("1", "true", "yes")
-        rows = database.located_photos(folder)
+        rows = database.located_photos(folder, exclude_folders=exclude_folders)
         custom_places = database.list_places()
         footprints = merge_places_and_footprints(rows, custom_places)
 
@@ -282,14 +287,14 @@ def register(app, cfg, database):
         key = request.args.get("key", "").strip()
         if not key:
             return jsonify({"error": "缺少地点标识 key"}), 400
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         try:
             offset = max(0, int(request.args.get("offset", "0")))
             limit = max(1, min(2000, int(request.args.get("limit", "500"))))
         except (TypeError, ValueError):
             return jsonify({"error": "分页参数不合法"}), 400
 
-        rows = database.located_photos(folder)
+        rows = database.located_photos(folder, exclude_folders=exclude_folders)
         custom_places = database.list_places()
         footprints = merge_places_and_footprints(rows, custom_places)
         target = None
@@ -523,7 +528,7 @@ def register(app, cfg, database):
         and ``day``/``month`` can be overridden so the page works for a date the
         user picked as well as for today.
         """
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         today = datetime.now().astimezone()
         try:
             month = int(request.args.get("month", today.month))
@@ -543,7 +548,9 @@ def register(app, cfg, database):
                 return jsonify({"error": "window 参数不合法"}), 400
         window = max(0, min(window, 30))
 
-        rows = database.memories_on(month, day, window=window, folder=folder)
+        rows = database.memories_on(
+            month, day, window=window, folder=folder, exclude_folders=exclude_folders
+        )
         buckets: dict[int, list[dict[str, Any]]] = {}
         for row in rows:
             year = photo_capture_year(row)
@@ -586,7 +593,7 @@ def register(app, cfg, database):
         purpose and the UI offers it as a slider, because "how alike is alike"
         is a judgement call the reviewer should make, not one to bury.
         """
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         dup_mode = (request.args.get("mode", "phash") or "phash").strip().lower()
         if dup_mode not in ("phash", "vector"):
             dup_mode = "phash"
@@ -597,7 +604,7 @@ def register(app, cfg, database):
             return jsonify({"error": "threshold 参数不合法"}), 400
         threshold = max(0, min(threshold, 24))
 
-        candidates = database.duplicate_candidates(folder)
+        candidates = database.duplicate_candidates(folder, exclude_folders=exclude_folders)
         if dup_mode == "vector":
             model = vectors.active_vector_model(cfg)
             raw_embs = database.list_photo_embeddings(model, photo_ids=[c["id"] for c in candidates])
@@ -630,7 +637,7 @@ def register(app, cfg, database):
     @app.get("/api/trips")
     def api_trips():
         """Auto-clustered Trips & Stories for the current folder or library."""
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         try:
             max_gap = max(1, min(int(request.args.get("max_gap_days", 3)), 14))
         except (TypeError, ValueError):
@@ -640,16 +647,24 @@ def register(app, cfg, database):
         except (TypeError, ValueError):
             min_photos = 3
         rows = database.list_photos(
-            folder=folder, exclude_deleted=True, sort="time_asc", limit=20000
+            folder=folder,
+            exclude_folders=exclude_folders,
+            exclude_deleted=True,
+            sort="time_asc",
+            limit=20000,
         )
         trip_list = trips_mod.cluster_trips(rows, max_gap_days=max_gap, min_photos=min_photos)
         return jsonify({"trips": trip_list, "total": len(trip_list)})
 
     @app.get("/api/trips/<trip_id>")
     def api_trip_detail(trip_id: str):
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         rows = database.list_photos(
-            folder=folder, exclude_deleted=True, sort="time_asc", limit=20000
+            folder=folder,
+            exclude_folders=exclude_folders,
+            exclude_deleted=True,
+            sort="time_asc",
+            limit=20000,
         )
         trip_list = trips_mod.cluster_trips(rows)
         target = next((t for t in trip_list if t["id"] == trip_id), None)

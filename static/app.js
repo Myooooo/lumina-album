@@ -1932,13 +1932,21 @@ function openComparePhotos(photos, keepId = null) {
 async function exportSelectedOriginals() {
   const ids = [...state.selected];
   if (!ids.length) return;
-  const defaultDir = state.folder ? `${state.folder}/selected-export` : "";
+  const defaultDir = state.folder && state.folder !== "__all__" ? `${state.folder}/selected-export` : "";
   const ans = await confirmDialog(
-    `将选中的 ${ids.length} 张照片原图拷贝到目标目录（原文件不动）。`,
+    `将选中的 ${ids.length} 张照片原图导出到目标目录（原文件不动）。`,
     {
       title: "导出原图 / RAW",
       confirmText: "开始导出",
       input: { label: "目标文件夹路径", value: defaultDir, placeholder: "例如：/Users/name/Pictures/Lightroom-Import" },
+      select: {
+        label: "导出方式",
+        value: "copy",
+        options: [
+          { value: "copy", label: "复制文件（独立副本，兼容任意磁盘）" },
+          { value: "hardlink", label: "硬链接（零额外空间占用，跨盘自动回退复制）" },
+        ],
+      },
       checkbox: { label: "同时导出同名 RAW 文件", checked: true },
     }
   );
@@ -1948,14 +1956,16 @@ async function exportSelectedOriginals() {
     showToast("请填写目标文件夹路径", "warning");
     return;
   }
+  const mode = ans.selected === "hardlink" ? "hardlink" : "copy";
   showLoading("正在导出原图与 RAW…");
   try {
     const report = await api("/api/cull/export-originals", {
       method: "POST",
-      body: JSON.stringify({ ids, target_dir: targetDir, mode: "copy", include_raw: !!ans.checked }),
+      body: JSON.stringify({ ids, target_dir: targetDir, mode, include_raw: !!ans.checked }),
     });
     const rawTip = report.raw_exported ? `（含 ${report.raw_exported} 个 RAW）` : "";
-    showToast(`已导出 ${report.exported} 张原图${rawTip}到 ${report.target_dir}`, "success");
+    const modeTip = report.mode === "hardlink" ? "硬链接" : "复制";
+    showToast(`已${modeTip}导出 ${report.exported} 张原图${rawTip}到 ${report.target_dir}`, "success");
   } catch (e) {
     showToast("导出原图失败：" + e.message, "error");
   } finally {

@@ -432,6 +432,18 @@ window.LuminaUI = (() => {
       const inputLabel = getEl("confirmInputLabel");
       const wantsCheckbox = !!options.checkbox;
       const wantsInput = !!options.input;
+      const wantsSelect = !!(options.select && Array.isArray(options.select.options) && options.select.options.length);
+
+      let selectRow = getEl("confirmSelectRow");
+      let selectEl = getEl("confirmSelect");
+      if (wantsSelect && !selectRow && inputRow && inputRow.parentNode) {
+        selectRow = document.createElement("label");
+        selectRow.id = "confirmSelectRow";
+        selectRow.className = "confirm-input-row";
+        selectRow.innerHTML = `<span id="confirmSelectLabel"></span><select id="confirmSelect" data-no-custom="1" class="inline-select"></select>`;
+        inputRow.parentNode.insertBefore(selectRow, checkRow || inputRow.nextSibling);
+        selectEl = getEl("confirmSelect");
+      }
 
       if (titleEl) {
         titleEl.innerHTML = `<span class="modal-title-icon">${ICONS.sparkles || ""}</span>${escapeUiHtml(options.title || "确认操作")}`;
@@ -452,6 +464,19 @@ window.LuminaUI = (() => {
           inputRow.classList.add("hidden");
         }
       }
+      if (selectRow && selectEl) {
+        if (wantsSelect) {
+          const selLabel = getEl("confirmSelectLabel");
+          if (selLabel) selLabel.textContent = options.select.label || "方式";
+          selectEl.innerHTML = options.select.options
+            .map((opt) => `<option value="${escapeUiHtml(opt.value)}">${escapeUiHtml(opt.label)}</option>`)
+            .join("");
+          if (options.select.value !== undefined) selectEl.value = String(options.select.value);
+          selectRow.classList.remove("hidden");
+        } else {
+          selectRow.classList.add("hidden");
+        }
+      }
       if (checkRow && checkInput && checkLabel) {
         if (wantsCheckbox) {
           checkLabel.textContent = options.checkbox.label || "";
@@ -463,11 +488,12 @@ window.LuminaUI = (() => {
       }
 
       function result(confirmed) {
-        if (!wantsCheckbox && !wantsInput) return confirmed;
+        if (!wantsCheckbox && !wantsInput && !wantsSelect) return confirmed;
         return {
           confirmed,
           checked: checkInput ? checkInput.checked : false,
           value: inputEl ? inputEl.value.trim() : "",
+          selected: selectEl ? selectEl.value : "",
         };
       }
 
@@ -475,6 +501,7 @@ window.LuminaUI = (() => {
         activeConfirm = null;
         hideModal(modal);
         if (checkRow) checkRow.classList.add("hidden");
+        if (selectRow) selectRow.classList.add("hidden");
         if (okBtn) okBtn.removeEventListener("click", onOk);
         if (cancelBtn) cancelBtn.removeEventListener("click", onCancel);
         if (closeBtn) closeBtn.removeEventListener("click", onCancel);

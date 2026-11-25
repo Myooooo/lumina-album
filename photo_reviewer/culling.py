@@ -99,6 +99,47 @@ def _transfer_file(src: str, dest: Path, mode: str) -> str:
     return "copy"
 
 
+MAX_ORIGINAL_EXPORT_PHOTOS = 500
+
+_FORBIDDEN_EXPORT_DIR_NAMES = frozenset({".photo-review-cache", ".photo-trash"})
+_FORBIDDEN_SYSTEM_PREFIXES = (
+    "/System",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/etc",
+    "/private/etc",
+    "/private/var/db",
+    "/Library",
+    "/Applications",
+    "/dev",
+    "/proc",
+    "/sys",
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+    "C:\\ProgramData",
+)
+
+
+def validate_export_target_dir(target_dir: str) -> Path:
+    """Validate and resolve the destination directory for original photo export."""
+    clean_dir = (target_dir or "").strip()
+    if not clean_dir:
+        raise ValueError("请指定导出目标文件夹")
+    dest_root = Path(os.path.expanduser(clean_dir)).resolve()
+    if dest_root == dest_root.parent:
+        raise ValueError("不能直接导出到磁盘根目录，请选择子文件夹")
+    if any(part in _FORBIDDEN_EXPORT_DIR_NAMES for part in dest_root.parts):
+        raise ValueError("不能导出到相册内部缓存或回收站目录")
+    norm_dest = os.path.normcase(str(dest_root))
+    for prefix in _FORBIDDEN_SYSTEM_PREFIXES:
+        norm_prefix = os.path.normcase(os.path.normpath(prefix))
+        if norm_dest == norm_prefix or norm_dest.startswith(norm_prefix + os.sep):
+            raise ValueError(f"出于安全保护，禁止导出到系统目录：{prefix}")
+    return dest_root
+
+
 def export_originals_to_dir(
     photos: list[dict[str, Any]],
     target_dir: str,
@@ -109,10 +150,11 @@ def export_originals_to_dir(
 
     Never modifies or deletes source files.
     """
-    clean_dir = (target_dir or "").strip()
-    if not clean_dir:
-        raise ValueError("请指定导出目标文件夹")
-    dest_root = Path(os.path.expanduser(clean_dir)).resolve()
+    if len(photos) > MAX_ORIGINAL_EXPORT_PHOTOS:
+        raise ValueError(
+            f"单次最多导出 {MAX_ORIGINAL_EXPORT_PHOTOS} 张原图（当前选中 {len(photos)} 张），请分批导出"
+        )
+    dest_root = validate_export_target_dir(target_dir)
     dest_root.mkdir(parents=True, exist_ok=True)
     mode_norm = "hardlink" if (mode or "").strip().lower() == "hardlink" else "copy"
 

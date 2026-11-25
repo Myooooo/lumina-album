@@ -21,7 +21,7 @@ from ..faces import (
     match_and_cluster_library,
     recompute_person_centroid,
 )
-from .helpers import _photo_payload
+from .helpers import _photo_payload, resolve_folder_scope
 
 
 def register(app, cfg, database):
@@ -37,7 +37,7 @@ def register(app, cfg, database):
     @app.post("/api/people/scan")
     def api_people_scan():
         data = request.get_json(force=True, silent=True) or {}
-        folder = str(data.get("folder") or "").strip() or None
+        folder, _exclude_folders = resolve_folder_scope(database, str(data.get("folder") or ""))
         force = bool(data.get("force", False))
         st = engine_status(cfg)
         if not st["ready"]:
@@ -88,7 +88,7 @@ def register(app, cfg, database):
 
     @app.get("/api/people")
     def api_list_people():
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         kind = request.args.get("kind", "").strip().lower() or None
         if kind not in (None, "person", "cat", "dog", "pet"):
             kind = None
@@ -100,6 +100,7 @@ def register(app, cfg, database):
             include_hidden=include_hidden,
             kind=kind,
             min_unnamed_count=min_unnamed,
+            exclude_folders=exclude_folders,
         )
         return jsonify(
             {
@@ -115,10 +116,16 @@ def register(app, cfg, database):
         person = database.get_person(person_id)
         if not person:
             return jsonify({"error": "人物不存在"}), 404
-        folder = request.args.get("folder", "").strip() or None
-        confirmed_photos = database.person_photos(person_id, folder=folder, pending=False)
-        pending_photos = database.person_photos(person_id, folder=folder, pending=True)
-        pending_faces = database.person_pending_faces(person_id, folder=folder)
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
+        confirmed_photos = database.person_photos(
+            person_id, folder=folder, pending=False, exclude_folders=exclude_folders
+        )
+        pending_photos = database.person_photos(
+            person_id, folder=folder, pending=True, exclude_folders=exclude_folders
+        )
+        pending_faces = database.person_pending_faces(
+            person_id, folder=folder, exclude_folders=exclude_folders
+        )
         cover_faces = database.faces_for_person(person_id, include_pending=False)[:24]
         return jsonify(
             {

@@ -32,7 +32,7 @@ from .helpers import (
     _ensure_exif,
     _file_size,
     _photo_payload,
-    hidden_folder_list,
+    resolve_folder_scope,
 )
 
 
@@ -41,9 +41,7 @@ def register(app, cfg, database):
 
     @app.get("/api/photos")
     def api_photos():
-        raw_folder = request.args.get("folder", "").strip()
-        folder = None if (not raw_folder or raw_folder == "__all__") else raw_folder
-        exclude_folders = hidden_folder_list(database) if folder is None else None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         status_raw = request.args.get("status", "").strip()
         search = request.args.get("search", "").strip() or None
         tag = request.args.get("tag", "").strip() or None
@@ -126,7 +124,7 @@ def register(app, cfg, database):
     @app.post("/api/search")
     def api_search():
         data = request.get_json(force=True, silent=True) or {}
-        folder = data.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, data.get("folder", ""))
         query = data.get("query", "").strip()
         mode = data.get("mode", "smart") or "smart"
         # A retired mode is redirected rather than rejected: the page is a single
@@ -178,6 +176,7 @@ def register(app, cfg, database):
         # EXIF, dimensions, video_info - as the prompt could use.
         all_candidates = database.list_photos(
             folder=folder,
+            exclude_folders=exclude_folders,
             status=status,
             min_score=min_score,
             tag=tag,
@@ -193,6 +192,7 @@ def register(app, cfg, database):
         if mode in ("keyword", "smart"):
             keyword_photos = database.list_photos(
                 folder=folder,
+                exclude_folders=exclude_folders,
                 status=status,
                 min_score=min_score,
                 search=query,
@@ -212,6 +212,7 @@ def register(app, cfg, database):
             if vectors.has_clip_onnx_model(cfg):
                 vec_candidates = database.list_photos(
                     folder=folder,
+                    exclude_folders=exclude_folders,
                     status=status,
                     min_score=min_score,
                     tag=tag,
@@ -279,7 +280,11 @@ def register(app, cfg, database):
         photo = database.get_photo(photo_id)
         if not photo:
             return jsonify({"error": "照片不存在"}), 404
-        folder = request.args.get("folder", "").strip() or photo.get("folder") or None
+        raw_folder = request.args.get("folder", "").strip()
+        if raw_folder:
+            folder, exclude_folders = resolve_folder_scope(database, raw_folder)
+        else:
+            folder, exclude_folders = photo.get("folder") or None, None
         try:
             limit = max(4, min(int(request.args.get("limit", 48)), 120))
         except (TypeError, ValueError):
@@ -290,6 +295,7 @@ def register(app, cfg, database):
             min_sim = 0.68
         candidates = database.list_photos(
             folder=folder,
+            exclude_folders=exclude_folders,
             exclude_deleted=True,
             sort="time_desc",
             limit=5000,
@@ -308,10 +314,12 @@ def register(app, cfg, database):
 
     @app.get("/api/vectors/status")
     def api_vectors_status():
-        folder = request.args.get("folder", "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         return jsonify(
             {
-                "engine": vectors.vector_engine_status(database, cfg, folder=folder),
+                "engine": vectors.vector_engine_status(
+                    database, cfg, folder=folder, exclude_folders=exclude_folders
+                ),
                 "job": vectors.VECTOR_INDEX_MANAGER.status(),
             }
         )
@@ -319,9 +327,11 @@ def register(app, cfg, database):
     @app.post("/api/vectors/index")
     def api_vectors_index():
         data = request.get_json(force=True, silent=True) or {}
-        folder = (data.get("folder") or "").strip() or None
+        folder, exclude_folders = resolve_folder_scope(database, data.get("folder", ""))
         force = bool(data.get("force"))
-        job = vectors.VECTOR_INDEX_MANAGER.start(database, cfg, folder=folder, force=force)
+        job = vectors.VECTOR_INDEX_MANAGER.start(
+            database, cfg, folder=folder, force=force, exclude_folders=exclude_folders
+        )
         return jsonify(job)
 
     @app.post("/api/vectors/index/cancel")
@@ -347,9 +357,7 @@ def register(app, cfg, database):
 
     @app.get("/api/stats")
     def api_stats():
-        raw_folder = request.args.get("folder", "").strip()
-        folder = None if (not raw_folder or raw_folder == "__all__") else raw_folder
-        exclude_folders = hidden_folder_list(database) if folder is None else None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         return jsonify(database.stats(folder, exclude_folders=exclude_folders))
 
     @app.get("/api/photo/<int:photo_id>")
@@ -479,9 +487,7 @@ def register(app, cfg, database):
     @app.get("/api/stats/report")
     def api_stats_report():
         """Photography Year-in-Review & gear/focal statistics."""
-        raw_folder = request.args.get("folder", "").strip()
-        folder = None if (not raw_folder or raw_folder == "__all__") else raw_folder
-        exclude_folders = hidden_folder_list(database) if folder is None else None
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
         year_raw = request.args.get("year", "").strip()
         year = None
         if year_raw:

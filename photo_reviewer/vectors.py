@@ -130,8 +130,116 @@ def compute_visual_descriptor(image_path: str) -> list[float] | None:
     return l2_normalize(vec)
 
 
+def _is_cjk_char(ch: str) -> bool:
+    cp = ord(ch)
+    return (
+        0x4E00 <= cp <= 0x9FFF
+        or 0x3400 <= cp <= 0x4DBF
+        or 0xF900 <= cp <= 0xFAFF
+        or 0x3040 <= cp <= 0x30FF
+        or 0xAC00 <= cp <= 0xD7AF
+    )
+
+
+def tokenize_clip_text(
+    query: str, vocab: dict[str, int], max_len: int = 52
+) -> tuple[list[int], list[int], list[int]]:
+    """WordPiece + CJK tokenizer compatible with Chinese-CLIP BERT ``vocab.txt``."""
+    cls_id = vocab.get("[CLS]", 101)
+    sep_id = vocab.get("[SEP]", 102)
+    unk_id = vocab.get("[UNK]", 100)
+    pad_id = vocab.get("[PAD]", 0)
+
+    # Split into CJK characters, ASCII word runs, and punctuation symbols.
+    basic_tokens: list[str] = []
+    buf: list[str] = []
+    for ch in (query or "").strip().lower():
+        if ch.isspace():
+            if buf:
+                basic_tokens.append("".join(buf))
+                buf.clear()
+            continue
+        if _is_cjk_char(ch) or (not ch.isalnum() and ch != "_"):
+            if buf:
+                basic_tokens.append("".join(buf))
+                buf.clear()
+            basic_tokens.append(ch)
+        else:
+            buf.append(ch)
+    if buf:
+        basic_tokens.append("".join(buf))
+
+    token_ids = [cls_id]
+    limit = max(2, int(max_len))
+    for tok in basic_tokens:
+        if len(token_ids) >= limit - 1:
+            break
+        if tok in vocab:
+            token_ids.append(vocab[tok])
+            continue
+        # Greedy longest-match WordPiece subword splitting for ASCII/English words
+        start = 0
+        sub_ids: list[int] = []
+        matched = True
+        while start < len(tok):
+            end = len(tok)
+            cur_id = None
+            while start < end:
+                piece = tok[start:end] if start == 0 else f"##{tok[start:end]}"
+                if piece in vocab:
+                    cur_id = vocab[piece]
+                    break
+                end -= 1
+            if cur_id is None:
+                matched = False
+                break
+            sub_ids.append(cur_id)
+            start = end
+        if matched and sub_ids:
+            for sid in sub_ids:
+                if len(token_ids) >= limit - 1:
+                    break
+                token_ids.append(sid)
+        else:
+            token_ids.append(unk_id)
+
+    token_ids.append(sep_id)
+    real_len = len(token_ids)
+    attention_mask = [1] * real_len + [0] * max(0, limit - real_len)
+    token_ids = token_ids + [pad_id] * max(0, limit - real_len)
+    token_type_ids = [0] * limit
+    return token_ids[:limit], attention_mask[:limit], token_type_ids[:limit]
+
+
+def build_clip_text_feed(
+    input_specs: list[Any],
+    token_ids: list[int],
+    attention_mask: list[int],
+    token_type_ids: list[int],
+) -> dict[str, Any]:
+    """Build ONNX Runtime feed dict dynamically matching the model's input names & shapes."""
+    import numpy as np
+
+    feed: dict[str, Any] = {}
+    for inp in input_specs:
+        name = inp.name
+        lname = name.lower()
+        seq_len = len(token_ids)
+        shape = getattr(inp, "shape", None) or []
+        if len(shape) >= 2 and isinstance(shape[1], int) and shape[1] > 0:
+            seq_len = shape[1]
+        if "mask" in lname:
+            arr = (attention_mask + [0] * seq_len)[:seq_len]
+        elif "type" in lname or "segment" in lname:
+            arr = (token_type_ids + [0] * seq_len)[:seq_len]
+        else:
+            arr = (token_ids + [0] * seq_len)[:seq_len]
+        feed[name] = np.array([arr], dtype=np.int64)
+    return feed
+
+
 class _ClipOnnxRuntime:
-    """Lazy-loaded ONNX Runtime session pair for CLIP/SigLIP vision & text."""
+    """Lazy-loaded ONNX Runtime session pair for Chinese-CLIP vision & text."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -139,6 +247,13 @@ class _ClipOnnxRuntime:
         self._vision = None
         self._text = None
         self._vocab: dict[str, int] | None = None
+
+    def reset(self) -> None:
+        with self._lock:
+            self._dir_key = None
+            self._vision = None
+            self._text = None
+            self._vocab = None
 
     def _ensure_loaded(self, cfg) -> bool:
         if not has_clip_onnx_model(cfg):
@@ -200,33 +315,47 @@ class _ClipOnnxRuntime:
         if not self._ensure_loaded(cfg):
             return None
         try:
-            import numpy as np
+            import numpy as np  # noqa: F401
         except ImportError:
             return None
-        vocab = self._vocab or {}
-        cls_id = vocab.get("[CLS]", 101)
-        sep_id = vocab.get("[SEP]", 102)
-        unk_id = vocab.get("[UNK]", 100)
-        tokens = [cls_id]
-        for ch in (query or "").strip().lower():
-            if ch.isspace():
-                continue
-            tokens.append(vocab.get(ch, unk_id))
-            if len(tokens) >= 51:
-                break
-        tokens.append(sep_id)
+        input_specs = self._text.get_inputs()
         max_len = 52
-        while len(tokens) < max_len:
-            tokens.append(0)
+        for inp in input_specs:
+            shape = getattr(inp, "shape", None) or []
+            if len(shape) >= 2 and isinstance(shape[1], int) and shape[1] > 0:
+                max_len = shape[1]
+                break
+        token_ids, attention_mask, token_type_ids = tokenize_clip_text(
+            query, self._vocab or {}, max_len=max_len
+        )
         try:
-            inp = np.array([tokens[:max_len]], dtype=np.int64)
-            input_name = self._text.get_inputs()[0].name
-            out = self._text.run(None, {input_name: inp})[0]
+            feed = build_clip_text_feed(input_specs, token_ids, attention_mask, token_type_ids)
+            out = self._text.run(None, feed)[0]
             flat = [float(x) for x in out.reshape(-1)]
             return l2_normalize(flat)
         except Exception:
             logger.debug("CLIP text encode failed for %r", query, exc_info=True)
             return None
+
+    def self_test(self, cfg) -> tuple[bool, str]:
+        """Run a lightweight vision + text dummy inference to verify model compatibility."""
+        self.reset()
+        if not self._ensure_loaded(cfg):
+            return False, "模型文件未能加载（请确认 onnxruntime 已安装且模型文件完整）"
+        try:
+            import numpy as np
+            dummy = np.zeros((1, 3, 224, 224), dtype=np.float32)
+            v_name = self._vision.get_inputs()[0].name
+            v_out = self._vision.run(None, {v_name: dummy})[0].reshape(-1)
+            t_vec = self.encode_text("测试", cfg)
+            if t_vec is None or len(t_vec) == 0 or len(v_out) == 0:
+                return False, "模型自检未输出有效向量"
+            if len(v_out) != len(t_vec):
+                return False, f"视觉向量维度({len(v_out)})与文本向量维度({len(t_vec)})不一致"
+            return True, f"模型自检通过（{len(v_out)} 维向量对齐）"
+        except Exception as exc:
+            logger.warning("CLIP ONNX self-test failed", exc_info=True)
+            return False, f"模型自检失败：{exc}"
 
 
 _CLIP_RUNTIME = _ClipOnnxRuntime()
@@ -275,12 +404,16 @@ def ensure_photo_embedding(database, cfg, photo: dict[str, Any], model: str | No
     return used_model, vec
 
 
-def vector_engine_status(database, cfg, folder: str | None = None) -> dict[str, Any]:
+def vector_engine_status(
+    database, cfg, folder: str | None = None, exclude_folders: list[str] | None = None
+) -> dict[str, Any]:
     """Return vector search engine readiness & index coverage stats."""
     clip_ready = has_clip_onnx_model(cfg)
     model = active_vector_model(cfg)
-    indexed = database.count_photo_embeddings(model, folder=folder)
-    total = database.stats(folder).get("total", 0)
+    indexed = database.count_photo_embeddings(
+        model, folder=folder, exclude_folders=exclude_folders
+    )
+    total = database.stats(folder, exclude_folders=exclude_folders).get("total", 0)
     return {
         "enabled": bool(getattr(cfg, "vector_search_enabled", True)),
         "clip_ready": clip_ready,
@@ -452,7 +585,14 @@ class VectorIndexManager:
             self._job.message = "正在取消向量索引…"
             return True
 
-    def start(self, database, cfg, folder: str | None = None, force: bool = False) -> dict[str, Any]:
+    def start(
+        self,
+        database,
+        cfg,
+        folder: str | None = None,
+        force: bool = False,
+        exclude_folders: list[str] | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             if self._job.status == "running":
                 return self._job.to_dict()
@@ -470,6 +610,7 @@ class VectorIndexManager:
             try:
                 photos = database.list_photos(
                     folder=folder,
+                    exclude_folders=exclude_folders,
                     exclude_deleted=True,
                     sort="time_desc",
                     limit=100000,
@@ -527,8 +668,8 @@ def _clip_download_specs() -> tuple[tuple[str, tuple[str, ...]], ...]:
     base = (os.getenv("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
     return (
         ("vocab.txt", (f"{base}/OFA-Sys/chinese-clip-vit-base-patch16/resolve/main/vocab.txt",)),
-        ("vision.onnx", (f"{base}/Xenova/clip-vit-base-patch16/resolve/main/onnx/vision_model_quantized.onnx",)),
-        ("text.onnx", (f"{base}/Xenova/clip-vit-base-patch16/resolve/main/onnx/text_model_quantized.onnx",)),
+        ("vision.onnx", (f"{base}/felixdu/chinese-clip-vit-base-patch16-onnx/resolve/main/cn_clip_vision.onnx",)),
+        ("text.onnx", (f"{base}/felixdu/chinese-clip-vit-base-patch16-onnx/resolve/main/cn_clip_text.onnx",)),
     )
 
 
@@ -634,10 +775,21 @@ class VectorModelDownloadManager:
                             job.message = job.error
                         return
                 with self._lock:
+                    job.stage = "verify"
+                    job.percent = 99
+                    job.message = "正在校验本地向量模型兼容性…"
+                ok_test, test_msg = _CLIP_RUNTIME.self_test(cfg)
+                if not ok_test:
+                    with self._lock:
+                        job.status = "error"
+                        job.error = test_msg
+                        job.message = test_msg
+                    return
+                with self._lock:
                     job.status = "completed"
                     job.stage = "done"
                     job.percent = 100
-                    job.message = f"本地向量模型已就绪（{target_dir}）"
+                    job.message = f"本地向量模型已就绪（{test_msg}）"
             except Exception as exc:
                 logger.warning("Vector model download failed", exc_info=True)
                 with self._lock:

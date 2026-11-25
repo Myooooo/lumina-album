@@ -253,6 +253,22 @@ def hidden_folder_list(database: Database) -> list[str]:
     return folders
 
 
+def resolve_folder_scope(
+    database: Database, raw_folder: str | None
+) -> tuple[str | None, list[str] | None]:
+    """Normalize a client ``folder`` parameter into ``(folder, exclude_folders)``.
+
+    Empty string and the ``"__all__"`` sentinel both mean "all visible albums",
+    in which case hidden albums are excluded. A concrete folder path scopes the
+    query to that album alone (even if it is hidden, when opened from the hidden
+    albums list).
+    """
+    clean = (raw_folder or "").strip()
+    if not clean or clean == "__all__":
+        return None, hidden_folder_list(database)
+    return clean, None
+
+
 def is_hidden_folder(database: Database, folder: str | None) -> bool:
     """True when ``folder`` is one of the hidden albums."""
     if not folder:
@@ -421,17 +437,21 @@ def _image_cache_timeout() -> int | None:
 #: single digits. The answer only changes when a scan does, so it is memoised for
 #: a short while; the key includes the folder so switching albums is unaffected.
 YEARS_CACHE_SECONDS = 60.0
-_years_cache: dict[str, tuple[float, list[int]]] = {}
+_years_cache: dict[tuple[str, tuple[str, ...]], tuple[float, list[int]]] = {}
 
 
-def _cached_years(database: Database, folder: str | None) -> list[int]:
+def _cached_years(
+    database: Database,
+    folder: str | None,
+    exclude_folders: list[str] | None = None,
+) -> list[int]:
     """Distinct capture years, memoised for ``YEARS_CACHE_SECONDS``."""
-    key = folder or ""
+    key = (folder or "", tuple(sorted(exclude_folders or ())))
     now = time.monotonic()
     hit = _years_cache.get(key)
     if hit and now - hit[0] < YEARS_CACHE_SECONDS:
         return hit[1]
-    years = database.capture_years(folder)
+    years = database.capture_years(folder, exclude_folders=exclude_folders)
     if len(_years_cache) > 32:
         _years_cache.clear()
     _years_cache[key] = (now, years)

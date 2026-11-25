@@ -7,6 +7,7 @@ configuration/database context they receive.
 
 from __future__ import annotations
 
+import hmac
 import logging
 from pathlib import Path
 
@@ -22,6 +23,9 @@ from .web.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+_LAN_READONLY_ALLOWED_POSTS = frozenset({"/api/search", "/api/cull/quality", "/api/export"})
+_LAN_READONLY_BLOCKED_PREFIXES = ("/api/dirs", "/api/config", "/api/folders/hidden")
 
 
 def create_app(config: Config | None = None, db: Database | None = None) -> Flask:
@@ -52,16 +56,22 @@ def create_app(config: Config | None = None, db: Database | None = None) -> Flas
             or request.cookies.get("lumina_lan_pin")
             or ""
         ).strip()
-        if supplied != pin:
+        if not supplied or not hmac.compare_digest(supplied, pin):
             return jsonify({"error": "局域网访问需要口令（请附加 ?pin=口令 或 X-Lumina-Pin 请求头）"}), 401
-        if request.method in _UNSAFE_METHODS and request.path not in ("/api/search", "/api/cull/quality"):
+        if any(
+            request.path == prefix or request.path.startswith(prefix + "/")
+            for prefix in _LAN_READONLY_BLOCKED_PREFIXES
+        ):
+            return jsonify({"error": "局域网只读模式不允许访问宿主机配置或目录接口"}), 403
+        if request.method in _UNSAFE_METHODS and request.path not in _LAN_READONLY_ALLOWED_POSTS:
             return jsonify({"error": "局域网只读模式不允许修改或删除操作"}), 403
         return None
 
     @app.after_request
     def _persist_lan_pin_cookie(response):
         pin = (getattr(cfg, "lan_readonly_pin", "") or "").strip()
-        if pin and request.args.get("pin", "").strip() == pin:
+        query_pin = (request.args.get("pin") or "").strip()
+        if pin and query_pin and hmac.compare_digest(query_pin, pin):
             response.set_cookie("lumina_lan_pin", pin, httponly=True, samesite="Lax")
         return response
 

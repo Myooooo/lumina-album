@@ -39,6 +39,7 @@ from .helpers import (
     _job_payload,
     _normalize_folder,
     hidden_folder_list,
+    resolve_folder_scope,
 )
 
 
@@ -196,13 +197,13 @@ def register(app, cfg, database):
 
     @app.get("/api/tags")
     def api_tags():
-        folder = request.args.get("folder", "").strip() or None
-        return jsonify({"tags": database.all_tags(folder)})
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
+        return jsonify({"tags": database.all_tags(folder, exclude_folders=exclude_folders)})
 
     @app.get("/api/years")
     def api_years():
-        folder = request.args.get("folder", "").strip() or None
-        return jsonify({"years": _cached_years(database, folder)})
+        folder, exclude_folders = resolve_folder_scope(database, request.args.get("folder", ""))
+        return jsonify({"years": _cached_years(database, folder, exclude_folders=exclude_folders)})
 
     @app.get("/api/folders")
     def api_folders():
