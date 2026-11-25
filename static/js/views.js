@@ -392,6 +392,10 @@ function updateSelectionBar() {
   $("permanentDeleteSelectedBtn").classList.toggle("hidden", !hasDeleted);
   $("deleteSelectedBtn").classList.toggle("hidden", !hasActive);
   $("reanalyzeSelectedBtn").classList.toggle("hidden", !hasActive);
+  const cmpBtn = $("compareSelectedBtn");
+  if (cmpBtn) cmpBtn.classList.toggle("hidden", count < 2);
+  const origBtn = $("exportOriginalsSelectedBtn");
+  if (origBtn) origBtn.classList.toggle("hidden", !hasActive);
   if (count > 0) showStrip(bar);
   else hideStrip(bar);
 }

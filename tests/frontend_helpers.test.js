@@ -2211,6 +2211,17 @@ section("people & pets (人物与宠物)");
       /theme:\s*\(state && state\.theme\)\s*\|\|\s*"paper"/.test(src),
     true
   );
+  check(
+    "Phase 3 photographer culling quality bar, multi-select compare, P/X shortcuts & Original+RAW export are wired",
+    /id="compareSelectedBtn"/.test(indexHtml) &&
+      /id="exportOriginalsSelectedBtn"/.test(indexHtml) &&
+      /id="compareQualityBar"/.test(indexHtml) &&
+      /function refreshCompareQuality\(/.test(src) &&
+      /function exportSelectedOriginals\(/.test(src) &&
+      /e\.key === "p"/.test(src) &&
+      /e\.key === "x"/.test(src),
+    true
+  );
 }
 
 console.log(

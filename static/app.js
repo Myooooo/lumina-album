@@ -140,6 +140,17 @@ function init() {
   $("deleteSelectedBtn").addEventListener("click", () => deletePhotos([...state.selected]));
   $("restoreSelectedBtn").addEventListener("click", () => restorePhotos([...state.selected]));
   $("reanalyzeSelectedBtn").addEventListener("click", () => reanalyzeSelected([...state.selected]));
+  const compareSelectedBtn = $("compareSelectedBtn");
+  if (compareSelectedBtn) {
+    compareSelectedBtn.addEventListener("click", () => {
+      const picked = [...state.selected].map((id) => photoById(id)).filter(Boolean);
+      openComparePhotos(picked);
+    });
+  }
+  const exportOrigBtn = $("exportOriginalsSelectedBtn");
+  if (exportOrigBtn) {
+    exportOrigBtn.addEventListener("click", exportSelectedOriginals);
+  }
   const assignPlaceSelectedBtn = $("assignPlaceSelectedBtn");
   if (assignPlaceSelectedBtn) {
     assignPlaceSelectedBtn.addEventListener("click", () => {
@@ -525,11 +536,11 @@ function init() {
       } else if (e.key === "i" || e.key === "I") {
         e.preventDefault();
         toggleFullscreenInfo();
-      } else if (e.key === "f" || e.key === "F") {
+      } else if (e.key === "f" || e.key === "F" || e.key === "p" || e.key === "P") {
         e.preventDefault();
         resetFsIdleTimer();
         toggleCurrentPreviewFavorite();
-      } else if (e.key === "d" || e.key === "D") {
+      } else if (e.key === "d" || e.key === "D" || e.key === "x" || e.key === "X") {
         e.preventDefault();
         const photo = photoById(state.currentPreviewId);
         if (photo && photo.status !== "deleted") deletePhotos([photo.id]);
@@ -575,13 +586,13 @@ function init() {
         navigatePreview(1);
       } else if (e.key === "Escape") {
         closeModal("previewModal");
-      } else if (e.key === "f" || e.key === "F") {
+      } else if (e.key === "f" || e.key === "F" || e.key === "p" || e.key === "P") {
         e.preventDefault();
         toggleCurrentPreviewFavorite();
       } else if (e.key === "e" || e.key === "E") {
         e.preventDefault();
         openEditPreview();
-      } else if (e.key === "d" || e.key === "D") {
+      } else if (e.key === "d" || e.key === "D" || e.key === "x" || e.key === "X") {
         e.preventDefault();
         const photo = photoById(state.currentPreviewId);
         if (photo && photo.status !== "deleted") deletePhotos([photo.id]);
@@ -1836,21 +1847,45 @@ function paintCompareImages() {
   const rightMeta = $("compareRightMeta");
   if (leftMeta) leftMeta.textContent = metaText(left, "左");
   if (rightMeta) rightMeta.textContent = metaText(right, "右");
+  refreshCompareQuality(left.id, right.id);
 }
 
-function openCompareModal(groupIndex) {
-  const group = (dupState.groups || [])[groupIndex];
-  if (!group || !group.photos || group.photos.length < 2) return;
-  compareState.photos = group.photos;
-  const keeper = group.photos.find((p) => p.id === group.keep_id) || group.photos[0];
-  const other = group.photos.find((p) => p.id !== keeper.id) || group.photos[1];
+async function refreshCompareQuality(leftId, rightId) {
+  const bar = $("compareQualityBar");
+  if (!bar || !leftId || !rightId) return;
+  bar.textContent = "正在检测锐度与曝光…";
+  try {
+    const data = await api("/api/cull/quality", {
+      method: "POST",
+      body: JSON.stringify({ ids: [leftId, rightId] }),
+    });
+    const res = data.results || {};
+    const fmt = (id, label) => {
+      const m = res[String(id)];
+      if (!m) return `${label}：无数据`;
+      const flags = m.flags && m.flags.length ? ` · ${m.flags.join("/")}` : " · 曝光锐度正常";
+      return `${label} 锐度 ${m.sharpness}${flags}`;
+    };
+    bar.textContent = `${fmt(leftId, "左图")}   |   ${fmt(rightId, "右图")}`;
+  } catch (_e) {
+    bar.textContent = "";
+  }
+}
+
+function openComparePhotos(photos, keepId = null) {
+  if (!Array.isArray(photos) || photos.length < 2) {
+    showToast("请至少选择 2 张照片进行对比", "info");
+    return;
+  }
+  compareState.photos = photos;
+  const keeper = photos.find((p) => p.id === keepId) || photos[0];
+  const other = photos.find((p) => p.id !== keeper.id) || photos[1];
   compareState.leftId = keeper.id;
   compareState.rightId = other.id;
-
   const leftSel = $("compareLeftSelect");
   const rightSel = $("compareRightSelect");
-  const optsHtml = group.photos
-    .map((p) => `<option value="${p.id}">${escapeHtml(p.filename)}${p.id === group.keep_id ? "（建议保留）" : ""}</option>`)
+  const optsHtml = photos
+    .map((p) => `<option value="${p.id}">${escapeHtml(p.filename)}${p.id === keepId ? "（建议保留）" : ""}</option>`)
     .join("");
   if (leftSel) {
     leftSel.innerHTML = optsHtml;
@@ -1865,6 +1900,46 @@ function openCompareModal(groupIndex) {
   paintCompareImages();
   showModal($("compareModal"));
   pushModal($("compareModal"));
+}
+
+async function exportSelectedOriginals() {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  const defaultDir = state.folder ? `${state.folder}/selected-export` : "";
+  const ans = await confirmDialog(
+    `将选中的 ${ids.length} 张照片原图拷贝到目标目录（原文件不动）。`,
+    {
+      title: "导出原图 / RAW",
+      confirmText: "开始导出",
+      input: { label: "目标文件夹路径", value: defaultDir, placeholder: "例如：/Users/name/Pictures/Lightroom-Import" },
+      checkbox: { label: "同时导出同名 RAW 文件", checked: true },
+    }
+  );
+  if (!ans || !ans.confirmed) return;
+  const targetDir = (ans.value || "").trim();
+  if (!targetDir) {
+    showToast("请填写目标文件夹路径", "warning");
+    return;
+  }
+  showLoading("正在导出原图与 RAW…");
+  try {
+    const report = await api("/api/cull/export-originals", {
+      method: "POST",
+      body: JSON.stringify({ ids, target_dir: targetDir, mode: "copy", include_raw: !!ans.checked }),
+    });
+    const rawTip = report.raw_exported ? `（含 ${report.raw_exported} 个 RAW）` : "";
+    showToast(`已导出 ${report.exported} 张原图${rawTip}到 ${report.target_dir}`, "success");
+  } catch (e) {
+    showToast("导出原图失败：" + e.message, "error");
+  } finally {
+    hideLoading();
+  }
+}
+
+function openCompareModal(groupIndex) {
+  const group = (dupState.groups || [])[groupIndex];
+  if (!group || !group.photos || group.photos.length < 2) return;
+  return openComparePhotos(group.photos, group.keep_id);
 }
 
 function initCompareModal() {

@@ -267,7 +267,9 @@
     <span>已选择 <strong id="selectedCount">0</strong> 张回忆</span>
     <button id="deleteSelectedBtn" class="btn danger" title="暂时收起"><span class="btn-icon" data-icon="trash"></span>暂时收起</button>
     <button id="restoreSelectedBtn" class="btn" title="恢复"><span class="btn-icon" data-icon="restore"></span>恢复</button>
+    <button id="compareSelectedBtn" class="btn" title="同步放大对比选中的照片（至少选 2 张）"><span class="btn-icon" data-icon="compare"></span>对比选片</button>
     <button id="assignPlaceSelectedBtn" class="btn" title="归入自定义地点（仅改数据库，不动原图 EXIF）"><span class="btn-icon" data-icon="pin"></span>归入地点</button>
+    <button id="exportOriginalsSelectedBtn" class="btn" title="拷贝/硬链接原图与同名 RAW 到指定目录"><span class="btn-icon" data-icon="folder"></span>导出原图/RAW</button>
     <button id="exportSelectedBtn" class="btn" title="导出成网页或长图"><span class="btn-icon" data-icon="file"></span>导出回忆</button>
     <button id="reanalyzeSelectedBtn" class="btn" title="重新解读"><span class="btn-icon" data-icon="refresh"></span>重新解读</button>
     <button id="permanentDeleteSelectedBtn" class="btn danger" title="彻底移除"><span class="btn-icon" data-icon="close"></span>彻底移除</button>
@@ -1329,6 +1331,7 @@
         <input id="compareSlider" class="compare-range" type="range" min="0" max="100" value="50" aria-label="拖动对比分割线" />
       </div>
       <div class="compare-footer">
+        <span id="compareQualityBar" class="compare-quality-bar"></span>
         <span class="compare-tip">左右拖动分割线对比锐度与细节 · 切换 <kbd>2×</kbd>/<kbd>4×</kbd> 可同步拖拽平移 · 按住 <kbd>Space</kbd> 速切右图</span>
       </div>
     </div>

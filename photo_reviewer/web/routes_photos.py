@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from flask import jsonify, request, url_for
 
-from .. import vectors, video
+from .. import culling, vectors, video
 
 from ..api_client import (
     SEMANTIC_CANDIDATE_LIMIT,
@@ -399,3 +399,58 @@ def register(app, cfg, database):
                 "faces": database.faces_for_photo(photo["id"]),
             }
         )
+
+    @app.post("/api/cull/quality")
+    def api_cull_quality():
+        """Zero-VLM focus sharpness and exposure clipping check for culling."""
+        data = request.get_json(force=True, silent=True) or {}
+        ids = data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"results": {}})
+        results = {}
+        for raw_id in ids[:24]:
+            try:
+                pid = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            photo = database.get_photo(pid)
+            if not photo:
+                continue
+            img_path = photo.get("proxy_path") or photo.get("thumb_path") or photo.get("path")
+            metrics = culling.analyze_photo_quality(img_path)
+            if metrics:
+                results[str(pid)] = metrics
+        return jsonify({"results": results})
+
+    @app.post("/api/cull/export-originals")
+    def api_cull_export_originals():
+        """Copy or hardlink selected original photos (and RAW siblings) to a folder."""
+        data = request.get_json(force=True, silent=True) or {}
+        ids = data.get("ids") or []
+        target_dir = (data.get("target_dir") or "").strip()
+        mode = (data.get("mode") or "copy").strip().lower()
+        include_raw = bool(data.get("include_raw", True))
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"error": "请先选择要导出的照片"}), 400
+        if not target_dir:
+            return jsonify({"error": "请填写导出目标目录"}), 400
+        photos = []
+        for raw_id in ids:
+            try:
+                pid = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            p = database.get_photo(pid)
+            if p:
+                photos.append(p)
+        if not photos:
+            return jsonify({"error": "未找到选中的照片"}), 404
+        try:
+            report = culling.export_originals_to_dir(
+                photos, target_dir=target_dir, mode=mode, include_raw=include_raw
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except OSError as exc:
+            return jsonify({"error": f"导出失败：{exc}"}), 500
+        return jsonify(report)

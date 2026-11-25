@@ -14614,3 +14614,19 @@ body[data-theme="vintage"] .fp-route-dot {
   fill: #eb9234;
   stroke: #1b1714;
 }
+
+/* ==========================================================================
+   Phase 3: Photographer Culling Quality Bar
+   ========================================================================== */
+
+.compare-quality-bar {
+  display: block;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--primary-dark);
+  margin-bottom: 4px;
+}
+
+body[data-theme="vintage"] .compare-quality-bar {
+  color: #f4b165;
+}
