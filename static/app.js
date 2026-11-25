@@ -1804,7 +1804,17 @@ const compareState = {
   isDraggingHandle: false,
   panStartX: 0,
   panStartY: 0,
+  qualitySeq: 0,
 };
+
+function resetCompareModalState() {
+  compareState.savedSplit = null;
+  compareState.isPanning = false;
+  compareState.isDraggingHandle = false;
+  compareState.qualitySeq += 1;
+  const stage = $("compareStage");
+  if (stage) stage.classList.remove("is-panning");
+}
 
 function setCompareSplit(pct) {
   const clamped = Math.max(0, Math.min(100, Number(pct) || 0));
@@ -1880,12 +1890,14 @@ function paintCompareImages() {
 async function refreshCompareQuality(leftId, rightId) {
   const bar = $("compareQualityBar");
   if (!bar || !leftId || !rightId) return;
+  const seq = ++compareState.qualitySeq;
   bar.textContent = "正在检测锐度与曝光…";
   try {
     const data = await api("/api/cull/quality", {
       method: "POST",
       body: JSON.stringify({ ids: [leftId, rightId] }),
     });
+    if (seq !== compareState.qualitySeq) return;
     const res = data.results || {};
     const fmt = (id, label) => {
       const m = res[String(id)];
@@ -1895,7 +1907,7 @@ async function refreshCompareQuality(leftId, rightId) {
     };
     bar.textContent = `${fmt(leftId, "左图")}   |   ${fmt(rightId, "右图")}`;
   } catch (_e) {
-    bar.textContent = "";
+    if (seq === compareState.qualitySeq) bar.textContent = "";
   }
 }
 
@@ -2051,6 +2063,10 @@ function initCompareModal() {
   document.addEventListener("keydown", (e) => {
     const modal = $("compareModal");
     if (!modal || modal.classList.contains("hidden")) return;
+    const targetTag = (e.target && e.target.tagName || "").toLowerCase();
+    if (["select", "input", "textarea"].includes(targetTag) || (e.target && e.target.isContentEditable)) {
+      return;
+    }
     if (e.code === "Space" && !e.repeat) {
       e.preventDefault();
       compareState.savedSplit = compareState.split;

@@ -83,24 +83,51 @@ function openSmartAlbumsModal() {
   }
 }
 
+function ensureSelectOption(select, value, label) {
+  if (!select || !value) return;
+  const strVal = String(value);
+  if (![...select.options].some((opt) => opt.value === strVal)) {
+    const opt = document.createElement("option");
+    opt.value = strVal;
+    opt.textContent = label || strVal;
+    select.appendChild(opt);
+  }
+}
+
 function applySmartAlbum(album) {
   const r = (album && album.rules) || {};
+  const prevFolder = state.folder;
   if (r.folder) {
     state.folder = r.folder;
     const inp = $("folderInput");
     if (inp) inp.value = r.folder === "__all__" ? "全部可见相册" : r.folder;
   }
+  if (state.folder !== prevFolder) {
+    if (typeof clearPhotoDetailCache === "function") clearPhotoDetailCache();
+  }
+  if (typeof isHiddenFolder === "function") {
+    state.folderHidden = state.folder !== "__all__" && isHiddenFolder(state.folder);
+  }
+  if (typeof paintFolderHiddenBadge === "function") paintFolderHiddenBadge();
   if (r.status !== undefined) setSelectValue($("statusFilter"), r.status || "all");
   if (r.kind !== undefined) setSelectValue($("kindFilter"), r.kind || "");
   if (r.min_score !== undefined) setSelectValue($("minScoreFilter"), r.min_score || "");
-  if (r.tag !== undefined) setSelectValue($("tagFilter"), r.tag || "");
-  if (r.year !== undefined) setSelectValue($("yearFilter"), r.year || "");
+  if (r.tag !== undefined) {
+    if (r.tag) ensureSelectOption($("tagFilter"), r.tag, r.tag);
+    setSelectValue($("tagFilter"), r.tag || "");
+  }
+  if (r.year !== undefined) {
+    if (r.year) ensureSelectOption($("yearFilter"), r.year, `${r.year} 年`);
+    setSelectValue($("yearFilter"), r.year ? String(r.year) : "");
+  }
   if (r.favorite !== undefined) setSelectValue($("favoriteFilter"), r.favorite || "");
   if (r.sort !== undefined) setSelectValue($("sortFilter"), r.sort || "score_desc");
   const modeVal = r.search_mode === "vector" ? "smart" : r.search_mode || "smart";
   if (r.search_mode !== undefined) setSelectValue($("searchMode"), modeVal);
   const searchEl = $("searchInput");
   if (searchEl && r.search !== undefined) searchEl.value = r.search || "";
+  if (typeof updateActiveStat === "function") updateActiveStat();
+  if (typeof updateFilterHighlights === "function") updateFilterHighlights();
   if (state.view !== "album") showView("album");
   loadPhotos();
   showToast(`已打开智能影集「${album.name}」`, "info");
@@ -192,9 +219,25 @@ async function findSimilarPhotos(photoId) {
   }
 }
 
+let loadPhotosSeq = 0;
+let loadPhotosAbort = null;
+
 async function loadPhotos(options = {}) {
   const quiet = !!options.quiet;
+  let controller = null;
+  let seq = loadPhotosSeq;
   if (!quiet) {
+    seq = ++loadPhotosSeq;
+    if (loadPhotosAbort) {
+      try {
+        loadPhotosAbort.abort();
+      } catch (_e) {}
+      loadPhotosAbort = null;
+    }
+    if (typeof AbortController === "function") {
+      controller = new AbortController();
+      loadPhotosAbort = controller;
+    }
     hideSimilarSearchBanner();
     updateFilterHighlights();
   }
@@ -222,17 +265,23 @@ async function loadPhotos(options = {}) {
       };
       if (!quiet) showLoading("正在寻找相关回忆…");
       try {
-        data = await api("/api/search", {
+        const reqOpts = {
           method: "POST",
           body: JSON.stringify(body),
-        });
+        };
+        if (controller) reqOpts.signal = controller.signal;
+        data = await api("/api/search", reqOpts);
       } finally {
-        if (!quiet) hideLoading();
+        if (!quiet && seq === loadPhotosSeq) hideLoading();
       }
     } else {
-      data = await api(`/api/photos?${params.toString()}`);
+      const reqOpts = controller ? { signal: controller.signal } : {};
+      data = await api(`/api/photos?${params.toString()}`, reqOpts);
       hasMore = !!data.has_more;
     }
+
+    // Discard stale responses superseded by a newer filter/search request.
+    if (seq !== loadPhotosSeq) return;
 
     if (data.warning && !quiet) showToast(data.warning, "warning");
     // A visual search only looks at a bounded number of photos; saying so keeps
@@ -267,6 +316,9 @@ async function loadPhotos(options = {}) {
     // badge is refreshed whenever the gallery is (re)loaded.
     refreshCardStatus();
   } catch (e) {
+    if ((e && e.name === "AbortError") || seq !== loadPhotosSeq) {
+      return;
+    }
     if (quiet) {
       console.warn("后台刷新照片失败", e);
       return;
@@ -285,6 +337,10 @@ async function loadPhotos(options = {}) {
       return;
     }
     showToast("读取照片失败：" + e.message, "error");
+  } finally {
+    if (controller && loadPhotosAbort === controller) {
+      loadPhotosAbort = null;
+    }
   }
 }
 

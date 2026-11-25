@@ -922,6 +922,12 @@ function closeModal(id, onHidden) {
   // browser returns to the import sheet".
   const at = state.modalStack.lastIndexOf(id);
   if (at !== -1) state.modalStack.splice(at, 1);
+  if (id === "settingsModal" && typeof stopVectorIndexPoll === "function") {
+    stopVectorIndexPoll();
+  }
+  if (id === "compareModal" && typeof resetCompareModalState === "function") {
+    resetCompareModalState();
+  }
   if (id === "previewModal") {
     const fsModal = $("fullscreenModal");
     if (fsModal && !fsModal.classList.contains("hidden")) {

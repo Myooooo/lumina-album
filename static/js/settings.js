@@ -852,13 +852,22 @@ function closeFfmpegInstallModal() {
 }
 
 let vectorIndexPollTimer = null;
+let vectorStatusInFlight = false;
+
+function stopVectorIndexPoll() {
+  if (vectorIndexPollTimer) {
+    clearTimeout(vectorIndexPollTimer);
+    vectorIndexPollTimer = null;
+  }
+}
 
 async function refreshVectorEngineStatus() {
   const statusEl = $("vectorEngineStatus");
   const pillsEl = $("vectorStatusPills");
   const startBtn = $("vectorIndexStartBtn");
   const cancelBtn = $("vectorIndexCancelBtn");
-  if (!statusEl) return;
+  if (!statusEl || vectorStatusInFlight) return;
+  vectorStatusInFlight = true;
   try {
     const q = state.folder ? `?folder=${encodeURIComponent(state.folder)}` : "";
     const data = await api(`/api/vectors/status${q}`);
@@ -885,7 +894,8 @@ async function refreshVectorEngineStatus() {
     }
     if (running) {
       statusEl.textContent = job.message || `正在建立向量索引 ${job.done || 0}/${job.total || 0}…`;
-      if (!vectorIndexPollTimer) {
+      const settingsModal = $("settingsModal");
+      if (settingsModal && !settingsModal.classList.contains("hidden") && !vectorIndexPollTimer) {
         vectorIndexPollTimer = setTimeout(() => {
           vectorIndexPollTimer = null;
           refreshVectorEngineStatus();
@@ -893,11 +903,15 @@ async function refreshVectorEngineStatus() {
       }
       return;
     }
+    stopVectorIndexPoll();
     statusEl.textContent = eng.clip_ready
       ? `本地 CLIP 向量引擎已就绪，目录：${eng.models_dir || ""}`
       : `当前使用内建视觉向量（支持以图搜图与相似回忆）；点击下方「一键下载安装」可启用全库自然语言语义搜图。`;
   } catch (e) {
+    stopVectorIndexPoll();
     statusEl.textContent = "无法读取向量引擎状态";
+  } finally {
+    vectorStatusInFlight = false;
   }
 }
 
