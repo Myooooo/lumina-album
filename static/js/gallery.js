@@ -141,11 +141,18 @@ async function saveCurrentSmartAlbum(explicitName = "") {
 
 async function deleteSmartAlbum(albumId) {
   if (!albumId) return;
+  const album = (state.smartAlbums || []).find((a) => a.id === albumId);
+  const label = album ? `「${album.name}」` : "这个智能影集";
+  const confirmed = await confirmDialog(
+    `确定删除虚拟智能影集${label}吗？\n仅移除这条筛选规则，不会影响磁盘上的任何原图。`,
+    { title: "删除智能影集", confirmText: "确认删除", danger: true }
+  );
+  if (!confirmed) return;
   try {
     await api(`/api/smart-albums/${albumId}`, { method: "DELETE" });
     state.smartAlbums = (state.smartAlbums || []).filter((a) => a.id !== albumId);
     renderSmartAlbums();
-    showToast("已删除智能影集", "info");
+    showToast(`已删除智能影集${label}`, "info");
   } catch (e) {
     showToast("删除失败：" + e.message, "error");
   }

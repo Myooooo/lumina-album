@@ -329,6 +329,22 @@ def register(app, cfg, database):
         vectors.VECTOR_INDEX_MANAGER.cancel()
         return jsonify(vectors.VECTOR_INDEX_MANAGER.status())
 
+    @app.post("/api/vectors/models/download")
+    def api_vectors_models_download():
+        data = request.get_json(force=True, silent=True) or {}
+        install_deps = bool(data.get("install_deps", True))
+        job = vectors.VECTOR_MODEL_DOWNLOAD_MANAGER.start(cfg, install_deps=install_deps)
+        return jsonify({"job": job})
+
+    @app.get("/api/vectors/models/download/status")
+    def api_vectors_models_download_status():
+        return jsonify({"job": vectors.VECTOR_MODEL_DOWNLOAD_MANAGER.status()})
+
+    @app.post("/api/vectors/models/download/cancel")
+    def api_vectors_models_download_cancel():
+        vectors.VECTOR_MODEL_DOWNLOAD_MANAGER.cancel()
+        return jsonify({"job": vectors.VECTOR_MODEL_DOWNLOAD_MANAGER.status()})
+
     @app.get("/api/stats")
     def api_stats():
         raw_folder = request.args.get("folder", "").strip()

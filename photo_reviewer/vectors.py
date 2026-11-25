@@ -22,6 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from .faces import (
+    ModelDownloadJob,
+    _ensure_face_runtime,
+    _stream_download_file,
     active_accelerator_label,
     decode_embedding,
     encode_embedding,
@@ -518,3 +521,133 @@ class VectorIndexManager:
 
 
 VECTOR_INDEX_MANAGER = VectorIndexManager()
+
+
+def _clip_download_specs() -> tuple[tuple[str, tuple[str, ...]], ...]:
+    base = (os.getenv("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
+    return (
+        ("vocab.txt", (f"{base}/OFA-Sys/chinese-clip-vit-base-patch16/resolve/main/vocab.txt",)),
+        ("vision.onnx", (f"{base}/Xenova/clip-vit-base-patch16/resolve/main/onnx/vision_model_quantized.onnx",)),
+        ("text.onnx", (f"{base}/Xenova/clip-vit-base-patch16/resolve/main/onnx/text_model_quantized.onnx",)),
+    )
+
+
+class VectorModelDownloadManager:
+    """Background downloader for local CLIP ONNX runtime & model files."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._job = ModelDownloadJob()
+        self._thread: threading.Thread | None = None
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return self._job.to_dict()
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self._job.status != "running":
+                return False
+            self._job.cancelled = True
+            self._job.message = "正在取消下载…"
+            return True
+
+    def start(self, cfg, install_deps: bool = True) -> dict[str, Any]:
+        with self._lock:
+            if self._job.status == "running":
+                return self._job.to_dict()
+            self._job = ModelDownloadJob(
+                status="running",
+                model=getattr(cfg, "vector_model", DEFAULT_CLIP_MODEL),
+                stage="prepare",
+                message="正在准备本地向量模型环境…",
+                started_at=time.time(),
+            )
+            job = self._job
+
+        def _worker() -> None:
+            try:
+                if install_deps:
+                    err = _ensure_face_runtime(job, include_pets=False)
+                    if err:
+                        with self._lock:
+                            job.status = "cancelled" if job.cancelled else "error"
+                            job.error = err
+                            job.message = err
+                        return
+                target_dir = clip_model_dir(cfg)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                specs = _clip_download_specs()
+                total_files = len(specs)
+                for idx, (filename, urls) in enumerate(specs):
+                    if job.cancelled:
+                        with self._lock:
+                            job.status = "cancelled"
+                            job.message = "已取消下载"
+                        return
+                    dest = target_dir / filename
+                    if dest.is_file() and dest.stat().st_size > 1024:
+                        continue
+                    base_pct = int((idx / total_files) * 100)
+                    span_pct = int(100 / total_files)
+                    with self._lock:
+                        job.stage = "download"
+                        job.message = f"正在下载 {filename} ({idx + 1}/{total_files})…"
+                        job.percent = base_pct
+                    last_err = ""
+                    ok = False
+                    for url in urls:
+                        if job.cancelled:
+                            break
+                        try:
+                            def _on_prog(done_b: int, total_b: int, speed: float) -> None:
+                                frac = (done_b / total_b) if total_b > 0 else 0.0
+                                with self._lock:
+                                    job.downloaded_bytes = done_b
+                                    job.total_bytes = total_b
+                                    job.speed_bps = speed
+                                    job.percent = min(99, base_pct + int(frac * span_pct))
+                            _stream_download_file(
+                                url,
+                                dest,
+                                on_progress=_on_prog,
+                                is_cancelled=lambda: job.cancelled,
+                            )
+                            ok = True
+                            break
+                        except Exception as exc:
+                            last_err = str(exc)
+                            try:
+                                if dest.exists():
+                                    dest.unlink()
+                            except OSError:
+                                pass
+                    if job.cancelled:
+                        with self._lock:
+                            job.status = "cancelled"
+                            job.message = "已取消下载"
+                        return
+                    if not ok:
+                        with self._lock:
+                            job.status = "error"
+                            job.error = f"下载 {filename} 失败：{last_err}。也可手动将 vision.onnx、text.onnx、vocab.txt 放入 {target_dir}"
+                            job.message = job.error
+                        return
+                with self._lock:
+                    job.status = "completed"
+                    job.stage = "done"
+                    job.percent = 100
+                    job.message = f"本地向量模型已就绪（{target_dir}）"
+            except Exception as exc:
+                logger.warning("Vector model download failed", exc_info=True)
+                with self._lock:
+                    job.status = "error"
+                    job.error = str(exc)
+                    job.message = f"下载失败：{exc}"
+
+        self._thread = threading.Thread(target=_worker, name="lumina-vector-model-dl", daemon=True)
+        self._thread.start()
+        return self.status()
+
+
+VECTOR_MODEL_DOWNLOAD_MANAGER = VectorModelDownloadManager()

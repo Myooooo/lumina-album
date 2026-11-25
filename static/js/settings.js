@@ -597,18 +597,29 @@ function paintModelDownloadJob(job) {
   if (closeBtn) closeBtn.classList.toggle("hidden", running);
 }
 
-function startModelDownloadPoll() {
+let activeModelDownloadKind = "face";
+
+function startModelDownloadPoll(kind = activeModelDownloadKind) {
+  activeModelDownloadKind = kind === "vector" ? "vector" : "face";
+  const statusUrl =
+    activeModelDownloadKind === "vector"
+      ? "/api/vectors/models/download/status"
+      : "/api/people/models/download/status";
   stopModelDownloadPoll();
   modelDownloadPollTimer = setInterval(async () => {
     if (modelDownloadPollInFlight) return;
     modelDownloadPollInFlight = true;
     try {
-      const data = await api("/api/people/models/download/status");
+      const data = await api(statusUrl);
       const job = data.job || {};
       paintModelDownloadJob(job);
       if (job.status !== "running") {
         stopModelDownloadPoll();
-        await paintPeopleEngineStatus();
+        if (activeModelDownloadKind === "vector") {
+          await refreshVectorEngineStatus();
+        } else {
+          await paintPeopleEngineStatus();
+        }
         if (job.status === "completed") {
           showToast(
             (job.message || "本地模型准备完成") +
@@ -648,7 +659,7 @@ async function downloadFaceModels() {
       showModal(modal);
       pushModal(modal);
     }
-    startModelDownloadPoll();
+    startModelDownloadPoll("face");
   } catch (e) {
     showToast("启动下载失败：" + e.message, "error");
   } finally {
@@ -656,9 +667,35 @@ async function downloadFaceModels() {
   }
 }
 
+async function downloadVectorModels() {
+  const btn = $("downloadVectorModelsBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const data = await api("/api/vectors/models/download", {
+      method: "POST",
+      body: JSON.stringify({ install_deps: true }),
+    });
+    const modal = $("modelDownloadModal");
+    paintModelDownloadJob(data.job || { status: "running", percent: 0, message: "正在准备本地向量模型…" });
+    if (modal) {
+      showModal(modal);
+      pushModal(modal);
+    }
+    startModelDownloadPoll("vector");
+  } catch (e) {
+    showToast("启动向量模型下载失败：" + e.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function cancelModelDownload() {
   try {
-    await api("/api/people/models/download/cancel", { method: "POST" });
+    const cancelUrl =
+      activeModelDownloadKind === "vector"
+        ? "/api/vectors/models/download/cancel"
+        : "/api/people/models/download/cancel";
+    await api(cancelUrl, { method: "POST" });
     showToast("正在取消模型下载…", "info");
   } catch (e) {
     showToast("取消失败：" + e.message, "error");
@@ -668,7 +705,11 @@ async function cancelModelDownload() {
 function closeModelDownloadModal() {
   stopModelDownloadPoll();
   closeModal("modelDownloadModal");
-  paintPeopleEngineStatus();
+  if (activeModelDownloadKind === "vector") {
+    refreshVectorEngineStatus();
+  } else {
+    paintPeopleEngineStatus();
+  }
 }
 
 async function copyFaceModelsPath() {
@@ -814,6 +855,7 @@ let vectorIndexPollTimer = null;
 
 async function refreshVectorEngineStatus() {
   const statusEl = $("vectorEngineStatus");
+  const pillsEl = $("vectorStatusPills");
   const startBtn = $("vectorIndexStartBtn");
   const cancelBtn = $("vectorIndexCancelBtn");
   if (!statusEl) return;
@@ -825,6 +867,22 @@ async function refreshVectorEngineStatus() {
     const running = job.status === "running";
     if (startBtn) startBtn.disabled = running;
     if (cancelBtn) cancelBtn.classList.toggle("hidden", !running);
+    if (pillsEl) {
+      const pills = [
+        { ok: true, text: `加速：${eng.accelerator || "CPU"}` },
+        {
+          ok: !!eng.clip_ready,
+          text: eng.clip_ready ? `CLIP 模型：已就绪 (${eng.active_model})` : "CLIP 模型：未安装（可一键下载）",
+        },
+        {
+          ok: (eng.indexed_count || 0) > 0,
+          text: `向量索引：${eng.indexed_count || 0} / ${eng.total_photos || 0} 张`,
+        },
+      ];
+      pillsEl.innerHTML = pills
+        .map((p) => `<span class="engine-pill ${p.ok ? "is-ok" : "is-warn"}">${escapeHtml(p.text)}</span>`)
+        .join("");
+    }
     if (running) {
       statusEl.textContent = job.message || `正在建立向量索引 ${job.done || 0}/${job.total || 0}…`;
       if (!vectorIndexPollTimer) {
@@ -835,8 +893,9 @@ async function refreshVectorEngineStatus() {
       }
       return;
     }
-    const modeLabel = eng.clip_ready ? `CLIP (${eng.active_model})` : "视觉特征向量 (内建)";
-    statusEl.textContent = `${modeLabel} · 已索引 ${eng.indexed_count || 0}/${eng.total_photos || 0} 张 · 加速：${eng.accelerator || "CPU"}`;
+    statusEl.textContent = eng.clip_ready
+      ? `本地 CLIP 向量引擎已就绪，目录：${eng.models_dir || ""}`
+      : `当前使用内建视觉向量（支持以图搜图与相似回忆）；点击下方「一键下载安装」可启用全库自然语言语义搜图。`;
   } catch (e) {
     statusEl.textContent = "无法读取向量引擎状态";
   }

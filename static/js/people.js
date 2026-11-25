@@ -305,7 +305,7 @@ function renderPeopleGrid(options = {}) {
   const titleEl = $("peopleTitle");
   const detailBar = $("peopleDetailBar");
   const pendingBanner = $("peoplePendingBanner");
-  const filterRow = $("peopleFilterRow");
+  const kindSwitch = $("peopleKindSwitch");
   if (!body) return;
 
   peopleState.currentPerson = null;
@@ -313,7 +313,7 @@ function renderPeopleGrid(options = {}) {
   if (titleEl) titleEl.textContent = "人物与宠物";
   if (detailBar) detailBar.classList.add("hidden");
   if (pendingBanner) pendingBanner.classList.add("hidden");
-  if (filterRow) filterRow.classList.remove("hidden");
+  if (kindSwitch) kindSwitch.classList.remove("hidden");
   syncPeopleKindSwitch();
 
   const items = peopleState.items || [];
@@ -506,12 +506,12 @@ function renderPersonDetail(payload) {
   const backBtn = $("peopleBackBtn");
   const titleEl = $("peopleTitle");
   const lede = $("peopleLede");
-  const filterRow = $("peopleFilterRow");
+  const kindSwitch = $("peopleKindSwitch");
   const detailBar = $("peopleDetailBar");
   const body = $("peopleBody");
 
   if (backBtn) backBtn.classList.remove("hidden");
-  if (filterRow) filterRow.classList.add("hidden");
+  if (kindSwitch) kindSwitch.classList.add("hidden");
   if (titleEl) titleEl.textContent = personDisplayName(person);
   if (lede) {
     const kindText = kindBadgeLabel(person.kind);
@@ -701,9 +701,9 @@ function initPeople() {
     });
   }
 
-  const filterRow = $("peopleFilterRow");
-  if (filterRow) {
-    filterRow.addEventListener("click", (e) => {
+  const kindSwitch = $("peopleKindSwitch");
+  if (kindSwitch) {
+    kindSwitch.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-people-kind]");
       if (!btn) return;
       peopleState.kind = btn.dataset.peopleKind || "all";

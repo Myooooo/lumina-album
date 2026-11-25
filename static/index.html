@@ -364,6 +364,12 @@
           <span id="peopleSilentBadge" class="people-silent-badge hidden" role="status">
             <span class="people-silent-dot" aria-hidden="true"></span>后台静默扫描中
           </span>
+          <div class="view-switcher people-kind-switch" id="peopleKindSwitch" role="tablist" aria-label="按类型筛选">
+            <span class="view-ink people-kind-ink" id="peopleKindInk" aria-hidden="true"></span>
+            <button type="button" class="view-tab people-kind-btn is-active" role="tab" aria-selected="true" data-people-kind="all">全部</button>
+            <button type="button" class="view-tab people-kind-btn" role="tab" aria-selected="false" data-people-kind="person"><span class="btn-icon" data-icon="people"></span>人物</button>
+            <button type="button" class="view-tab people-kind-btn" role="tab" aria-selected="false" data-people-kind="pet"><span class="btn-icon" data-icon="paw"></span>宠物猫狗</button>
+          </div>
           <button id="peopleScanBtn" class="btn primary" type="button" title="后台增量扫描新照片中的人物与宠物">
             <span class="btn-icon" data-icon="sparkles"></span>扫描识别
           </button>
@@ -375,14 +381,6 @@
           </button>
         </div>
       </header>
-      <div id="peopleFilterRow" class="people-filter-row">
-        <div class="view-switcher people-kind-switch" id="peopleKindSwitch" role="tablist" aria-label="按类型筛选">
-          <span class="view-ink people-kind-ink" id="peopleKindInk" aria-hidden="true"></span>
-          <button type="button" class="view-tab people-kind-btn is-active" role="tab" aria-selected="true" data-people-kind="all">全部</button>
-          <button type="button" class="view-tab people-kind-btn" role="tab" aria-selected="false" data-people-kind="person"><span class="btn-icon" data-icon="people"></span>人物</button>
-          <button type="button" class="view-tab people-kind-btn" role="tab" aria-selected="false" data-people-kind="pet"><span class="btn-icon" data-icon="paw"></span>宠物猫狗</button>
-        </div>
-      </div>
       <div id="peopleScanProgress" class="scan-progress people-scan-progress hidden" role="status" aria-live="polite">
         <div class="progress-text">
           <span id="peopleScanProgressText">正在识别人物与宠物…</span>
@@ -513,18 +511,20 @@
       </header>
 
       <div class="duplicates-toolbar">
-        <label class="duplicates-similarity">
-          <span>比对方式</span>
-          <select id="dupModeSelect" class="dup-mode-select" data-no-custom>
-            <option value="phash">感知哈希</option>
-            <option value="vector">向量语义</option>
-          </select>
-        </label>
-        <label class="duplicates-similarity">
-          <span>相似程度</span>
-          <input id="dupThreshold" type="range" min="0" max="12" step="1" value="6" />
-          <output id="dupThresholdLabel">宽松</output>
-        </label>
+        <div class="duplicates-controls-left">
+          <label class="duplicates-similarity duplicates-mode-control">
+            <span>比对方式</span>
+            <select id="dupModeSelect" class="dup-mode-select">
+              <option value="phash">感知哈希</option>
+              <option value="vector">向量语义</option>
+            </select>
+          </label>
+          <label class="duplicates-similarity duplicates-range-control">
+            <span>相似程度</span>
+            <input id="dupThreshold" type="range" min="0" max="12" step="1" value="6" />
+            <output id="dupThresholdLabel">宽松</output>
+          </label>
+        </div>
         <div class="duplicates-toolbar-actions">
           <button id="dupSelectAllBtn" class="btn small" type="button">
             <span class="btn-icon" data-icon="check"></span>全部只留一张
@@ -696,15 +696,14 @@
           </div>
           <div class="settings-section">
             <h3 class="settings-section-title">本地向量搜图引擎</h3>
-            <div class="vector-engine-row">
-              <div class="vector-engine-meta">
-                <div id="vectorEngineStatus" class="vector-engine-status">正在检查向量索引状态…</div>
-                <div id="vectorIndexHint" class="form-hint">支持本地视觉向量以图搜图与向量相似回忆；放入 CLIP ONNX 模型后支持全库自然语言向量搜图。</div>
-              </div>
-              <div class="vector-engine-actions">
-                <button id="vectorIndexStartBtn" class="btn small" type="button"><span class="btn-icon" data-icon="sparkles"></span>建立向量索引</button>
-                <button id="vectorIndexCancelBtn" class="btn small danger hidden" type="button"><span class="btn-icon" data-icon="close"></span>取消</button>
-              </div>
+            <p class="settings-section-desc">复用本地硬件加速提取图像与文本向量；安装 CLIP ONNX 模型后，「探索回忆」将自动升级为毫秒级全库语义搜图。</p>
+            <div class="settings-status" id="vectorEngineStatus">正在检测本地向量引擎与索引状态…</div>
+            <div class="engine-status-pills" id="vectorStatusPills"></div>
+            <div class="settings-row-actions people-engine-actions">
+              <button id="downloadVectorModelsBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="import"></span>一键下载安装</button>
+              <button id="vectorIndexStartBtn" class="btn" type="button"><span class="btn-icon" data-icon="scan"></span>建立向量索引</button>
+              <button id="vectorIndexCancelBtn" class="btn danger hidden" type="button"><span class="btn-icon" data-icon="close"></span>取消索引</button>
+              <button id="refreshVectorStatusBtn" class="btn" type="button"><span class="btn-icon" data-icon="sync"></span>重新检测</button>
             </div>
           </div>
         </section>
@@ -1395,7 +1394,7 @@
       <h2><span class="modal-title-icon" data-icon="smartAlbum"></span>虚拟智能影集</h2>
       <div class="smart-albums-create-row">
         <input id="smartAlbumNameInput" type="text" maxlength="40" placeholder="将当前筛选/搜索存为新影集，输入名称…" />
-        <button id="createSmartAlbumBtn" class="btn primary small" type="button"><span class="btn-icon" data-icon="check"></span>存为影集</button>
+        <button id="createSmartAlbumBtn" class="btn primary" type="button"><span class="btn-icon" data-icon="check"></span>存为影集</button>
       </div>
       <div id="smartAlbumsList" class="modal-body smart-albums-modal-body">
         <div class="people-empty">还没有创建智能影集</div>

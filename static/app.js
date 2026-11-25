@@ -425,6 +425,10 @@ function init() {
   });
 
   $("saveSettingsBtn").addEventListener("click", saveSettings);
+  const dlVecBtn = $("downloadVectorModelsBtn");
+  if (dlVecBtn) dlVecBtn.addEventListener("click", downloadVectorModels);
+  const refreshVecBtn = $("refreshVectorStatusBtn");
+  if (refreshVecBtn) refreshVecBtn.addEventListener("click", refreshVectorEngineStatus);
   const vecStartBtn = $("vectorIndexStartBtn");
   if (vecStartBtn) vecStartBtn.addEventListener("click", startVectorIndex);
   const vecCancelBtn = $("vectorIndexCancelBtn");
