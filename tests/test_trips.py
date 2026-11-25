@@ -49,10 +49,11 @@ class TripsAndThemedExportTest(unittest.TestCase):
     def test_build_html_supports_three_themes(self) -> None:
         if not _HAS_EXPORTER:
             # Verify theme definitions are present in exporter.py even without Pillow.
-            src = open(
-                os.path.join(os.path.dirname(__file__), "..", "photo_reviewer", "exporter.py"),
-                encoding="utf-8",
-            ).read()
+            exporter_path = os.path.join(
+                os.path.dirname(__file__), "..", "photo_reviewer", "exporter.py"
+            )
+            with open(exporter_path, encoding="utf-8") as fh:
+                src = fh.read()
             self.assertIn("_HTML_THEME_OVERRIDES", src)
             self.assertIn("_TALL_THEMES", src)
             self.assertIn("#121110", src)

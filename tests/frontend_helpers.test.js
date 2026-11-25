@@ -2222,6 +2222,15 @@ section("people & pets (人物与宠物)");
       /e\.key === "x"/.test(src),
     true
   );
+  check(
+    "Phase 4 cross-folder all-visible view & Virtual Smart Albums are wired",
+    /id="smartAlbumsBar"/.test(indexHtml) &&
+      /id="saveSmartAlbumBtn"/.test(indexHtml) &&
+      /全部可见相册/.test(src) &&
+      /function saveCurrentSmartAlbum\(/.test(src) &&
+      /function applySmartAlbum\(/.test(src),
+    true
+  );
 }
 
 console.log(

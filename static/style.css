@@ -14630,3 +14630,83 @@ body[data-theme="vintage"] .fp-route-dot {
 body[data-theme="vintage"] .compare-quality-bar {
   color: #f4b165;
 }
+
+/* ==========================================================================
+   Phase 4: Virtual Smart Albums Strip (3-theme coordinated)
+   ========================================================================== */
+
+.smart-albums-bar {
+  max-width: var(--page-max, 1400px);
+  margin: 0 auto 12px;
+  padding: 6px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.smart-albums-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.smart-albums-empty {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.smart-album-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-solid);
+  overflow: hidden;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.smart-album-chip:hover {
+  border-color: var(--primary);
+}
+
+.smart-album-chip-btn {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 4px 8px 4px 12px;
+  cursor: pointer;
+}
+
+.smart-album-chip-del {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 4px 9px 4px 4px;
+  cursor: pointer;
+}
+
+.smart-album-chip-del:hover {
+  color: var(--danger, #c44536);
+}
+
+body[data-theme="paper"] .smart-album-chip {
+  border-radius: 2px;
+  border-color: var(--ink-line, #2a241e);
+}
+
+body[data-theme="vintage"] .smart-album-chip {
+  border-radius: 2px;
+  background: #1b1714;
+  border-color: rgba(235, 146, 52, 0.28);
+}
+
+body[data-theme="vintage"] .smart-album-chip-btn {
+  color: #f3e8d8;
+}

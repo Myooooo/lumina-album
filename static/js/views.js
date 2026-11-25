@@ -1373,21 +1373,26 @@ async function toggleFolderHistory() {
     showToast("读取文件夹列表失败：" + e.message, "error");
   }
   const entries = folderHistoryEntries(indexed);
+  const allRow = entries.length
+    ? `<div class="folder-history-item folder-history-all" role="option" data-path="__all__" title="跨目录浏览所有可见相册（自动排除已隐藏目录）">${ICONS.collection || ""}<span class="history-name">全部可见相册</span><span class="history-tags"><span class="history-tag recent">全库</span></span></div>`
+    : "";
   if (!entries.length) {
     panel.innerHTML = `<div class="folder-history-empty">${ICONS.history || ""} 还没有整理过的文件夹</div>`;
   } else {
-    panel.innerHTML = entries
-      .map((entry) => {
-        const tags = [...entry.tags]
-          .map(
-            (t) =>
-              `<span class="history-tag${t === "最近" ? " recent" : ""}">${escapeHtml(t)}</span>`
-          )
-          .join("");
-        const tagHtml = tags ? `<span class="history-tags">${tags}</span>` : "";
-        return `<div class="folder-history-item" role="option" data-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">${ICONS.folder || ""}<span class="history-name">${escapeHtml(entry.path)}</span>${tagHtml}</div>`;
-      })
-      .join("");
+    panel.innerHTML =
+      allRow +
+      entries
+        .map((entry) => {
+          const tags = [...entry.tags]
+            .map(
+              (t) =>
+                `<span class="history-tag${t === "最近" ? " recent" : ""}">${escapeHtml(t)}</span>`
+            )
+            .join("");
+          const tagHtml = tags ? `<span class="history-tags">${tags}</span>` : "";
+          return `<div class="folder-history-item" role="option" data-path="${escapeHtml(entry.path)}" title="${escapeHtml(entry.path)}">${ICONS.folder || ""}<span class="history-name">${escapeHtml(entry.path)}</span>${tagHtml}</div>`;
+        })
+        .join("");
     panel.querySelectorAll(".folder-history-item").forEach((el) => {
       el.addEventListener("click", () => {
         selectFolder(el.dataset.path);
@@ -1412,15 +1417,22 @@ async function toggleFolderHistory() {
  * backend restart has to land back on the last visible one.
  */
 function openAlbumFolder(folder) {
-  const clean = String(folder || "").trim();
-  if (!clean) return;
+  const raw = String(folder || "").trim();
+  if (!raw) return;
+  if (raw === "__all__" || raw === "全部可见相册") {
+    state.folderHidden = false;
+    $("folderInput").value = "全部可见相册";
+    paintFolderHiddenBadge();
+    saveUiState({ folder: "__all__" });
+    applyFolderChange("__all__");
+    return;
+  }
+  const clean = raw;
   const hidden = isHiddenFolder(clean);
   state.folderHidden = hidden;
   $("folderInput").value = clean;
   paintFolderHiddenBadge();
   if (hidden) {
-    // Keep it out of the in-memory history too: the dropdown is a path
-    // selector, and hidden albums do not belong there.
     state.folderHistory = state.folderHistory.filter(
       (item) => folderPathKey(item) !== folderPathKey(clean)
     );
@@ -1428,8 +1440,6 @@ function openAlbumFolder(folder) {
     rememberFolder(clean);
     saveUiState({ folder: clean });
   }
-  // Goes through the shared path so the filters and the search box are cleared
-  // first: a query written for the previous album must not be re-sent.
   applyFolderChange(clean);
 }
 

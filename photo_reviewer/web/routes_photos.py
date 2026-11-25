@@ -32,6 +32,7 @@ from .helpers import (
     _ensure_exif,
     _file_size,
     _photo_payload,
+    hidden_folder_list,
 )
 
 
@@ -40,7 +41,9 @@ def register(app, cfg, database):
 
     @app.get("/api/photos")
     def api_photos():
-        folder = request.args.get("folder", "").strip() or None
+        raw_folder = request.args.get("folder", "").strip()
+        folder = None if (not raw_folder or raw_folder == "__all__") else raw_folder
+        exclude_folders = hidden_folder_list(database) if folder is None else None
         status_raw = request.args.get("status", "").strip()
         search = request.args.get("search", "").strip() or None
         tag = request.args.get("tag", "").strip() or None
@@ -107,6 +110,7 @@ def register(app, cfg, database):
             limit=fetch_limit,
             offset=offset,
             kind=kind,
+            exclude_folders=exclude_folders,
         )
         has_more = len(photos) > requested_limit
         photos = photos[:requested_limit]
@@ -350,8 +354,10 @@ def register(app, cfg, database):
 
     @app.get("/api/stats")
     def api_stats():
-        folder = request.args.get("folder", "").strip() or None
-        return jsonify(database.stats(folder))
+        raw_folder = request.args.get("folder", "").strip()
+        folder = None if (not raw_folder or raw_folder == "__all__") else raw_folder
+        exclude_folders = hidden_folder_list(database) if folder is None else None
+        return jsonify(database.stats(folder, exclude_folders=exclude_folders))
 
     @app.get("/api/photo/<int:photo_id>")
     def api_photo(photo_id: int):
@@ -454,3 +460,25 @@ def register(app, cfg, database):
         except OSError as exc:
             return jsonify({"error": f"导出失败：{exc}"}), 500
         return jsonify(report)
+
+    @app.get("/api/smart-albums")
+    def api_list_smart_albums():
+        return jsonify({"albums": database.list_smart_albums()})
+
+    @app.post("/api/smart-albums")
+    def api_create_smart_album():
+        data = request.get_json(force=True, silent=True) or {}
+        name = (data.get("name") or "").strip()
+        rules = data.get("rules") if isinstance(data.get("rules"), dict) else {}
+        try:
+            album = database.create_smart_album(name, rules)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(album), 201
+
+    @app.delete("/api/smart-albums/<int:album_id>")
+    def api_delete_smart_album(album_id: int):
+        deleted = database.delete_smart_album(album_id)
+        if not deleted:
+            return jsonify({"error": "智能影集不存在"}), 404
+        return jsonify({"deleted": True, "id": album_id})

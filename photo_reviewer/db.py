@@ -11,6 +11,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from .paths import canonical_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -519,6 +521,13 @@ class Database:
                         PRIMARY KEY (photo_id, model)
                     );
                     CREATE INDEX IF NOT EXISTS idx_photo_embeddings_model ON photo_embeddings(model);
+                    CREATE TABLE IF NOT EXISTS smart_albums (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        rules TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
                     """
                 )
                 conn.commit()
@@ -678,12 +687,19 @@ class Database:
         limit: int = 1000,
         offset: int = 0,
         kind: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
+        elif exclude_folders:
+            cleaned_ex = list({v for f in exclude_folders if f for v in (str(f), canonical_path(f)) if v})
+            if cleaned_ex:
+                placeholders = ",".join("?" for _ in cleaned_ex)
+                clauses.append(f"folder NOT IN ({placeholders})")
+                params.extend(cleaned_ex)
         if status == "pending":
             clauses.append("status IN ('pending','error')")
         elif status:
@@ -691,9 +707,6 @@ class Database:
             params.append(status)
         if exclude_deleted:
             clauses.append("status != 'deleted'")
-        # The type filter. "照片" deliberately includes the stills that carry a
-        # motion clip: from the user's side those are photographs that happen to
-        # move, and hiding them behind a fourth tab would be a surprise.
         if kind == "video":
             clauses.append("COALESCE(media_kind, 'photo') = 'video'")
         elif kind == "photo":
@@ -710,9 +723,9 @@ class Database:
             clauses.append("score <= ?")
             params.append(max_score)
         if search:
-            clauses.append("(filename LIKE ? OR reason LIKE ? OR tags LIKE ?)")
+            clauses.append("(filename LIKE ? OR title LIKE ? OR reason LIKE ? OR tags LIKE ? OR location LIKE ?)")
             like = f"%{search}%"
-            params.extend([like, like, like])
+            params.extend([like, like, like, like, like])
         if tag:
             # tags is stored as a JSON array, e.g. ["风景","模糊"].
             # Match the JSON string form of the tag to avoid partial word matches.
@@ -759,12 +772,22 @@ class Database:
             rows = conn.execute(sql, params).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
-    def stats(self, folder: str | None = None) -> dict[str, int]:
+    def stats(
+        self,
+        folder: str | None = None,
+        exclude_folders: Sequence[str] | None = None,
+    ) -> dict[str, int]:
         clauses = []
         params: list[Any] = []
         if folder:
             clauses.append("folder = ?")
             params.append(folder)
+        elif exclude_folders:
+            cleaned_ex = list({v for f in exclude_folders if f for v in (str(f), canonical_path(f)) if v})
+            if cleaned_ex:
+                placeholders = ",".join("?" for _ in cleaned_ex)
+                clauses.append(f"folder NOT IN ({placeholders})")
+                params.extend(cleaned_ex)
         where = "WHERE " + " AND ".join(clauses) if clauses else ""
         and_clause = " AND " if where else " WHERE "
         active_clause = (
@@ -2912,7 +2935,7 @@ class Database:
                         JOIN photos p ON p.id = e.photo_id
                         WHERE e.model=? AND p.folder=? AND p.status != 'deleted'
                         """,
-                        (str(model), canonical_folder(folder)),
+                        (str(model), canonical_path(folder)),
                     ).fetchone()
                 else:
                     row = conn.execute(
@@ -2925,6 +2948,70 @@ class Database:
                         (str(model),),
                     ).fetchone()
                 return int(row["c"]) if row else 0
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Virtual Smart Albums (saved filter/search rules)
+    # ------------------------------------------------------------------
+
+    def list_smart_albums(self) -> list[dict[str, Any]]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    "SELECT id, name, rules, created_at, updated_at FROM smart_albums ORDER BY id DESC"
+                ).fetchall()
+                out: list[dict[str, Any]] = []
+                for r in rows:
+                    try:
+                        rules = json.loads(r["rules"]) if r["rules"] else {}
+                    except (TypeError, ValueError):
+                        rules = {}
+                    out.append(
+                        {
+                            "id": int(r["id"]),
+                            "name": r["name"],
+                            "rules": rules if isinstance(rules, dict) else {},
+                            "created_at": r["created_at"],
+                            "updated_at": r["updated_at"],
+                        }
+                    )
+                return out
+            finally:
+                conn.close()
+
+    def create_smart_album(self, name: str, rules: dict[str, Any]) -> dict[str, Any]:
+        clean_name = (name or "").strip()[:40]
+        if not clean_name:
+            raise ValueError("影集名称不能为空")
+        now = utc_now()
+        rules_json = json.dumps(rules or {}, ensure_ascii=False)
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "INSERT INTO smart_albums (name, rules, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (clean_name, rules_json, now, now),
+                )
+                conn.commit()
+                return {
+                    "id": int(cur.lastrowid),
+                    "name": clean_name,
+                    "rules": dict(rules or {}),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            finally:
+                conn.close()
+
+    def delete_smart_album(self, album_id: int) -> bool:
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute("DELETE FROM smart_albums WHERE id=?", (int(album_id),))
+                conn.commit()
+                return cur.rowcount > 0
             finally:
                 conn.close()
 

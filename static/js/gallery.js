@@ -9,6 +9,115 @@ function hideSimilarSearchBanner() {
   state.similarTargetId = null;
 }
 
+async function loadSmartAlbums() {
+  try {
+    const data = await api("/api/smart-albums");
+    state.smartAlbums = data.albums || [];
+    renderSmartAlbums();
+  } catch (_e) {
+    // Non-critical strip
+  }
+}
+
+function renderSmartAlbums() {
+  const list = $("smartAlbumsList");
+  if (!list) return;
+  const albums = state.smartAlbums || [];
+  if (!albums.length) {
+    list.innerHTML = '<span class="smart-albums-empty">可将任意筛选/搜索组合存为虚拟智能影集</span>';
+    return;
+  }
+  list.innerHTML = albums
+    .map(
+      (a) =>
+        `<span class="smart-album-chip" data-smart-album-id="${a.id}"><button type="button" class="smart-album-chip-btn" data-smart-apply="${a.id}">${escapeHtml(a.name)}</button><button type="button" class="smart-album-chip-del" data-smart-del="${a.id}" title="删除影集" aria-label="删除影集">×</button></span>`
+    )
+    .join("");
+  list.querySelectorAll("[data-smart-apply]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.smartApply);
+      const album = (state.smartAlbums || []).find((x) => x.id === id);
+      if (album) applySmartAlbum(album);
+    });
+  });
+  list.querySelectorAll("[data-smart-del]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSmartAlbum(Number(btn.dataset.smartDel));
+    });
+  });
+}
+
+function applySmartAlbum(album) {
+  const r = (album && album.rules) || {};
+  if (r.folder) {
+    state.folder = r.folder;
+    const inp = $("folderInput");
+    if (inp) inp.value = r.folder === "__all__" ? "全部可见相册" : r.folder;
+  }
+  if (r.status !== undefined) setSelectValue($("statusFilter"), r.status || "all");
+  if (r.kind !== undefined) setSelectValue($("kindFilter"), r.kind || "");
+  if (r.min_score !== undefined) setSelectValue($("minScoreFilter"), r.min_score || "");
+  if (r.tag !== undefined) setSelectValue($("tagFilter"), r.tag || "");
+  if (r.year !== undefined) setSelectValue($("yearFilter"), r.year || "");
+  if (r.favorite !== undefined) setSelectValue($("favoriteFilter"), r.favorite || "");
+  if (r.sort !== undefined) setSelectValue($("sortFilter"), r.sort || "score_desc");
+  if (r.search_mode !== undefined) setSelectValue($("searchMode"), r.search_mode || "smart");
+  const searchEl = $("searchInput");
+  if (searchEl && r.search !== undefined) searchEl.value = r.search || "";
+  if (state.view !== "album") showView("album");
+  loadPhotos();
+  showToast(`已打开智能影集「${album.name}」`, "info");
+}
+
+async function saveCurrentSmartAlbum() {
+  const ans = await confirmDialog("将当前的目录范围、筛选条件与搜索词保存为一个虚拟智能影集（不挪动原图）。", {
+    title: "存为虚拟智能影集",
+    confirmText: "保存影集",
+    input: { label: "影集名称", value: "", placeholder: "例如：京都 8.5+ 精选、全部猫咪" },
+  });
+  if (!ans || !ans.confirmed) return;
+  const name = (ans.value || "").trim();
+  if (!name) {
+    showToast("请填写影集名称", "warning");
+    return;
+  }
+  const rules = {
+    folder: state.folder || "__all__",
+    status: $("statusFilter").value,
+    kind: $("kindFilter").value,
+    min_score: $("minScoreFilter").value,
+    tag: $("tagFilter").value,
+    year: $("yearFilter").value,
+    favorite: $("favoriteFilter").value,
+    sort: $("sortFilter").value,
+    search_mode: $("searchMode").value,
+    search: $("searchInput").value.trim(),
+  };
+  try {
+    await api("/api/smart-albums", {
+      method: "POST",
+      body: JSON.stringify({ name, rules }),
+    });
+    showToast(`已保存智能影集「${name}」`, "success");
+    loadSmartAlbums();
+  } catch (e) {
+    showToast("保存智能影集失败：" + e.message, "error");
+  }
+}
+
+async function deleteSmartAlbum(albumId) {
+  if (!albumId) return;
+  try {
+    await api(`/api/smart-albums/${albumId}`, { method: "DELETE" });
+    state.smartAlbums = (state.smartAlbums || []).filter((a) => a.id !== albumId);
+    renderSmartAlbums();
+    showToast("已删除智能影集", "info");
+  } catch (e) {
+    showToast("删除失败：" + e.message, "error");
+  }
+}
+
 async function findSimilarPhotos(photoId) {
   if (!photoId) return;
   showLoading("正在按视觉向量寻找相似画面…");

@@ -136,6 +136,11 @@ function init() {
       loadPhotos();
     });
   }
+  const saveSmartBtn = $("saveSmartAlbumBtn");
+  if (saveSmartBtn) {
+    saveSmartBtn.addEventListener("click", saveCurrentSmartAlbum);
+  }
+  if (typeof loadSmartAlbums === "function") loadSmartAlbums();
 
   $("deleteSelectedBtn").addEventListener("click", () => deletePhotos([...state.selected]));
   $("restoreSelectedBtn").addEventListener("click", () => restorePhotos([...state.selected]));
