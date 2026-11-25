@@ -1541,13 +1541,35 @@ section("photobook layout and motion system");
     true
   );
   check(
-    "the modal dims the header but the root-only scroll lock keeps it sticky",
+    "the modal centers vertically with symmetric padding and root-only scroll lock",
     /\.modal \{[^}]*inset: 0;/.test(css) &&
-      /padding: calc\(var\(--topbar-height, 0px\) \+ 24px\) 24px 24px;/.test(css) &&
+      /\.modal \{[^}]*padding: 24px;/.test(css) &&
       /html\.modal-open \{[^}]*overflow: hidden;/.test(css) &&
       /html\.modal-open \{[^}]*scrollbar-gutter: stable;/.test(css) &&
       !/body\.modal-open \{[^}]*overflow: hidden;/.test(css) &&
       /classList\.contains\("modal-open"\)/.test(src),
+    true
+  );
+  check(
+    "custom select menus portal to body and flip upward near viewport bottom",
+    /document\.body\.appendChild\(menu\)/.test(src) &&
+      /is-dropup/.test(src) &&
+      /\.custom-select-menu\.is-dropup\.open/.test(css) &&
+      /@keyframes dropdownUpIn/.test(css),
+    true
+  );
+  check(
+    "no undefined var(--surface) fallback remains in style.css",
+    !/var\(--surface\b/.test(css) && !/var\(--surface-2\b/.test(css),
+    true
+  );
+  check(
+    "footprints map and place dialogs have three-theme overrides and animations",
+    /body\[data-theme="paper"\] \.footprints-map-drawer/.test(css) &&
+      /body\[data-theme="vintage"\] \.place-picker-card/.test(css) &&
+      /body\[data-theme="vintage"\] \.fp-map-error-banner/.test(css) &&
+      /@keyframes fpDrawerIn/.test(css) &&
+      /@keyframes fpBannerIn/.test(css),
     true
   );
   check(

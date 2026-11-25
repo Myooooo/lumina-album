@@ -84,7 +84,16 @@ window.LuminaUI = (() => {
    * ``onHidden`` runs once the dialog is really gone, so callers can chain
    * whatever follows without racing the animation.
    */
+  const openSelectClosers = new Set();
+
+  function closeAllSelectMenus(exceptCloser) {
+    openSelectClosers.forEach((fn) => {
+      if (fn !== exceptCloser) fn(true);
+    });
+  }
+
   function hideModal(el, onHidden) {
+    closeAllSelectMenus();
     if (!el || el.classList.contains("hidden")) {
       syncModalScrollLock();
       if (typeof onHidden === "function") onHidden();
@@ -128,7 +137,10 @@ window.LuminaUI = (() => {
   }
 
  /**
-   * Custom stylized dropdown wrapper with fluid transitions
+   * Custom stylized dropdown wrapper with fluid transitions.
+   * Portals to document.body while open so scrollable / overflow-hidden modals
+   * (e.g. Settings -> 地点 -> 地图底图源) and backdrop-filter layers never clip it,
+   * and flips upward automatically when near the bottom of the viewport.
    */
   function enhanceSelect(select) {
     if (!select || select.dataset.enhanced || select.dataset.noCustom) return;
@@ -182,60 +194,137 @@ window.LuminaUI = (() => {
       });
     }
 
+    function positionMenu() {
+      const rect = trigger.getBoundingClientRect();
+      const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+      const vh = window.innerHeight || document.documentElement.clientHeight || 768;
+      const gap = 5;
+      const margin = 10;
+      const width = Math.max(rect.width, 120);
+      const left = Math.max(margin, Math.min(rect.left, vw - width - margin));
+
+      menu.style.position = "fixed";
+      menu.style.left = `${Math.round(left)}px`;
+      menu.style.right = "auto";
+      menu.style.width = `${Math.round(width)}px`;
+
+      // Measure desired height (capped at 240px) before deciding up vs down.
+      menu.style.maxHeight = "240px";
+      const naturalHeight = Math.min(240, menu.scrollHeight + 12 || 200);
+      const spaceBelow = vh - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      const openUp = spaceBelow < naturalHeight && spaceAbove > spaceBelow;
+
+      if (openUp) {
+        menu.classList.add("is-dropup");
+        menu.style.top = "auto";
+        menu.style.bottom = `${Math.round(vh - rect.top + gap)}px`;
+        menu.style.maxHeight = `${Math.min(240, Math.max(110, Math.floor(spaceAbove - gap)))}px`;
+      } else {
+        menu.classList.remove("is-dropup");
+        menu.style.bottom = "auto";
+        menu.style.top = `${Math.round(rect.bottom + gap)}px`;
+        menu.style.maxHeight = `${Math.min(240, Math.max(110, Math.floor(spaceBelow - gap)))}px`;
+      }
+
+      const dialog = wrapper.closest(".modal");
+      if (dialog && dialog._luminaLayer) {
+        menu.style.zIndex = String(dialog._luminaLayer + 20);
+      } else {
+        menu.style.zIndex = "1600";
+      }
+    }
+
+    function onViewportScroll(e) {
+      if (e && e.target && (e.target === menu || menu.contains(e.target))) return;
+      close(true);
+    }
+
+    function onViewportResize() {
+      close(true);
+    }
+
+    function onKeyDown(e) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+        trigger.focus();
+      }
+    }
+
+    function detachPortal() {
+      window.removeEventListener("scroll", onViewportScroll, true);
+      window.removeEventListener("resize", onViewportResize);
+      document.removeEventListener("keydown", onKeyDown, true);
+      openSelectClosers.delete(close);
+      menu.classList.remove("is-dropup");
+      menu.style.position = "";
+      menu.style.top = "";
+      menu.style.bottom = "";
+      menu.style.left = "";
+      menu.style.right = "";
+      menu.style.width = "";
+      menu.style.maxHeight = "";
+      menu.style.zIndex = "";
+      if (menu.parentNode !== wrapper) {
+        wrapper.appendChild(menu);
+      }
+    }
+
     function open() {
+      closeAllSelectMenus(close);
       if (exitTimer) {
         clearTimeout(exitTimer);
         exitTimer = null;
       }
       buildMenu();
+      if (document.body && menu.parentNode !== document.body) {
+        document.body.appendChild(menu);
+      }
       menu.classList.remove("closing");
       menu.classList.add("open");
+      positionMenu();
       trigger.classList.add("open");
       trigger.setAttribute("aria-expanded", "true");
+      openSelectClosers.add(close);
+      window.addEventListener("scroll", onViewportScroll, true);
+      window.addEventListener("resize", onViewportResize);
+      document.addEventListener("keydown", onKeyDown, true);
     }
 
-    function close() {
+    function close(immediate = false) {
       if (!menu.classList.contains("open")) return;
+      if (exitTimer) {
+        clearTimeout(exitTimer);
+        exitTimer = null;
+      }
       trigger.classList.remove("open");
       trigger.setAttribute("aria-expanded", "false");
+      if (immediate || prefersReducedMotion()) {
+        menu.classList.remove("open", "closing");
+        detachPortal();
+        return;
+      }
       menu.classList.add("closing");
       exitTimer = setTimeout(() => {
         exitTimer = null;
         menu.classList.remove("open", "closing");
-      }, prefersReducedMotion() ? 0 : EXIT_MS);
+        detachPortal();
+      }, EXIT_MS);
     }
 
     trigger.addEventListener("click", (e) => {
       e.stopPropagation();
       if (menu.classList.contains("open")) close();
-      else {
-        document.querySelectorAll(".custom-select-menu.open").forEach((m) => m.classList.remove("open"));
-        document.querySelectorAll(".custom-select-trigger.open").forEach((t) => t.classList.remove("open"));
-        open();
-      }
+      else open();
     });
 
     document.addEventListener("click", (e) => {
-      if (!wrapper.contains(e.target)) close();
+      if (!wrapper.contains(e.target) && !menu.contains(e.target)) close();
     });
 
     select.classList.add("native-hidden");
     updateLabel();
-
-    // A dropdown must cover the dialog it lives in. The dialogs take 1100+ layers
-    // from `showModal`, so the menu cannot use a constant: it reads the owning
-    // dialog's layer when it opens and sits just above it.
-    if (menu) {
-      const ownerLayer = () => {
-        const dialog = wrapper.closest(".modal");
-        if (!dialog || !dialog._luminaLayer) return "";
-        return String(dialog._luminaLayer + 1);
-      };
-      trigger.addEventListener("click", () => {
-        const value = ownerLayer();
-        menu.style.zIndex = value;
-      });
-    }
   }
 
   function setSelectValue(select, value) {

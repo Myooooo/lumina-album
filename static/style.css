@@ -947,6 +947,11 @@ svg {
   transform-origin: top center;
 }
 
+.custom-select-menu.is-dropup.open {
+  animation: dropdownUpIn var(--dur-fast) var(--ease-out);
+  transform-origin: bottom center;
+}
+
 .custom-select-option {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
@@ -1859,11 +1864,9 @@ select {
   align-items: center;
   justify-content: center;
   z-index: 100;
-  /* The dim/blur layer covers the header (so it recedes with the rest of the
-     page), but the dialog itself starts below it, leaving the sticky header
-     visible as part of that dimmed background rather than hidden behind the
-     dialog card. */
-  padding: calc(var(--topbar-height, 0px) + 24px) 24px 24px;
+  /* Symmetric viewport padding keeps every dialog truly centered vertically
+     and horizontally while the dim/blur backdrop covers the sticky header. */
+  padding: 24px;
   animation: modalBackdrop 200ms var(--ease-out) both;
 }
 
@@ -1890,7 +1893,7 @@ select {
   padding: 30px 32px 28px;
   max-width: 960px;
   width: 100%;
-  max-height: min(92vh, calc(100vh - var(--topbar-height, 0px) - 48px));
+  max-height: min(90vh, calc(100vh - 48px));
   overflow: auto;
   position: relative;
   box-shadow: var(--shadow-modal), inset 0 1px 0 rgba(255, 255, 255, 0.9);
@@ -4168,6 +4171,14 @@ select {
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(-3px) scale(0.98); }
 }
+@keyframes dropdownUpIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes dropdownUpOut {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(3px) scale(0.98); }
+}
 
 /* ---------- Exit animations (faster than entrances, synced with EXIT_MS = 170) ---------- */
 .modal.closing {
@@ -4199,6 +4210,9 @@ select {
   display: block;
   animation: dropdownOut var(--dur-press) var(--ease-out) both;
   pointer-events: none;
+}
+.custom-select-menu.is-dropup.closing {
+  animation: dropdownUpOut var(--dur-press) var(--ease-out) both;
 }
 
 /* ---------- Scrollbars & Responsive ---------- */
@@ -4333,10 +4347,12 @@ select {
   .modal, .modal-content, .preview-body img, .polaroid-card,
   .preview-switch-left, .preview-switch-right, .stat, .btn,
   .card-status.state-connected::before, .folder-history, .folder-history-item,
-  .custom-select-menu, .settings-pane, .card-pending-dot, .toast,
+  .custom-select-menu, .custom-select-menu.is-dropup, .settings-pane, .card-pending-dot, .toast,
   .back-to-top, .back-to-top-ring, .back-to-top .btn-icon,
   .live-badge, .live-badge-chip,
-  .preview-sound-btn, .preview-video-pause {
+  .preview-sound-btn, .preview-video-pause,
+  .footprints-map-wrap, .footprints-map-drawer, .fp-map-error-banner,
+  .fp-map-pin, .fp-map-tile, .place-picker-card, .place-geocode-item {
     animation: none !important;
     transition: none !important;
   }
@@ -4359,7 +4375,8 @@ select {
     }
   }
   /* Exit animations are skipped entirely; js/ui-kit.js hides immediately. */
-  .modal.closing, .custom-select-menu.closing, .folder-history.closing,
+  .modal.closing, .custom-select-menu.closing, .custom-select-menu.is-dropup.closing,
+  .folder-history.closing,
   .modal.closing > .modal-content, .modal.closing > .preview-content {
     animation: none !important;
   }
@@ -12703,7 +12720,7 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  background: var(--bg-deep);
   border: 1px solid var(--border);
   color: var(--muted);
 }
@@ -12730,7 +12747,9 @@ body[data-theme="vintage"] .dup-group-keep:hover {
 .polaroid-card.is-place-removable {
   cursor: pointer;
   outline: 2px dashed transparent;
-  transition: outline-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+  transition: outline-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              opacity var(--dur-fast) var(--ease-out);
 }
 
 .polaroid-card.is-place-removable:hover {
@@ -12777,16 +12796,18 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   padding: 8px 12px;
   border-radius: var(--radius-md, 10px);
   border: 1px solid var(--border);
-  background: var(--surface, #fff);
+  background: var(--panel-solid);
   color: var(--text);
   cursor: pointer;
-  transition: border-color 0.16s ease, background 0.16s ease;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-press) var(--ease-out);
 }
 
 .place-geocode-item:hover,
 .place-geocode-item.active {
   border-color: var(--primary);
-  background: var(--surface-2, rgba(174, 118, 78, 0.08));
+  background: var(--primary-light);
 }
 
 .place-geocode-name {
@@ -12841,11 +12862,20 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   padding: 0;
   border-radius: var(--radius-md, 10px);
   border: 2px solid var(--border);
-  background: var(--surface, #fff);
+  background: var(--panel-solid);
   overflow: hidden;
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .place-picker-card:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-2px);
+  }
 }
 
 .place-picker-card.is-selected {
@@ -12873,6 +12903,9 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              transform var(--dur-press) var(--ease-out);
 }
 
 .place-picker-card.is-selected .place-picker-check {
@@ -12920,9 +12953,78 @@ body[data-theme="vintage"] .dup-group-keep:hover {
   color: var(--muted);
 }
 
+body[data-theme="paper"] .place-coords-pill {
+  border-radius: 2px;
+  border-color: var(--ink-line, #2a241e);
+  background: var(--bg-deep);
+}
+
+body[data-theme="paper"] .footprint-source-badge {
+  border-radius: 2px;
+  background: #2a241e;
+  color: #f6efe2;
+  backdrop-filter: none;
+}
+
+body[data-theme="paper"] .place-geocode-item,
+body[data-theme="paper"] .place-picker-card {
+  border-radius: 2px;
+  border-color: var(--ink-line, rgba(42, 36, 30, 0.35));
+}
+
+body[data-theme="paper"] .place-picker-card.is-selected {
+  border-color: #2a241e;
+  box-shadow: 3px 3px 0 #2a241e;
+}
+
+body[data-theme="paper"] .compare-picker-label select {
+  border-radius: 2px;
+  border-color: var(--ink-line, #2a241e);
+}
+
 body[data-theme="vintage"] .footprint-source-badge {
-  background: rgba(224, 123, 57, 0.88);
-  color: #1a1512;
+  border-radius: 2px;
+  background: rgba(235, 146, 52, 0.9);
+  color: #161310;
+}
+
+body[data-theme="vintage"] .place-coords-pill {
+  border-radius: 2px;
+  background: rgba(20, 16, 13, 0.85);
+  border-color: rgba(235, 146, 52, 0.28);
+  color: #e2b886;
+}
+
+body[data-theme="vintage"] .place-geocode-item,
+body[data-theme="vintage"] .place-picker-card {
+  border-radius: 3px;
+  background: #1b1714;
+  border-color: rgba(235, 146, 52, 0.22);
+  color: #f3e8d8;
+}
+
+body[data-theme="vintage"] .place-geocode-item:hover,
+body[data-theme="vintage"] .place-geocode-item.active {
+  border-color: #eb9234;
+  background: rgba(235, 146, 52, 0.14);
+}
+
+body[data-theme="vintage"] .place-picker-card.is-selected {
+  border-color: #eb9234;
+  box-shadow: 0 0 0 2px rgba(235, 146, 52, 0.28);
+}
+
+body[data-theme="vintage"] .place-picker-card.is-selected .place-picker-check {
+  background: #eb9234;
+  border-color: #eb9234;
+  color: #161310;
+}
+
+body[data-theme="vintage"] .compare-picker-label select {
+  border-radius: 2px;
+  background-color: #1b1714;
+  border-color: rgba(235, 146, 52, 0.28);
+  color: #f3e8d8;
 }
 
 /* ==========================================================================
@@ -12938,7 +13040,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   border-radius: var(--radius-lg, 16px);
   overflow: hidden;
   border: 1px solid var(--border);
-  background: var(--surface-2, #ebe5da);
+  background: var(--bg-deep);
   box-shadow: var(--shadow-md, 0 8px 28px rgba(0, 0, 0, 0.08));
 }
 
@@ -12960,7 +13062,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  transition: filter 0.25s ease;
+  transition: filter var(--dur-ui) var(--ease-out);
 }
 
 .fp-map-tile {
@@ -12999,13 +13101,23 @@ body[data-theme="vintage"] .footprint-source-badge {
   cursor: pointer;
   pointer-events: auto;
   z-index: 2;
-  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), z-index 0s;
+  transition: transform var(--dur-fast) var(--ease-out), z-index 0s;
 }
 
-.fp-map-pin:hover,
+@media (hover: hover) and (pointer: fine) {
+  .fp-map-pin:hover {
+    transform: translate(-50%, -100%) scale(1.08);
+    z-index: 8;
+  }
+}
+
 .fp-map-pin.is-selected {
   transform: translate(-50%, -100%) scale(1.08);
   z-index: 8;
+}
+
+.fp-map-pin:active {
+  transform: translate(-50%, -100%) scale(0.98);
 }
 
 .fp-pin-frame {
@@ -13014,7 +13126,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   height: 56px;
   border-radius: 12px;
   border: 3px solid #fff;
-  background: var(--surface, #fff);
+  background: var(--panel-solid);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   overflow: visible;
   display: flex;
@@ -13104,7 +13216,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border);
-  background: var(--surface, rgba(255, 255, 255, 0.92));
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
 }
@@ -13121,6 +13233,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background-color var(--dur-press) var(--ease-out);
 }
 
 .fp-map-zoom-btn + .fp-map-zoom-btn {
@@ -13128,7 +13241,7 @@ body[data-theme="vintage"] .footprint-source-badge {
 }
 
 .fp-map-zoom-btn:hover {
-  background: var(--surface-2, rgba(0, 0, 0, 0.06));
+  background: var(--primary-light);
 }
 
 .footprints-map-controls {
@@ -13141,7 +13254,7 @@ body[data-theme="vintage"] .footprint-source-badge {
 }
 
 .footprints-map-float-btn {
-  background: var(--surface, rgba(255, 255, 255, 0.92));
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
 }
@@ -13155,7 +13268,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   border-radius: 6px;
   font-size: 11px;
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.72);
+  background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
   backdrop-filter: blur(6px);
   pointer-events: none;
 }
@@ -13168,7 +13281,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   z-index: 6;
   padding: 12px 18px;
   border-radius: var(--radius-md, 12px);
-  background: var(--surface, rgba(255, 255, 255, 0.94));
+  background: color-mix(in srgb, var(--panel-solid) 94%, transparent);
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 13.5px;
@@ -13191,9 +13304,18 @@ body[data-theme="vintage"] .footprint-source-badge {
   padding: 14px;
   border-radius: var(--radius-lg, 16px);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
   backdrop-filter: blur(18px) saturate(1.15);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.footprints-map-drawer:not(.hidden) {
+  animation: fpDrawerIn var(--dur-ui) var(--ease-out) both;
+}
+
+@keyframes fpDrawerIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .fp-drawer-head {
@@ -13242,7 +13364,7 @@ body[data-theme="vintage"] .footprint-source-badge {
   border-radius: 8px;
   overflow: hidden;
   aspect-ratio: 1 / 1;
-  background: var(--surface-2);
+  background: var(--bg-deep);
   cursor: pointer;
 }
 
@@ -13251,11 +13373,13 @@ body[data-theme="vintage"] .footprint-source-badge {
   height: 100%;
   object-fit: cover;
   display: block;
-  transition: transform 0.18s ease;
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 
-.fp-drawer-thumb:hover img {
-  transform: scale(1.06);
+@media (hover: hover) and (pointer: fine) {
+  .fp-drawer-thumb:hover img {
+    transform: scale(1.06);
+  }
 }
 
 .fp-drawer-empty {
@@ -13274,12 +13398,23 @@ body[data-theme="vintage"] .footprint-source-badge {
 }
 
 /* Theme 1: Paper (纸质手账) — warm sepia travel-journal map */
+body[data-theme="paper"] .footprints-map-wrap {
+  border-radius: 3px;
+  border: 1.5px solid var(--ink-line, #2a241e);
+  box-shadow: 4px 4px 0 rgba(42, 36, 30, 0.14);
+}
+
 body[data-theme="paper"] .fp-map-tiles {
   filter: sepia(0.22) saturate(0.84) brightness(1.01);
 }
 
 body[data-theme="paper"] .fp-pin-frame {
   border-color: #fbf7ef;
+  border-radius: 4px;
+}
+
+body[data-theme="paper"] .fp-pin-frame img {
+  border-radius: 2px;
 }
 
 body[data-theme="paper"] .fp-pin-badge {
@@ -13287,16 +13422,37 @@ body[data-theme="paper"] .fp-pin-badge {
   border-color: #fbf7ef;
 }
 
+body[data-theme="paper"] .footprints-map-drawer,
+body[data-theme="paper"] .fp-map-zoom-stack,
+body[data-theme="paper"] .footprints-map-float-btn,
+body[data-theme="paper"] .fp-map-empty-toast {
+  border-radius: 3px;
+  background: #fbf7ef;
+  border: 1.5px solid var(--ink-line, #2a241e);
+  backdrop-filter: none;
+  box-shadow: 3px 3px 0 rgba(42, 36, 30, 0.16);
+}
+
+body[data-theme="paper"] .fp-map-attribution {
+  border-radius: 2px;
+  background: rgba(251, 247, 239, 0.9);
+  border: 1px solid rgba(42, 36, 30, 0.25);
+  backdrop-filter: none;
+}
+
 /* Theme 2: Classic (经典画册) — Apple-style frosted glass */
 body[data-theme="classic"] .footprints-map-drawer,
 body[data-theme="classic"] .fp-map-zoom-stack,
-body[data-theme="classic"] .footprints-map-float-btn {
+body[data-theme="classic"] .footprints-map-float-btn,
+body[data-theme="classic"] .fp-map-empty-toast {
   background: rgba(255, 255, 255, 0.78);
   backdrop-filter: blur(22px) saturate(1.4);
+  border-color: rgba(255, 255, 255, 0.7);
 }
 
 /* Theme 3: Vintage (复古胶片) — darkroom amber map & quartz-orange badges */
 body[data-theme="vintage"] .footprints-map-wrap {
+  border-radius: 3px;
   background: #181411;
   border-color: rgba(235, 146, 52, 0.24);
 }
@@ -13306,9 +13462,14 @@ body[data-theme="vintage"] .fp-map-tiles.is-dark-filter {
 }
 
 body[data-theme="vintage"] .fp-pin-frame {
+  border-radius: 4px;
   border-color: #2b231d;
   background: #1f1915;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+}
+
+body[data-theme="vintage"] .fp-pin-frame img {
+  border-radius: 2px;
 }
 
 body[data-theme="vintage"] .fp-pin-tail {
@@ -13322,22 +13483,36 @@ body[data-theme="vintage"] .fp-pin-badge {
 }
 
 body[data-theme="vintage"] .fp-pin-label {
+  border-radius: 2px;
   background: rgba(24, 20, 17, 0.88);
   color: #f4b165;
   border: 1px solid rgba(235, 146, 52, 0.3);
 }
 
 body[data-theme="vintage"] .fp-map-attribution {
-  background: rgba(24, 20, 17, 0.78);
+  border-radius: 2px;
+  background: rgba(24, 20, 17, 0.82);
   color: #b8a38c;
 }
 
 body[data-theme="vintage"] .footprints-map-drawer,
 body[data-theme="vintage"] .fp-map-zoom-stack,
-body[data-theme="vintage"] .footprints-map-float-btn {
-  background: rgba(28, 22, 18, 0.88);
+body[data-theme="vintage"] .footprints-map-float-btn,
+body[data-theme="vintage"] .fp-map-empty-toast {
+  border-radius: 3px;
+  background: rgba(28, 22, 18, 0.9);
   border-color: rgba(235, 146, 52, 0.28);
   color: #f3e8d8;
+}
+
+body[data-theme="vintage"] .fp-map-zoom-btn:hover {
+  background: rgba(235, 146, 52, 0.16);
+}
+
+body[data-theme="vintage"] .fp-drawer-tag {
+  border-radius: 2px;
+  background: #eb9234;
+  color: #161310;
 }
 
 /* ==========================================================================
@@ -14191,10 +14366,47 @@ body[data-theme="vintage"] .people-silent-dot {
   font-size: 12.5px;
 }
 
+.fp-map-error-banner:not(.hidden) {
+  animation: fpBannerIn var(--dur-fast) var(--ease-out) both;
+}
+
+@keyframes fpBannerIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+body[data-theme="paper"] .fp-map-error-banner {
+  border-radius: 2px;
+  background: #fbf7ef;
+  border: 1.5px solid var(--ink-line, #2a241e);
+  box-shadow: 3px 3px 0 rgba(42, 36, 30, 0.16);
+}
+
+body[data-theme="classic"] .fp-map-error-banner {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(18px) saturate(1.3);
+}
+
+body[data-theme="vintage"] .fp-map-error-banner {
+  border-radius: 2px;
+  background: rgba(28, 22, 18, 0.94);
+  border-color: rgba(235, 146, 52, 0.42);
+  color: #f4b165;
+}
+
 .place-picker-load-more-wrap {
   display: flex;
   justify-content: center;
   padding: 10px 0 4px;
   flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .modal {
+    padding: 14px;
+  }
+  .modal-content {
+    max-height: calc(100vh - 28px);
+  }
 }
 
