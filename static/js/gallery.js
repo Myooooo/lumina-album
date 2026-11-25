@@ -335,10 +335,17 @@ async function loadYears() {
  * Prefers capture time when available, falling back to analyzed_at.
  */
 function cardDateText(photo) {
+  const exif = photo && photo.exif && typeof photo.exif === "object" ? photo.exif : null;
   const raw =
-    (photo.exif && photo.exif.datetime_original) ||
-    photo.taken_at ||
-    photo.analyzed_at ||
+    (photo && photo.captured_at) ||
+    (exif &&
+      (exif.datetime_original ||
+        exif.DateTimeOriginal ||
+        exif.datetime ||
+        exif.create_date ||
+        exif.DateTimeDigitized)) ||
+    (photo && photo.taken_at) ||
+    (photo && photo.analyzed_at) ||
     "";
   const match = /^(\d{4})[-:/](\d{2})[-:/](\d{2})/.exec(String(raw).trim());
   return match ? `${match[1]}.${match[2]}.${match[3]}` : "";

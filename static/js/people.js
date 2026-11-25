@@ -314,6 +314,7 @@ function renderPeopleGrid(options = {}) {
   if (detailBar) detailBar.classList.add("hidden");
   if (pendingBanner) pendingBanner.classList.add("hidden");
   if (filterRow) filterRow.classList.remove("hidden");
+  syncPeopleKindSwitch();
 
   const items = peopleState.items || [];
   const st = peopleState.status || {};
@@ -619,8 +620,42 @@ async function openPersonDetail(personId) {
   }
 }
 
+function syncPeopleKindSwitch() {
+  const sw = $("peopleKindSwitch");
+  if (!sw) return;
+  sw.querySelectorAll("[data-people-kind]").forEach((btn) => {
+    const active = (btn.dataset.peopleKind || "all") === peopleState.kind;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const ink = $("peopleKindInk");
+  const active = sw.querySelector(".people-kind-btn.is-active");
+  if (!ink || !active) return;
+  const width = active.offsetWidth;
+  if (!width) {
+    ink.style.opacity = "0";
+    if (!sw._inkRetry) {
+      sw._inkRetry = setTimeout(() => {
+        sw._inkRetry = null;
+        syncPeopleKindSwitch();
+      }, 220);
+    }
+    return;
+  }
+  if (sw._inkRetry) {
+    clearTimeout(sw._inkRetry);
+    sw._inkRetry = null;
+  }
+  ink.style.opacity = "1";
+  ink.style.width = `${width}px`;
+  ink.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+
 async function openPeople(personId = null) {
   showView("people");
+  syncPeopleKindSwitch();
+  requestAnimationFrame(syncPeopleKindSwitch);
+  setTimeout(syncPeopleKindSwitch, 320);
   peopleState.mergeMode = false;
   peopleState.mergeSelected.clear();
   updateMergeBar();
@@ -672,12 +707,11 @@ function initPeople() {
       const btn = e.target.closest("[data-people-kind]");
       if (!btn) return;
       peopleState.kind = btn.dataset.peopleKind || "all";
-      filterRow.querySelectorAll("[data-people-kind]").forEach((el) => {
-        el.classList.toggle("active", el === btn);
-      });
+      syncPeopleKindSwitch();
       loadPeopleGrid();
     });
   }
+  window.addEventListener("resize", syncPeopleKindSwitch);
 
   const mergeCancelBtn = $("peopleMergeCancelBtn");
   if (mergeCancelBtn) {

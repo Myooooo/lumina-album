@@ -11289,46 +11289,7 @@ body[data-theme="vintage"] .people-lede {
   margin-bottom: 20px;
 }
 
-.people-kind-pills {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 999px;
-  background: rgba(125, 95, 65, 0.08);
-  border: 1px solid var(--border);
-}
-
-.people-kind-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 13px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out),
-              color var(--dur-fast) var(--ease-out),
-              transform var(--dur-press) var(--ease-out);
-}
-
-.people-kind-pill svg {
-  width: 14px;
-  height: 14px;
-}
-
-.people-kind-pill.active {
-  background: var(--panel-solid);
-  color: var(--primary-dark);
-  font-weight: 600;
-  box-shadow: 0 2px 8px rgba(50, 34, 18, 0.09);
-}
+/* People kind switcher reuses .view-switcher / .view-ink / .view-tab across all themes. */
 
 .people-scan-status {
   display: inline-flex;
@@ -11737,20 +11698,6 @@ body[data-theme="paper"] .person-name-btn {
   font-weight: 400;
 }
 
-body[data-theme="paper"] .people-kind-pills {
-  background: #fffdf7;
-  border: 1px dashed #bfb39c;
-  border-radius: 3px;
-}
-
-body[data-theme="paper"] .people-kind-pill {
-  border-radius: 2px;
-}
-
-body[data-theme="paper"] .people-kind-pill.active {
-  background: #362e26;
-  color: #fbf7ee;
-}
 
 body[data-theme="paper"] .people-empty {
   background: #fffdf8;
@@ -11802,22 +11749,6 @@ body[data-theme="vintage"] .person-pet-badge {
   color: #141210;
 }
 
-body[data-theme="vintage"] .people-kind-pills {
-  background: #1a1816;
-  border-color: #2b2723;
-  border-radius: 2px;
-}
-
-body[data-theme="vintage"] .people-kind-pill {
-  border-radius: 2px;
-  color: #a89f91;
-}
-
-body[data-theme="vintage"] .people-kind-pill.active {
-  background: #eb9234;
-  color: #141210;
-  font-weight: 700;
-}
 
 body[data-theme="vintage"] .people-pending-banner,
 body[data-theme="vintage"] .people-empty {

@@ -361,10 +361,11 @@
         </div>
       </header>
       <div id="peopleFilterRow" class="people-filter-row">
-        <div class="people-kind-pills" role="group" aria-label="按类型筛选">
-          <button type="button" class="people-kind-pill active" data-people-kind="all">全部</button>
-          <button type="button" class="people-kind-pill" data-people-kind="person"><span class="btn-icon" data-icon="people"></span>人物</button>
-          <button type="button" class="people-kind-pill" data-people-kind="pet"><span class="btn-icon" data-icon="paw"></span>宠物猫狗</button>
+        <div class="view-switcher people-kind-switch" id="peopleKindSwitch" role="tablist" aria-label="按类型筛选">
+          <span class="view-ink people-kind-ink" id="peopleKindInk" aria-hidden="true"></span>
+          <button type="button" class="view-tab people-kind-btn is-active" role="tab" aria-selected="true" data-people-kind="all">全部</button>
+          <button type="button" class="view-tab people-kind-btn" role="tab" aria-selected="false" data-people-kind="person"><span class="btn-icon" data-icon="people"></span>人物</button>
+          <button type="button" class="view-tab people-kind-btn" role="tab" aria-selected="false" data-people-kind="pet"><span class="btn-icon" data-icon="paw"></span>宠物猫狗</button>
         </div>
       </div>
       <div id="peopleScanProgress" class="scan-progress people-scan-progress hidden" role="status" aria-live="polite">

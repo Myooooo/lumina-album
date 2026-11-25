@@ -116,6 +116,17 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
     # the trash view is small.
     if not raw_path and photo.get("status") == "deleted":
         raw_path = _trashed_raw_candidate(photo)
+    captured_at = photo.get("captured_at")
+    if not captured_at:
+        exif = photo.get("exif")
+        if isinstance(exif, dict):
+            captured_at = (
+                exif.get("datetime_original")
+                or exif.get("DateTimeOriginal")
+                or exif.get("datetime")
+                or exif.get("create_date")
+                or exif.get("DateTimeDigitized")
+            )
     payload = {
         "id": photo["id"],
         "path": photo["path"],
@@ -129,6 +140,7 @@ def _photo_payload(photo: dict[str, Any], detail: bool = False) -> dict[str, Any
         "tags": photo.get("tags") or [],
         "reason": photo.get("reason"),
         "title": photo.get("title") or "",
+        "captured_at": captured_at,
         "analyzed_at": photo.get("analyzed_at"),
         "status": photo.get("status"),
         "favorite": bool(photo.get("favorite")),

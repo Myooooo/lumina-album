@@ -2161,6 +2161,37 @@ section("people & pets (人物与宠物)");
       ),
     true
   );
+  const dateStampHarness = new Function(
+    `${extract("cardDateText")}\n${extract("vintageDateStamp")}\nreturn { cardDateText, vintageDateStamp };`
+  )();
+  check(
+    "vintage photo card date stamp prioritizes capture time and backend payload includes captured_at",
+    dateStampHarness.cardDateText({ captured_at: "2023-08-19 16:40:00", analyzed_at: "2026-11-25 10:00:00" }) ===
+      "2023.08.19" &&
+      dateStampHarness.vintageDateStamp({ captured_at: "2023-08-19 16:40:00", analyzed_at: "2026-11-25 10:00:00" }) ===
+        "'23 08 19" &&
+      dateStampHarness.vintageDateStamp({ exif: { datetime_original: "2021:05:02 09:12:00" }, analyzed_at: "2026-11-25" }) ===
+        "'21 05 02" &&
+      dateStampHarness.vintageDateStamp({ analyzed_at: "2026-11-25 10:00:00" }) === "'26 11 25" &&
+      /"captured_at":\s*captured_at/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "web", "helpers.py"), "utf8")
+      ),
+    true
+  );
+  check(
+    "people kind switcher reuses top nav view-switcher, view-ink and view-tab",
+    /class="view-switcher people-kind-switch"[^>]*id="peopleKindSwitch"/.test(
+      fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8")
+    ) &&
+      /id="peopleKindInk"/.test(
+        fs.readFileSync(path.join(__dirname, "..", "static", "index.html"), "utf8")
+      ) &&
+      /function syncPeopleKindSwitch\(/.test(src) &&
+      /syncPeopleKindSwitch\(\)/.test(
+        fs.readFileSync(path.join(__dirname, "..", "static", "js", "core.js"), "utf8")
+      ),
+    true
+  );
 }
 
 console.log(

@@ -1094,6 +1094,12 @@ function applyTheme(theme, options = {}) {
         const activeView = VIEWS.find((v) => v.name === state.view) || VIEWS[0];
         if (activeView) moveViewInk(activeView.button);
       }
+      if (typeof syncPeopleKindSwitch === "function") {
+        syncPeopleKindSwitch();
+      }
+      if (typeof syncFootprintsModeButtons === "function") {
+        syncFootprintsModeButtons();
+      }
       if (typeof refreshFootprintsMapLayer === "function") {
         refreshFootprintsMapLayer();
       }
