@@ -163,10 +163,47 @@ def register(app, cfg, database):
             },
         )
 
+    def _serialize_footprint_photo(photo):
+        coords = photo_coords(photo)
+        return {
+            "id": photo["id"],
+            "filename": photo.get("filename") or "",
+            "path": photo.get("path") or "",
+            "raw_path": photo.get("raw_path"),
+            "has_raw": bool(photo.get("raw_path")),
+            "is_raw": _is_raw_file(
+                photo.get("path") or photo.get("original_path")
+            ),
+            "raw_ext": (
+                Path(photo["raw_path"]).suffix.lstrip(".").upper()
+                if photo.get("raw_path")
+                else ""
+            ),
+            "size": photo.get("size") or 0,
+            "width": photo.get("width") or 0,
+            "height": photo.get("height") or 0,
+            "status": photo.get("status") or "",
+            "media_kind": photo.get("media_kind") or "photo",
+            "score": photo.get("score"),
+            "favorite": bool(photo.get("favorite")),
+            "location": photo.get("location"),
+            "place_id": photo.get("place_id"),
+            "lat": coords[0] if coords else None,
+            "lon": coords[1] if coords else None,
+            "thumb_version": photo.get("phash") or "",
+        }
+
     @app.get("/api/footprints")
     def api_footprints():
-        """Return unified footprints combining user-created places and EXIF cities."""
+        """Return unified footprints combining user-created places and EXIF cities.
+
+        Passing ``summary=1`` omits the full per-place ``photos`` array for large
+        places and returns up to 12 ``preview_photos`` per place so large libraries
+        load instantaneously; callers then fetch full photos on demand via
+        ``GET /api/footprints/photos``.
+        """
         folder = request.args.get("folder", "").strip() or None
+        summary_only = request.args.get("summary", "0").strip().lower() in ("1", "true", "yes")
         rows = database.located_photos(folder)
         custom_places = database.list_places()
         footprints = merge_places_and_footprints(rows, custom_places)
@@ -185,36 +222,6 @@ def register(app, cfg, database):
                 "thumb_version": chosen.get("phash") or "",
             }
 
-        def _serialize_photo(photo):
-            coords = photo_coords(photo)
-            return {
-                "id": photo["id"],
-                "filename": photo.get("filename") or "",
-                "path": photo.get("path") or "",
-                "raw_path": photo.get("raw_path"),
-                "has_raw": bool(photo.get("raw_path")),
-                "is_raw": _is_raw_file(
-                    photo.get("path") or photo.get("original_path")
-                ),
-                "raw_ext": (
-                    Path(photo["raw_path"]).suffix.lstrip(".").upper()
-                    if photo.get("raw_path")
-                    else ""
-                ),
-                "size": photo.get("size") or 0,
-                "width": photo.get("width") or 0,
-                "height": photo.get("height") or 0,
-                "status": photo.get("status") or "",
-                "media_kind": photo.get("media_kind") or "photo",
-                "score": photo.get("score"),
-                "favorite": bool(photo.get("favorite")),
-                "location": photo.get("location"),
-                "place_id": photo.get("place_id"),
-                "lat": coords[0] if coords else None,
-                "lon": coords[1] if coords else None,
-                "thumb_version": photo.get("phash") or "",
-            }
-
         active_coords = [
             (item.lat, item.lon)
             for item in footprints
@@ -229,27 +236,75 @@ def register(app, cfg, database):
                 "max_lon": max(c[1] for c in active_coords),
             }
 
+        places_out = []
+        for item in footprints:
+            key = f"place:{item.place_id}" if item.place_id is not None else f"city:{item.city}"
+            entry = {
+                "key": key,
+                "id": item.place_id,
+                "name": item.name,
+                "city": item.city,
+                "address": item.address,
+                "source": item.source,
+                "lat": item.lat,
+                "lon": item.lon,
+                "count": item.count,
+                "years": item.years,
+                "cover": _cover_for(item),
+            }
+            if summary_only:
+                preview = [_serialize_footprint_photo(p) for p in item.photos[:12]]
+                entry["photos_loaded"] = item.count <= 12
+                entry["preview_photos"] = preview
+                entry["photos"] = preview if item.count <= 12 else []
+            else:
+                entry["photos_loaded"] = True
+                entry["photos"] = [_serialize_footprint_photo(p) for p in item.photos]
+            places_out.append(entry)
+
         return jsonify(
             {
                 "total": sum(item.count for item in footprints),
                 "bounds": bounds,
-                "places": [
-                    {
-                        "key": f"place:{item.place_id}" if item.place_id is not None else f"city:{item.city}",
-                        "id": item.place_id,
-                        "name": item.name,
-                        "city": item.city,
-                        "address": item.address,
-                        "source": item.source,
-                        "lat": item.lat,
-                        "lon": item.lon,
-                        "count": item.count,
-                        "years": item.years,
-                        "cover": _cover_for(item),
-                        "photos": [_serialize_photo(photo) for photo in item.photos],
-                    }
-                    for item in footprints
-                ],
+                "places": places_out,
+            }
+        )
+
+    @app.get("/api/footprints/photos")
+    def api_footprint_place_photos():
+        """Fetch paginated photos for one footprint place/city on demand."""
+        key = request.args.get("key", "").strip()
+        if not key:
+            return jsonify({"error": "缺少地点标识 key"}), 400
+        folder = request.args.get("folder", "").strip() or None
+        try:
+            offset = max(0, int(request.args.get("offset", "0")))
+            limit = max(1, min(2000, int(request.args.get("limit", "500"))))
+        except (TypeError, ValueError):
+            return jsonify({"error": "分页参数不合法"}), 400
+
+        rows = database.located_photos(folder)
+        custom_places = database.list_places()
+        footprints = merge_places_and_footprints(rows, custom_places)
+        target = None
+        for item in footprints:
+            item_key = f"place:{item.place_id}" if item.place_id is not None else f"city:{item.city}"
+            if item_key == key:
+                target = item
+                break
+        if target is None:
+            return jsonify({"key": key, "photos": [], "total": 0, "offset": offset, "limit": limit, "has_more": False})
+
+        total = len(target.photos)
+        slice_rows = target.photos[offset : offset + limit]
+        return jsonify(
+            {
+                "key": key,
+                "photos": [_serialize_footprint_photo(p) for p in slice_rows],
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+                "has_more": offset + len(slice_rows) < total,
             }
         )
 

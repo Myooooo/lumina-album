@@ -24,7 +24,11 @@ const fpMapState = {
   dragStartWorldX: 0,
   dragStartWorldY: 0,
   tileCache: new Map(), // key -> img element
+  pinCache: new Map(), // pinKey -> button element (reused across frames)
+  currentClusters: new Map(), // pinKey -> cluster object
   tileLayerKey: "",
+  tileLoadedCount: 0,
+  tileFailedCount: 0,
   activeDrawerKey: null,
   resizeObserver: null,
   animToken: 0,
@@ -262,7 +266,68 @@ function ensureFootprintsMapMounted() {
     </div>
     <div class="fp-map-attribution" id="fpMapAttribution"></div>
     <div class="fp-map-empty-toast hidden" id="fpMapEmptyToast"></div>
+    <div class="fp-map-error-banner hidden" id="fpMapErrorBanner" role="status">
+      <span>地图底图加载失败，请检查网络或切换地图源</span>
+      <button type="button" class="btn small" id="fpMapRetryBtn">重试</button>
+      <button type="button" class="btn small" id="fpMapSwitchSourceBtn">切换底图源</button>
+    </div>
   `;
+
+  const retryBtn = $("fpMapRetryBtn");
+  if (retryBtn) {
+    retryBtn.addEventListener("click", () => {
+      fpMapState.tileLayerKey = "";
+      fpMapState.tileLoadedCount = 0;
+      fpMapState.tileFailedCount = 0;
+      const errEl = $("fpMapErrorBanner");
+      if (errEl) errEl.classList.add("hidden");
+      fpMapDraw();
+    });
+  }
+  const switchBtn = $("fpMapSwitchSourceBtn");
+  if (switchBtn) {
+    switchBtn.addEventListener("click", async () => {
+      if (typeof openSettings === "function") {
+        await openSettings();
+        if (typeof showSettingsTab === "function") showSettingsTab("geo");
+      }
+    });
+  }
+
+  // Single delegated click listener on pins container (avoids re-binding per frame)
+  const pinsEl = $("fpMapPins");
+  if (pinsEl) {
+    pinsEl.addEventListener("click", (e) => {
+      const btn = e.target.closest(".fp-map-pin");
+      if (!btn) return;
+      e.stopPropagation();
+      const cl = fpMapState.currentClusters.get(btn.dataset.pinKey || "");
+      if (!cl) return;
+      if (cl.members.length > 1 && fpMapState.zoom < MAP_MAX_ZOOM) {
+        let sumLat = 0;
+        let sumLon = 0;
+        for (const m of cl.members) {
+          sumLat += m.lat;
+          sumLon += m.lon;
+        }
+        fpAnimateView(
+          sumLat / cl.members.length,
+          sumLon / cl.members.length,
+          Math.min(MAP_MAX_ZOOM, fpMapState.zoom + 2)
+        );
+        return;
+      }
+      const p = cl.primary;
+      if (p.lat != null && p.lon != null) {
+        const [dLat, dLon] = fpDisplayCoords(Number(p.lat), Number(p.lon));
+        fpAnimateView(dLat, dLon, Math.max(fpMapState.zoom, 14), 420, () =>
+          openFootprintsMapDrawer(cl.primary, cl.primaryIndex)
+        );
+      } else {
+        openFootprintsMapDrawer(cl.primary, cl.primaryIndex);
+      }
+    });
+  }
 
   // Zoom buttons
   const zin = $("fpMapZoomIn");
@@ -345,16 +410,40 @@ function ensureFootprintsMapMounted() {
     fpMapStepZoom(1, e.clientX - rect.left, e.clientY - rect.top);
   });
 
-  // Touch pan
+  // Touch pan (1-finger) and pinch-to-zoom (2-finger)
   let touchStartX = 0;
   let touchStartY = 0;
   let touchWorldX = 0;
   let touchWorldY = 0;
+  let pinchStartDist = 0;
+  let pinchStartZoom = 4;
+  let pinchGeo = null;
+  const touchPairMetrics = (t0, t1, rect) => ({
+    dist: Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY),
+    midX: (t0.clientX + t1.clientX) / 2 - rect.left,
+    midY: (t0.clientY + t1.clientY) / 2 - rect.top,
+  });
   canvas.addEventListener(
     "touchstart",
     (e) => {
+      if (e.touches.length === 2) {
+        fpMapState.animToken += 1;
+        const rect = canvas.getBoundingClientRect();
+        const m = touchPairMetrics(e.touches[0], e.touches[1], rect);
+        pinchStartDist = Math.max(10, m.dist);
+        pinchStartZoom = fpMapState.zoom;
+        const centerW = fpLatLonToWorld(fpMapState.centerLat, fpMapState.centerLon, fpMapState.zoom);
+        pinchGeo = fpWorldToLatLon(
+          centerW.x + (m.midX - (canvas.clientWidth || 1) / 2),
+          centerW.y + (m.midY - (canvas.clientHeight || 1) / 2),
+          fpMapState.zoom
+        );
+        return;
+      }
       if (e.touches.length !== 1 || e.target.closest("button") || e.target.closest(".fp-map-pin")) return;
       fpMapState.animToken += 1;
+      pinchStartDist = 0;
+      pinchGeo = null;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
       const c = fpLatLonToWorld(fpMapState.centerLat, fpMapState.centerLon, fpMapState.zoom);
@@ -366,6 +455,24 @@ function ensureFootprintsMapMounted() {
   canvas.addEventListener(
     "touchmove",
     (e) => {
+      if (e.touches.length === 2 && pinchStartDist > 0 && pinchGeo) {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const m = touchPairMetrics(e.touches[0], e.touches[1], rect);
+        const ratio = Math.max(0.25, Math.min(4, m.dist / pinchStartDist));
+        const nextZoom = Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, pinchStartZoom + Math.log2(ratio)));
+        const newAnchorW = fpLatLonToWorld(pinchGeo.lat, pinchGeo.lon, nextZoom);
+        const nextCenter = fpWorldToLatLon(
+          newAnchorW.x - (m.midX - (canvas.clientWidth || 1) / 2),
+          newAnchorW.y - (m.midY - (canvas.clientHeight || 1) / 2),
+          nextZoom
+        );
+        fpMapState.zoom = nextZoom;
+        fpMapState.centerLat = nextCenter.lat;
+        fpMapState.centerLon = nextCenter.lon;
+        fpMapDraw();
+        return;
+      }
       if (e.touches.length !== 1) return;
       e.preventDefault();
       const dx = e.touches[0].clientX - touchStartX;
@@ -376,6 +483,20 @@ function ensureFootprintsMapMounted() {
       fpMapDraw();
     },
     { passive: false }
+  );
+  canvas.addEventListener(
+    "touchend",
+    (e) => {
+      if (e.touches.length < 2 && pinchStartDist > 0) {
+        pinchStartDist = 0;
+        pinchGeo = null;
+        const snapped = Math.max(MAP_MIN_ZOOM, Math.min(MAP_MAX_ZOOM, Math.round(fpMapState.zoom)));
+        if (Math.abs(snapped - fpMapState.zoom) > 0.02) {
+          fpAnimateView(fpMapState.centerLat, fpMapState.centerLon, snapped, 160);
+        }
+      }
+    },
+    { passive: true }
   );
 
   // Resize observer so map redraws cleanly on window resize
@@ -493,8 +614,12 @@ function fpMapDraw() {
   if (keyHint) keyHint.classList.toggle("hidden", !spec.needsKey);
   if (fpMapState.tileLayerKey !== spec.key) {
     fpMapState.tileLayerKey = spec.key;
+    fpMapState.tileLoadedCount = 0;
+    fpMapState.tileFailedCount = 0;
     fpMapState.tileCache.clear();
     tilesEl.innerHTML = "";
+    const errEl = $("fpMapErrorBanner");
+    if (errEl) errEl.classList.add("hidden");
   }
   tilesEl.classList.toggle("is-dark-filter", !!spec.needsDarkFilter);
   if (attrEl) attrEl.textContent = spec.attribution;
@@ -515,6 +640,7 @@ function fpMapDraw() {
   const maxTileY = Math.min(numTiles - 1, Math.floor((topLeftY + h) / tilePx) + 1);
 
   const needed = new Set();
+  const layerKeyAtDraw = fpMapState.tileLayerKey;
   for (let ty = minTileY; ty <= maxTileY; ty += 1) {
     for (let tx = minTileX; tx <= maxTileX; tx += 1) {
       const wrappedX = ((tx % numTiles) + numTiles) % numTiles;
@@ -530,7 +656,29 @@ function fpMapDraw() {
         const tileUrl = spec.urlFor(tileZ, wrappedX, ty);
         if (!tileUrl) continue;
         img.src = tileUrl;
-        img.addEventListener("load", () => img.classList.add("is-loaded"), { once: true });
+        img.addEventListener(
+          "load",
+          () => {
+            img.classList.add("is-loaded");
+            if (fpMapState.tileLayerKey !== layerKeyAtDraw) return;
+            fpMapState.tileLoadedCount += 1;
+            const errEl = $("fpMapErrorBanner");
+            if (errEl) errEl.classList.add("hidden");
+          },
+          { once: true }
+        );
+        img.addEventListener(
+          "error",
+          () => {
+            if (fpMapState.tileLayerKey !== layerKeyAtDraw) return;
+            fpMapState.tileFailedCount += 1;
+            if (fpMapState.tileFailedCount >= 4 && fpMapState.tileLoadedCount === 0) {
+              const errEl = $("fpMapErrorBanner");
+              if (errEl) errEl.classList.remove("hidden");
+            }
+          },
+          { once: true }
+        );
         fpMapState.tileCache.set(key, img);
         tilesEl.appendChild(img);
       }
@@ -550,7 +698,7 @@ function fpMapDraw() {
     }
   }
 
-  // Project and cluster photo pins
+  // Project and cluster photo pins, reusing DOM nodes across frames
   const projected = [];
   (fpMapState.places || []).forEach((place, index) => {
     if (place.lat == null || place.lon == null) return;
@@ -573,65 +721,81 @@ function fpMapDraw() {
   }
 
   const clusters = fpClusterPins(projected);
-  pinsEl.innerHTML = clusters
-    .map((cl, cIdx) => {
-      const p = cl.primary;
-      const cover = p.cover || {};
-      const imgHtml = cover.id
-        ? `<img src="/api/thumbnail/${cover.id}?v=${encodeURIComponent(cover.thumb_version || "")}" alt="" loading="lazy" decoding="async" />`
-        : `<span class="fp-pin-fallback">${ICONS.pin}</span>`;
-      const isCluster = cl.members.length > 1;
-      const label = isCluster
-        ? `${placeDisplayName(p)} 等 ${cl.members.length} 处`
-        : placeDisplayName(p);
-      const isSelected = !isCluster && fpMapState.activeDrawerKey === p.key;
-      return `
-        <button type="button"
-                class="fp-map-pin${isCluster ? " is-cluster" : ""}${isSelected ? " is-selected" : ""}${p.source === "manual" && !isCluster ? " is-manual" : ""}"
-                data-cluster-idx="${cIdx}"
-                style="left:${cl.sx.toFixed(1)}px;top:${cl.sy.toFixed(1)}px"
-                title="${escapeHtml(label)} · ${cl.totalCount} 张">
-          <span class="fp-pin-frame">
-            ${imgHtml}
-            <span class="fp-pin-badge">${cl.totalCount}</span>
-          </span>
-          <span class="fp-pin-label">${escapeHtml(label)}</span>
-          <span class="fp-pin-tail" aria-hidden="true"></span>
-        </button>`;
-    })
-    .join("");
+  const activePinKeys = new Set();
+  fpMapState.currentClusters.clear();
 
-  pinsEl.querySelectorAll(".fp-map-pin").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const cl = clusters[Number(btn.dataset.clusterIdx)];
-      if (!cl) return;
-      if (cl.members.length > 1 && fpMapState.zoom < MAP_MAX_ZOOM) {
-        // Fly to the cluster instead of hard-cutting to a new zoom level.
-        let sumLat = 0;
-        let sumLon = 0;
-        for (const m of cl.members) {
-          sumLat += m.lat;
-          sumLon += m.lon;
+  for (const cl of clusters) {
+    const p = cl.primary;
+    const isCluster = cl.members.length > 1;
+    const pinKey = isCluster ? `cluster:${p.key}:${cl.members.length}` : String(p.key);
+    activePinKeys.add(pinKey);
+    fpMapState.currentClusters.set(pinKey, cl);
+
+    const label = isCluster
+      ? `${placeDisplayName(p)} 等 ${cl.members.length} 处`
+      : placeDisplayName(p);
+    const isSelected = !isCluster && fpMapState.activeDrawerKey === p.key;
+    const isManual = p.source === "manual" && !isCluster;
+    const cover = p.cover || {};
+    const thumbSrc = cover.id
+      ? `/api/thumbnail/${cover.id}?v=${encodeURIComponent(cover.thumb_version || "")}`
+      : "";
+
+    let btn = fpMapState.pinCache.get(pinKey);
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.pinKey = pinKey;
+      const imgHtml = thumbSrc
+        ? `<img src="${thumbSrc}" alt="" loading="lazy" decoding="async" />`
+        : `<span class="fp-pin-fallback">${ICONS.pin}</span>`;
+      btn.innerHTML = `
+        <span class="fp-pin-frame">
+          ${imgHtml}
+          <span class="fp-pin-badge"></span>
+        </span>
+        <span class="fp-pin-label"></span>
+        <span class="fp-pin-tail" aria-hidden="true"></span>`;
+      btn.dataset.thumbSrc = thumbSrc;
+      fpMapState.pinCache.set(pinKey, btn);
+      pinsEl.appendChild(btn);
+    } else if (btn.dataset.thumbSrc !== thumbSrc) {
+      const frame = btn.querySelector(".fp-pin-frame");
+      if (frame) {
+        const badge = frame.querySelector(".fp-pin-badge");
+        const oldMedia = frame.querySelector("img, .fp-pin-fallback");
+        if (oldMedia) oldMedia.remove();
+        const mediaWrap = document.createElement("span");
+        mediaWrap.innerHTML = thumbSrc
+          ? `<img src="${thumbSrc}" alt="" loading="lazy" decoding="async" />`
+          : `<span class="fp-pin-fallback">${ICONS.pin}</span>`;
+        if (mediaWrap.firstElementChild) {
+          frame.insertBefore(mediaWrap.firstElementChild, badge || null);
         }
-        fpAnimateView(
-          sumLat / cl.members.length,
-          sumLon / cl.members.length,
-          Math.min(MAP_MAX_ZOOM, fpMapState.zoom + 2)
-        );
-        return;
       }
-      const p = cl.primary;
-      if (p.lat != null && p.lon != null) {
-        const [dLat, dLon] = fpDisplayCoords(Number(p.lat), Number(p.lon));
-        fpAnimateView(dLat, dLon, Math.max(fpMapState.zoom, 14), 420, () =>
-          openFootprintsMapDrawer(cl.primary, cl.primaryIndex)
-        );
-      } else {
-        openFootprintsMapDrawer(cl.primary, cl.primaryIndex);
-      }
-    });
-  });
+      btn.dataset.thumbSrc = thumbSrc;
+    }
+
+    btn.className = `fp-map-pin${isCluster ? " is-cluster" : ""}${isSelected ? " is-selected" : ""}${isManual ? " is-manual" : ""}`;
+    btn.style.left = `${cl.sx.toFixed(1)}px`;
+    btn.style.top = `${cl.sy.toFixed(1)}px`;
+    btn.title = `${label} · ${cl.totalCount} 张`;
+    const badgeEl = btn.querySelector(".fp-pin-badge");
+    if (badgeEl && badgeEl.textContent !== String(cl.totalCount)) {
+      badgeEl.textContent = String(cl.totalCount);
+    }
+    const labelEl = btn.querySelector(".fp-pin-label");
+    if (labelEl && labelEl.textContent !== label) {
+      labelEl.textContent = label;
+    }
+  }
+
+  for (const [key, btn] of fpMapState.pinCache.entries()) {
+    if (!activePinKeys.has(key)) {
+      btn.remove();
+      fpMapState.pinCache.delete(key);
+    }
+  }
 }
 
 function closeFootprintsMapDrawer() {
@@ -648,7 +812,7 @@ function openFootprintsMapDrawer(place, placeIndex) {
   const drawer = $("footprintsMapDrawer");
   if (!drawer || !place) return;
   fpMapState.activeDrawerKey = place.key;
-  const photos = place.photos || [];
+  const photos = (place.photos && place.photos.length) ? place.photos : (place.preview_photos || []);
   adoptPhotos(photos);
   const label = placeDisplayName(place);
   const coords =

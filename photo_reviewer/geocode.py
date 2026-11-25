@@ -139,20 +139,30 @@ def _get_json(
     return None
 
 
-_GEOCODE_LOCK = threading.Lock()
-_LAST_GEOCODE_REQUEST = 0.0
+_REVERSE_GEOCODE_LOCK = threading.Lock()
+_LAST_REVERSE_GEOCODE_REQUEST = 0.0
+_FORWARD_GEOCODE_LOCK = threading.Lock()
+_LAST_FORWARD_GEOCODE_REQUEST = 0.0
 
 
-def _wait_for_queue_slot(interval: float) -> None:
-    """Serialize geocoding requests and enforce the configured minimum interval."""
-    global _LAST_GEOCODE_REQUEST
+def _wait_for_queue_slot(interval: float, *, interactive: bool = False) -> None:
+    """Serialize geocoding requests without blocking interactive UI behind background scans."""
+    global _LAST_REVERSE_GEOCODE_REQUEST, _LAST_FORWARD_GEOCODE_REQUEST
     interval = max(0.1, float(interval or 1.0))
-    with _GEOCODE_LOCK:
+    if interactive:
+        with _FORWARD_GEOCODE_LOCK:
+            now = time.monotonic()
+            remaining = min(interval, 0.5) - (now - _LAST_FORWARD_GEOCODE_REQUEST)
+            if remaining > 0:
+                time.sleep(remaining)
+            _LAST_FORWARD_GEOCODE_REQUEST = time.monotonic()
+        return
+    with _REVERSE_GEOCODE_LOCK:
         now = time.monotonic()
-        remaining = interval - (now - _LAST_GEOCODE_REQUEST)
+        remaining = interval - (now - _LAST_REVERSE_GEOCODE_REQUEST)
         if remaining > 0:
             time.sleep(remaining)
-        _LAST_GEOCODE_REQUEST = time.monotonic()
+        _LAST_REVERSE_GEOCODE_REQUEST = time.monotonic()
 
 
 def _amap_location(lat: float, lon: float) -> str:
@@ -249,7 +259,7 @@ def forward_geocode(
     candidates: list[dict[str, Any]] = []
 
     if provider == "amap" and api_key:
-        _wait_for_queue_slot(interval)
+        _wait_for_queue_slot(interval, interactive=True)
         data = _get_json(
             "https://restapi.amap.com/v3/geocode/geo",
             {
@@ -282,7 +292,7 @@ def forward_geocode(
                     }
                 )
         if not candidates:
-            _wait_for_queue_slot(interval)
+            _wait_for_queue_slot(interval, interactive=True)
             poi_data = _get_json(
                 "https://restapi.amap.com/v3/place/text",
                 {
@@ -319,7 +329,7 @@ def forward_geocode(
         if candidates or not allow_fallback:
             return candidates
 
-    _wait_for_queue_slot(interval)
+    _wait_for_queue_slot(interval, interactive=True)
     data = _get_json(
         "https://nominatim.openstreetmap.org/search",
         {

@@ -6,6 +6,8 @@
    ========================================================================== */
 "use strict";
 
+const PICKER_PAGE_SIZE = 120;
+
 const fpState = {
   mode: "grid", // "grid" | "map"
   modeInitialized: false,
@@ -16,6 +18,9 @@ const fpState = {
   removeSelected: new Set(),
   pickerPlaceId: null,
   pickerPhotos: [],
+  pickerOffset: 0,
+  pickerHasMore: false,
+  pickerLoading: false,
   pickerSelected: new Set(),
 };
 
@@ -220,15 +225,24 @@ function renderPlaceDetailBar(place) {
   if (delBtn) delBtn.addEventListener("click", () => deleteCustomPlace(place));
 }
 
+async function ensurePlacePhotosLoaded(place) {
+  if (!place || place.photos_loaded || (place.count || 0) === 0) return place ? (place.photos || []) : [];
+  const params = new URLSearchParams();
+  params.set("key", place.key);
+  if (state.folder) params.set("folder", state.folder);
+  params.set("limit", "2000");
+  const data = await api(`/api/footprints/photos?${params.toString()}`);
+  place.photos = data.photos || [];
+  place.photos_loaded = true;
+  return place.photos;
+}
+
 function openPlace(index) {
   const place = (state.footprintPlaces || [])[index];
   if (!place) return;
   state.footprintPlace = place;
   fpState.removeMode = false;
   fpState.removeSelected.clear();
-
-  const photos = place.photos || [];
-  adoptPhotos(photos);
 
   const body = $("footprintsBody");
   const mapWrap = $("footprintsMapWrap");
@@ -237,7 +251,31 @@ function openPlace(index) {
   const back = $("footprintsBackBtn");
   const headerActions = $("footprintsHeaderActions");
 
-  const renderPlaceView = () => {
+  const paintPlacePhotos = (photos) => {
+    if (state.footprintPlace !== place) return;
+    adoptPhotos(photos);
+    if (!body) return;
+    if (!photos.length) {
+      const emptyHint =
+        place.source === "manual"
+          ? `<div class="footprints-empty">
+               <p>这个地点还没有照片。</p>
+               <p class="footprints-empty-hint">点上方「添加照片」挑选回忆，仅覆盖数据库地点字段，不会修改原图 EXIF。</p>
+               <button type="button" class="btn primary" id="placeEmptyAddBtn">${ICONS.image}<span>立即添加照片</span></button>
+             </div>`
+          : '<div class="footprints-empty"><p>这个地方的照片暂时打不开。</p></div>';
+      body.innerHTML = emptyHint;
+      const emptyAdd = $("placeEmptyAddBtn");
+      if (emptyAdd) emptyAdd.addEventListener("click", () => openPlacePhotoPicker(place));
+      return;
+    }
+    state.footprintShown = 0;
+    body.innerHTML = '<div class="footprint-photos"></div>';
+    appendPlacePhotos();
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  };
+
+  const renderPlaceView = async () => {
     if (mapWrap) mapWrap.classList.add("hidden");
     if (body) body.classList.remove("hidden");
     if (headerActions) headerActions.classList.add("hidden");
@@ -257,24 +295,19 @@ function openPlace(index) {
     renderPlaceDetailBar(place);
     if (!body) return;
     body.classList.remove("is-transitioning-out");
-    if (!photos.length) {
-      const emptyHint =
-        place.source === "manual"
-          ? `<div class="footprints-empty">
-               <p>这个地点还没有照片。</p>
-               <p class="footprints-empty-hint">点上方「添加照片」挑选回忆，仅覆盖数据库地点字段，不会修改原图 EXIF。</p>
-               <button type="button" class="btn primary" id="placeEmptyAddBtn">${ICONS.image}<span>立即添加照片</span></button>
-             </div>`
-          : '<div class="footprints-empty"><p>这个地方的照片暂时打不开。</p></div>';
-      body.innerHTML = emptyHint;
-      const emptyAdd = $("placeEmptyAddBtn");
-      if (emptyAdd) emptyAdd.addEventListener("click", () => openPlacePhotoPicker(place));
+    if (!place.photos_loaded && (place.count || 0) > 0) {
+      body.innerHTML = '<div class="footprints-empty">正在加载这个地方的回忆…</div>';
+      try {
+        const loaded = await ensurePlacePhotosLoaded(place);
+        paintPlacePhotos(loaded);
+      } catch (e) {
+        if (state.footprintPlace === place) {
+          body.innerHTML = `<div class="footprints-empty">加载失败：${escapeHtml(e.message)}</div>`;
+        }
+      }
       return;
     }
-    state.footprintShown = 0;
-    body.innerHTML = '<div class="footprint-photos"></div>';
-    appendPlacePhotos();
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    paintPlacePhotos(place.photos || []);
   };
 
   if (footprintSubTimer) {
@@ -396,6 +429,7 @@ async function openFootprints(options = {}) {
   try {
     const params = new URLSearchParams();
     if (state.folder) params.set("folder", state.folder);
+    params.set("summary", "1");
     const data = await api(`/api/footprints?${params.toString()}`);
     if (lede) {
       lede.textContent = data.places.length
@@ -665,25 +699,62 @@ function renderPlacePickerGrid() {
         </button>`;
     })
     .join("");
+  const moreWrap = $("placePickerLoadMoreWrap");
+  const moreBtn = $("placePickerLoadMoreBtn");
+  if (moreWrap) moreWrap.classList.toggle("hidden", !fpState.pickerHasMore);
+  if (moreBtn) {
+    moreBtn.disabled = fpState.pickerLoading;
+    moreBtn.textContent = fpState.pickerLoading ? "正在加载…" : "加载更多照片";
+  }
   updatePlacePickerCount();
 }
 
-async function loadPlacePickerPhotos() {
+async function loadPlacePickerPhotos({ append = false } = {}) {
+  if (fpState.pickerLoading) return;
+  fpState.pickerLoading = true;
   const grid = $("placePickerGrid");
-  if (grid) grid.innerHTML = '<div class="footprints-empty">正在加载照片…</div>';
+  if (!append) {
+    fpState.pickerOffset = 0;
+    fpState.pickerPhotos = [];
+    fpState.pickerHasMore = false;
+    if (grid) grid.innerHTML = '<div class="footprints-empty">正在加载照片…</div>';
+  }
+  const moreBtn = $("placePickerLoadMoreBtn");
+  if (moreBtn) {
+    moreBtn.disabled = true;
+    moreBtn.textContent = "正在加载…";
+  }
   try {
     const params = new URLSearchParams();
     if (state.folder) params.set("folder", state.folder);
     params.set("status", "all");
     params.set("sort", "time_desc");
-    params.set("limit", "400");
+    params.set("limit", String(PICKER_PAGE_SIZE));
+    params.set("offset", String(fpState.pickerOffset));
     const q = ($("placePickerSearch") ? $("placePickerSearch").value : "").trim();
     if (q) params.set("search", q);
     const data = await api(`/api/photos?${params.toString()}`);
-    fpState.pickerPhotos = (data.photos || []).filter((p) => p.status !== "deleted");
+    const batch = (data.photos || []).filter((p) => p.status !== "deleted");
+    fpState.pickerOffset += (data.photos || []).length;
+    fpState.pickerHasMore = (data.photos || []).length >= PICKER_PAGE_SIZE;
+    if (append) {
+      const seen = new Set(fpState.pickerPhotos.map((p) => p.id));
+      for (const item of batch) {
+        if (!seen.has(item.id)) fpState.pickerPhotos.push(item);
+      }
+    } else {
+      fpState.pickerPhotos = batch;
+    }
+    fpState.pickerLoading = false;
     renderPlacePickerGrid();
   } catch (e) {
-    if (grid) grid.innerHTML = `<div class="footprints-empty">加载失败：${escapeHtml(e.message)}</div>`;
+    fpState.pickerLoading = false;
+    if (!append && grid) {
+      grid.innerHTML = `<div class="footprints-empty">加载失败：${escapeHtml(e.message)}</div>`;
+    } else {
+      showToast("加载更多照片失败：" + e.message, "error");
+      renderPlacePickerGrid();
+    }
   }
 }
 
@@ -700,7 +771,7 @@ async function openPlacePhotoPicker(place) {
   updatePlacePickerCount();
   showModal($("placePhotoPickerModal"));
   pushModal($("placePhotoPickerModal"));
-  await loadPlacePickerPhotos();
+  await loadPlacePickerPhotos({ append: false });
 }
 
 async function confirmAddPlacePhotos() {
@@ -834,8 +905,12 @@ function initFootprints() {
     let timer = null;
     pickerSearch.addEventListener("input", () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(loadPlacePickerPhotos, 220);
+      timer = setTimeout(() => loadPlacePickerPhotos({ append: false }), 220);
     });
+  }
+  const pickerLoadMoreBtn = $("placePickerLoadMoreBtn");
+  if (pickerLoadMoreBtn) {
+    pickerLoadMoreBtn.addEventListener("click", () => loadPlacePickerPhotos({ append: true }));
   }
   const pickerUnlocated = $("placePickerUnlocatedOnly");
   if (pickerUnlocated) pickerUnlocated.addEventListener("change", renderPlacePickerGrid);

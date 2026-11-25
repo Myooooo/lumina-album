@@ -2110,6 +2110,21 @@ section("people & pets (人物与宠物)");
       ),
     true
   );
+  check(
+    "Phase 2 map & footprints upgrades are wired (pin DOM reuse, tile error banner, pinch zoom, lazy photos, picker pagination, separate geocode lock)",
+    /pinCache:\s*new Map\(\)/.test(src) &&
+      /fpMapErrorBanner/.test(src) &&
+      /touchPairMetrics/.test(src) &&
+      /ensurePlacePhotosLoaded/.test(src) &&
+      /placePickerLoadMoreBtn/.test(src) &&
+      /_FORWARD_GEOCODE_LOCK/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "geocode.py"), "utf8")
+      ) &&
+      /\/api\/footprints\/photos/.test(
+        fs.readFileSync(path.join(__dirname, "..", "photo_reviewer", "web", "routes_sheets.py"), "utf8")
+      ),
+    true
+  );
 }
 
 console.log(

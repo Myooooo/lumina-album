@@ -14209,3 +14209,30 @@ body[data-theme="vintage"] .people-silent-dot {
 .people-scan-progress #peopleScanEta {
   margin-left: 2px;
 }
+
+.fp-map-error-banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--panel-solid);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-card);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.place-picker-load-more-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 4px;
+  flex-shrink: 0;
+}
+
