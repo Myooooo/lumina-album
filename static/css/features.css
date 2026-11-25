@@ -473,6 +473,48 @@ body[data-theme="vintage"] .duplicates-similarity input[type="range"]::-moz-rang
   white-space: nowrap;
 }
 
+/* ---------- Compare Modal Fixed-Width File Pickers ---------- */
+.compare-pickers {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.compare-picker-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compare-picker-label > span {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.compare-picker-label select {
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 28px 0 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .compare-picker-label select {
+    width: 148px;
+    min-width: 148px;
+    max-width: 148px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .stats-bar-fill,
   .smart-album-row,

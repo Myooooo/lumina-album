@@ -1870,6 +1870,10 @@ function paintCompareImages() {
   const rightMeta = $("compareRightMeta");
   if (leftMeta) leftMeta.textContent = metaText(left, "左");
   if (rightMeta) rightMeta.textContent = metaText(right, "右");
+  const leftSel = $("compareLeftSelect");
+  const rightSel = $("compareRightSelect");
+  if (leftSel) leftSel.title = left.filename || "";
+  if (rightSel) rightSel.title = right.filename || "";
   refreshCompareQuality(left.id, right.id);
 }
 

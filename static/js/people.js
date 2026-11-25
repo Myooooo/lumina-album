@@ -322,7 +322,7 @@ function renderPeopleGrid(options = {}) {
   if (lede) {
     lede.textContent = items.length
       ? `本地共归类 ${items.length} 位人物与宠物，所有数据均保留在本机${accelText}。`
-      : `本地离线识别照片中的人物与宠物猫狗，数据不出本机${accelText}。`;
+      : `本地离线识别照片中的人物与宠物，数据不出本机${accelText}。`;
   }
 
   if (!items.length) {

@@ -2257,6 +2257,7 @@ section("people & pets (人物与宠物)");
       /function downloadVectorModels\(/.test(src) &&
       /class="people-header-actions"[\s\S]{0,900}id="peopleKindSwitch"[\s\S]{0,900}id="peopleScanBtn"/.test(indexHtml) &&
       !/id="peopleFilterRow"/.test(indexHtml) &&
+      /data-people-kind="pet"><span class="btn-icon" data-icon="paw"><\/span>宠物<\/button>/.test(indexHtml) &&
       /class="duplicates-controls-left"[\s\S]{0,900}id="dupModeSelect"[\s\S]{0,900}id="dupThreshold"/.test(indexHtml) &&
       /确定删除虚拟智能影集/.test(src),
     true
